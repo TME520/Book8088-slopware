@@ -1,6 +1,8 @@
-# Built DOS programs. Sources live in each program directory.
+# Build products. The ready-to-run DOS programs at the repository root are tracked.
 *.exe
 *.EXE
+!/LPSCOMP.EXE
+!/HELLO.EXE
 *.obj
 *.o
 *.err

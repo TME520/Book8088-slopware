@@ -9,6 +9,8 @@ Companion). Data lives under `C:\LPS\` by default and uses the **same**
 `SAVE_A.BIN` / `SAVE_B.BIN`, `EXPORT\*.ics` and `WEIGHTS\*.csv` formats as the
 PicoCalc firmware and LPS Console.
 
+Ready-to-run binaries are at the **repository root** (the directory above this one): [`../LPSCOMP.EXE`](../LPSCOMP.EXE) and [`../HELLO.EXE`](../HELLO.EXE). Copy those onto the Book 8088. `make dos` and `make hello` rebuild into this directory only; those local copies are gitignored. After a source change, copy the new files up (`cp LPSCOMP.EXE HELLO.EXE ..`) so the root copies stay current. CI rebuilds and fails if the root files differ.
+
 ![Home screen](captures/01-home-en.png)
 
 ![Home screen, French](captures/06-home-fr.png)
@@ -132,7 +134,7 @@ removed (too slow on 8088 + tiny HDD).
 
 ### What to try on the Book
 
-1. Build **`HELLO.EXE`** and **`LPSCOMP.EXE`** (`make hello` and `make dos`) and copy them to the HDD or a floppy.
+1. Copy **`HELLO.EXE`** and **`LPSCOMP.EXE`** from the repository root to the HDD or a floppy.
 2. Run `HELLO` — you must see `LPS COMPANION - HELLO` and video info; any key quits.
 3. Run `LPSCOMP` or `LPSCOMP C:\LPS` — you should briefly see the banner, then the home screen.
 4. Quit with **Q** from Home.
@@ -144,22 +146,23 @@ Other screens (activities, kanban, rosary, timer) are in `captures/`.
 
 ## Install on a real machine / DOSBox
 
-1. Copy `LPSCOMP.EXE` to a floppy or the hard disk.
+1. Copy the repository-root `LPSCOMP.EXE` (and `HELLO.EXE` for the smoke test) to a floppy or the hard disk.
 2. Create `C:\LPS` (or pass the path as argv: `LPSCOMP D:\DATA`).
 3. Optional: `SET LPSDIR=C:\LPS`
 4. Run `LPSCOMP` or `LPSCOMP C:\LPS`.
 5. Quit from Home with **Q**.
 
-DOSBox-X or DOSBox Staging, from this directory after `make dos` (`dosbox.conf` mounts the current directory as `C:` and sets an 8086 CPU with EGA):
+DOSBox-X or DOSBox Staging. `dosbox.conf` mounts the current directory as `C:` and sets an 8086 CPU with EGA, so the EXE has to sit in this directory. Copy the root binaries down (they are gitignored here) or use a local `make dos`, then start DOSBox:
 
 ```sh
+cp ../LPSCOMP.EXE ../HELLO.EXE .
 dosbox-x -conf dosbox.conf
 ```
 
-Equivalent by hand:
+Equivalent by hand, mounting the repository root:
 
 ```
-mount C /path/to/lps-companion
+mount C /path/to/Book8088-slopware
 C:
 LPSCOMP.EXE C:\LPS
 ```
@@ -221,6 +224,8 @@ Port complet de [LPS Companion v1.11](https://github.com/TME520/LPS-Companion-Pi
 vers MS-DOS 16 bits (8088, 640 Ko), clavier uniquement, mode texte 80×25.
 Memes formats `SAVE_A/B.BIN`, ICS et CSV que le firmware PicoCalc et LPS Console.
 
+Les executables prets a lancer sont a la **racine du depot** : [`../LPSCOMP.EXE`](../LPSCOMP.EXE) et [`../HELLO.EXE`](../HELLO.EXE). Copiez-les sur le Book 8088. `make dos` / `make hello` reconstruisent seulement dans ce dossier (copies non versionnees). Apres une modification des sources, recopiez-les a la racine (`cp LPSCOMP.EXE HELLO.EXE ..`). La CI reconstruit et echoue si les fichiers a la racine different.
+
 ## Book 8088 / materiel reel
 
 Premier essai Book 8088 : ecran vide + curseur. Cause : **pile DOS 2 Ko** trop
@@ -245,11 +250,10 @@ make test     # tests gcc, sans Watcom
 
 ## Utilisation
 
-Copier `LPSCOMP.EXE`, creer `C:\LPS`, lancer `LPSCOMP` (ou `LPSCOMP chemin`).
+Copier `LPSCOMP.EXE` et `HELLO.EXE` depuis la racine du depot, creer `C:\LPS`, lancer `LPSCOMP` (ou `LPSCOMP chemin`).
 **Q** quitte depuis l'accueil. Les touches reprennent celles du Companion.
 
-DOSBox-X / DOSBox Staging, depuis ce dossier : `dosbox-x -conf dosbox.conf`
-(`cputype=8086`, `machine=ega`).
+DOSBox-X / DOSBox Staging (`cputype=8086`, `machine=ega`) : copier les EXE de la racine ici, puis `dosbox-x -conf dosbox.conf`.
 
 ## Empreinte
 
