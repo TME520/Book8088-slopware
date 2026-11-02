@@ -1,0 +1,50 @@
+name: lps-companion
+
+on:
+  push:
+    paths:
+      - "lps-companion/**"
+      - ".github/workflows/lps-companion.yml"
+  pull_request:
+    paths:
+      - "lps-companion/**"
+      - ".github/workflows/lps-companion.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Host gcc tests
+        working-directory: lps-companion
+        run: make test
+
+      - name: Install Open Watcom
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq unzip
+          url="https://github.com/open-watcom/open-watcom-v2/releases/download/2026-11-01-Build/open-watcom-2_0-c-linux-x64"
+          curl -fL --retry 3 -o "$RUNNER_TEMP/ow-c-linux-x64" "$url"
+          mkdir -p "$RUNNER_TEMP/watcom"
+          unzip -q "$RUNNER_TEMP/ow-c-linux-x64" -d "$RUNNER_TEMP/watcom"
+          # The zip stores host tools without the executable bit.
+          chmod a+rx "$RUNNER_TEMP/watcom"/binl64/* "$RUNNER_TEMP/watcom"/binl/*
+          test -x "$RUNNER_TEMP/watcom/binl64/wcl"
+          test -x "$RUNNER_TEMP/watcom/binl64/wcc"
+          echo "WATCOM=$RUNNER_TEMP/watcom" >> "$GITHUB_ENV"
+          # wcl looks up wcc and wlink on PATH, not next to itself.
+          echo "$RUNNER_TEMP/watcom/binl64" >> "$GITHUB_PATH"
+
+      - name: Build LPSCOMP.EXE and HELLO.EXE (8088)
+        working-directory: lps-companion
+        run: make dos hello
+
+      - name: Upload DOS executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: lps-companion-dos
+          path: |
+            lps-companion/LPSCOMP.EXE
+            lps-companion/HELLO.EXE
