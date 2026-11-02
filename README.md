@@ -13,4 +13,4 @@ Sources and rebuild instructions are in [`lps-companion/`](lps-companion/). A lo
 
 | Program | Directory | What it is |
 |---|---|---|
-| LPS Companion | [`lps-companion/`](lps-companion/) | MS-DOS port of [LPS Companion v1.11](https://github.com/TME520/LPS-Companion-PicoCalc) (Open Watcom, real-mode 8086). Run [`LPSCOMP.EXE`](LPSCOMP.EXE) and [`HELLO.EXE`](HELLO.EXE) from this repository root. |
+| LPS Companion | [`lps-companion/`](lps-companion/) | MS-DOS port of [LPS Companion v1.11](https://github.com/TME520/LPS-Companion-PicoCalc) (Open Watcom, real-mode 8086, 80×25 text). Run [`LPSCOMP.EXE`](LPSCOMP.EXE) and [`HELLO.EXE`](HELLO.EXE) from this repository root. |

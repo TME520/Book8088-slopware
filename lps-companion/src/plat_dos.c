@@ -7,7 +7,10 @@
 typedef struct {
     Platform iface;
     char cells[ROWS][COLUMNS+1];
-    char reverse[ROWS];
+    unsigned char rev[ROWS][COLUMNS];
+    unsigned char sh_ch[ROWS][COLUMNS];
+    unsigned char sh_at[ROWS][COLUMNS];
+    int painted; /* 0 until the first frame is copied to VRAM */
     int palette;
     uint32_t generation;
     int active; /* 0=A, 1=B */
@@ -78,20 +81,43 @@ static void ensure_text_mode(DosPlat *d){
 
 static void dos_clear(Platform *p){
     DosPlat *d=self_of(p); int r;
-    for(r=0;r<ROWS;r++){ memset(d->cells[r],' ',COLUMNS); d->cells[r][COLUMNS]=0; d->reverse[r]=0; }
+    for(r=0;r<ROWS;r++){
+        memset(d->cells[r],' ',COLUMNS); d->cells[r][COLUMNS]=0;
+        memset(d->rev[r],0,COLUMNS);
+    }
 }
 static void dos_text(Platform *p, int row, int col, const char *s, int reverse){
     DosPlat *d=self_of(p); int c=col;
     if(row<0||row>=ROWS) return;
-    if(reverse) d->reverse[row]=1;
-    while(*s && c<COLUMNS){ d->cells[row][c++]=*s++; }
+    if(c<0) c=0;
+    while(*s && c<COLUMNS){
+        d->cells[row][c]=*s++;
+        d->rev[row][c]=(unsigned char)(reverse?1:0);
+        c++;
+    }
 }
-static void dos_alert(Platform *p, int row, int col, const char *s){ dos_text(p,row,col,s,1); }
+static void dos_alert(Platform *p, int row, int col, const char *s){
+    char bar[COLUMNS+1]; int n,i;
+    for(i=0;i<COLUMNS;i++) bar[i]=' ';
+    bar[COLUMNS]=0;
+    if(col<0) col=0;
+    if(col<COLUMNS){
+        n=(int)strlen(s);
+        if(n>COLUMNS-col) n=COLUMNS-col;
+        memcpy(bar+col,s,(size_t)n);
+    }
+    dos_text(p,row,0,bar,1);
+}
 static void dos_large(Platform *p, const char *value, int red){
-    char line[41];
-    sprintf(line,"        >>>  %s  <<<", value);
-    dos_text(p, 10, 0, line, red);
-    (void)red;
+    char line[COLUMNS+1]; char mid[32]; int n,col,i;
+    sprintf(mid,">>>  %s  <<<", value);
+    for(i=0;i<COLUMNS;i++) line[i]=' ';
+    line[COLUMNS]=0;
+    n=(int)strlen(mid);
+    if(n>COLUMNS) n=COLUMNS;
+    col=(COLUMNS-n)/2;
+    memcpy(line+col,mid,(size_t)n);
+    dos_text(p, 12, 0, line, red);
 }
 static unsigned char attr_for(DosPlat *d, int reverse){
     unsigned char fg;
@@ -113,24 +139,23 @@ static unsigned char attr_for(DosPlat *d, int reverse){
 
 static void present_bios(DosPlat *d){
     union REGS r; int row, col;
-    /* Home cursor */
+    /* Home cursor. Fallback path only (use_bios stays 0). */
     r.h.ah=0x02; r.h.bh=0; r.h.dh=0; r.h.dl=0; int86(0x10,&r,&r);
-    for(row=0;row<25;row++){
-        for(col=0;col<80;col++){
-            char ch = (row<ROWS && col<COLUMNS) ? d->cells[row][col] : ' ';
-            unsigned char attr = attr_for(d, (row<ROWS)?d->reverse[row]:0);
-            /* Write char+attr at cursor, advance */
-            r.h.ah=0x09; r.h.al=(unsigned char)ch; r.h.bh=0; r.h.bl=attr;
+    for(row=0;row<ROWS;row++){
+        for(col=0;col<COLUMNS;col++){
+            unsigned char attr = attr_for(d, d->rev[row][col]);
+            r.h.ah=0x09; r.h.al=(unsigned char)d->cells[row][col]; r.h.bh=0; r.h.bl=attr;
             r.x.cx=1; int86(0x10,&r,&r);
-            /* Advance cursor */
             r.h.ah=0x02; r.h.bh=0; r.h.dh=(unsigned char)row;
             r.h.dl=(unsigned char)(col+1);
-            if(r.h.dl>=80){ r.h.dl=0; r.h.dh=(unsigned char)(row+1); }
+            if(r.h.dl>=COLUMNS){ r.h.dl=0; r.h.dh=(unsigned char)(row+1); }
             int86(0x10,&r,&r);
         }
     }
 }
 
+/* Write only cells whose character or attribute changed. A full clear each
+ * key flickers on a 4.77 MHz 8088. */
 static void present_vram(DosPlat *d){
     int r,c;
 #if defined(__WATCOMC__)
@@ -138,14 +163,19 @@ static void present_vram(DosPlat *d){
 #else
     unsigned char *vid = (unsigned char*)((unsigned long)d->video_seg << 4);
 #endif
-    for(r=0;r<25;r++){
-        unsigned char attr = attr_for(d, (r<ROWS)?d->reverse[r]:0);
-        for(c=0;c<80;c++){
-            char ch = (r<ROWS && c<COLUMNS) ? d->cells[r][c] : ' ';
-            vid[(r*80+c)*2]=(unsigned char)ch;
-            vid[(r*80+c)*2+1]=attr;
+    for(r=0;r<ROWS;r++){
+        for(c=0;c<COLUMNS;c++){
+            char ch = d->cells[r][c];
+            unsigned char attr = attr_for(d, d->rev[r][c]);
+            if(!d->painted || d->sh_ch[r][c]!=(unsigned char)ch || d->sh_at[r][c]!=attr){
+                vid[(r*COLUMNS+c)*2]=(unsigned char)ch;
+                vid[(r*COLUMNS+c)*2+1]=attr;
+                d->sh_ch[r][c]=(unsigned char)ch;
+                d->sh_at[r][c]=attr;
+            }
         }
     }
+    d->painted=1;
 }
 
 static void dos_present(Platform *p){
