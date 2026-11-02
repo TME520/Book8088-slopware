@@ -1,0 +1,6 @@
+# Built DOS programs. Sources live in each program directory.
+*.exe
+*.EXE
+*.obj
+*.o
+*.err
