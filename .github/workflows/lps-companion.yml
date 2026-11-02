@@ -5,10 +5,14 @@ on:
     paths:
       - "lps-companion/**"
       - ".github/workflows/lps-companion.yml"
+      - "LPSCOMP.EXE"
+      - "HELLO.EXE"
   pull_request:
     paths:
       - "lps-companion/**"
       - ".github/workflows/lps-companion.yml"
+      - "LPSCOMP.EXE"
+      - "HELLO.EXE"
 
 jobs:
   build:
@@ -41,10 +45,16 @@ jobs:
         working-directory: lps-companion
         run: make dos hello
 
+      - name: Check committed root EXEs match this build
+        run: |
+          set -euo pipefail
+          cmp lps-companion/LPSCOMP.EXE LPSCOMP.EXE
+          cmp lps-companion/HELLO.EXE HELLO.EXE
+
       - name: Upload DOS executables
         uses: actions/upload-artifact@v4
         with:
           name: lps-companion-dos
           path: |
-            lps-companion/LPSCOMP.EXE
-            lps-companion/HELLO.EXE
+            LPSCOMP.EXE
+            HELLO.EXE
