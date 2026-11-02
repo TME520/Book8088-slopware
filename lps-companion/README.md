@@ -69,8 +69,10 @@ make test     # host gcc tests (no WATCOM required)
 make clean
 ```
 
-`make` (no target) builds both EXEs and runs the host tests. `make captures`
-regenerates text dumps under `captures/` with the host UI driver.
+`make` (no target) builds both EXEs and runs the host tests. `make dos` and
+`make hello` prepend `$WATCOM/binl64` (or `binl`) to `PATH` for that command:
+`wcl` looks up `wcc` and `wlink` on `PATH`, not beside the `wcl` binary.
+`make captures` regenerates text dumps under `captures/` with the host UI driver.
 
 The same DOS link line, without Make:
 

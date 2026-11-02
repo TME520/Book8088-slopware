@@ -32,7 +32,10 @@ jobs:
           # The zip stores host tools without the executable bit.
           chmod a+rx "$RUNNER_TEMP/watcom"/binl64/* "$RUNNER_TEMP/watcom"/binl/*
           test -x "$RUNNER_TEMP/watcom/binl64/wcl"
+          test -x "$RUNNER_TEMP/watcom/binl64/wcc"
           echo "WATCOM=$RUNNER_TEMP/watcom" >> "$GITHUB_ENV"
+          # wcl looks up wcc and wlink on PATH, not next to itself.
+          echo "$RUNNER_TEMP/watcom/binl64" >> "$GITHUB_PATH"
 
       - name: Build LPSCOMP.EXE and HELLO.EXE (8088)
         working-directory: lps-companion

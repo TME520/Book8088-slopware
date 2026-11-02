@@ -30,7 +30,7 @@ LPSCOMP.EXE: $(DOS_OBJS) src/lps.h src/rosary.h
 	  echo "WATCOM is not set. Export WATCOM to the Open Watcom root (contains binl64/ and h/)."; \
 	  exit 1; \
 	fi
-	WATCOM="$(WATCOM)" INCLUDE="$(WATCOM)/h" LIB="$(WATCOM)/lib286" \
+	WATCOM="$(WATCOM)" INCLUDE="$(WATCOM)/h" LIB="$(WATCOM)/lib286" PATH="$(WBIN):$$PATH" \
 	  "$(WCL)" $(DOS_CFLAGS) -fe=LPSCOMP.EXE $(DOS_OBJS)
 
 hello: HELLO.EXE
@@ -40,7 +40,7 @@ HELLO.EXE: src/hello.c
 	  echo "WATCOM is not set. Export WATCOM to the Open Watcom root (contains binl64/ and h/)."; \
 	  exit 1; \
 	fi
-	WATCOM="$(WATCOM)" INCLUDE="$(WATCOM)/h" LIB="$(WATCOM)/lib286" \
+	WATCOM="$(WATCOM)" INCLUDE="$(WATCOM)/h" LIB="$(WATCOM)/lib286" PATH="$(WBIN):$$PATH" \
 	  "$(WCL)" -0 -bt=dos -ms -zq -ox -fpc -k2048 -fe=HELLO.EXE src/hello.c
 
 host: lpscomp-host
