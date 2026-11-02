@@ -11,6 +11,8 @@ PicoCalc firmware and LPS Console.
 
 Ready-to-run binaries are at the **repository root** (the directory above this one): [`../LPSCOMP.EXE`](../LPSCOMP.EXE) and [`../HELLO.EXE`](../HELLO.EXE). Copy those onto the Book 8088. `make dos` and `make hello` rebuild into this directory only; those local copies are gitignored. After a source change, copy the new files up (`cp LPSCOMP.EXE HELLO.EXE ..`) so the root copies stay current. CI rebuilds and fails if the root files differ.
 
+The screen is the full **80×25** text mode (no 43/50-line modes). Home is two panes: the menu on the left, and a day summary (date, XP, weight, note, reminders, kanban counts) on the right. All 16 activities sit on one page in two columns. Kanban shows TODO, DOING and DONE side by side. Rosary and the notepad use 80-character lines; the timer stays centered. Keys, English and French wording, palettes, and the SAVE/ICS/CSV bytes are unchanged. On the 8088 the video driver rewrites only the cells that changed.
+
 ![Home screen](captures/01-home-en.png)
 
 ![Home screen, French](captures/06-home-fr.png)
@@ -225,6 +227,8 @@ vers MS-DOS 16 bits (8088, 640 Ko), clavier uniquement, mode texte 80×25.
 Memes formats `SAVE_A/B.BIN`, ICS et CSV que le firmware PicoCalc et LPS Console.
 
 Les executables prets a lancer sont a la **racine du depot** : [`../LPSCOMP.EXE`](../LPSCOMP.EXE) et [`../HELLO.EXE`](../HELLO.EXE). Copiez-les sur le Book 8088. `make dos` / `make hello` reconstruisent seulement dans ce dossier (copies non versionnees). Apres une modification des sources, recopiez-les a la racine (`cp LPSCOMP.EXE HELLO.EXE ..`). La CI reconstruit et echoue si les fichiers a la racine different.
+
+L'ecran utilise tout le mode texte **80×25**. L'accueil a deux volets : le menu a gauche, le resume du jour a droite (date, XP, poids, note, rappels, kanban). Les 16 activites tiennent sur une page en deux colonnes. Le kanban montre A FAIRE, EN COURS et FINI cote a cote. Le rosaire et le bloc notes utilisent des lignes de 80 caracteres ; le minuteur reste centre. Les touches, les textes, les palettes et les octets SAVE/ICS/CSV ne changent pas. Sur 8088, seules les cellules modifiees sont reecrites.
 
 ## Book 8088 / materiel reel
 

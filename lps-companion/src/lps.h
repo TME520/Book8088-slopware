@@ -27,8 +27,10 @@ typedef uint64_t lps_tick_t;
 #define PAGE_SIZE 10
 #define PAGE_COUNT 2
 #define ACTIVITY_MASK 0xFFFFu
-#define COLUMNS 40
-#define ROWS 20
+/* Book 8088 text mode is 80x25. One width drives every screen. */
+#define COLUMNS 80
+#define ROWS 25
+#define ACT_PER_COL 8
 
 #define KEY_ENTER 13
 #define KEY_BACKSPACE 8

@@ -10,7 +10,7 @@
 typedef struct {
     Platform iface;
     char rows[ROWS][COLUMNS+1];
-    int reverse[ROWS];
+    unsigned char rev[ROWS][COLUMNS];
     int palette;
     uint32_t generation;
     int active;
@@ -22,18 +22,45 @@ typedef struct {
 
 static HostPlat *H(Platform *p){ return (HostPlat*)p->user; }
 
-static void h_clear(Platform *p){ HostPlat *h=H(p); int r; for(r=0;r<ROWS;r++){ memset(h->rows[r],' ',COLUMNS); h->rows[r][COLUMNS]=0; h->reverse[r]=0; } }
-static void h_text(Platform *p, int row, int col, const char *s, int reverse){
-    HostPlat *h=H(p); int c=col; if(row<0||row>=ROWS) return; if(reverse) h->reverse[row]=1;
-    while(*s && c<COLUMNS) h->rows[row][c++]=*s++;
-}
-static void h_alert(Platform *p, int row, int col, const char *s){ h_text(p,row,col,s,1); }
-static void h_large(Platform *p, const char *value, int red){ char b[41]; sprintf(b,"        >>>  %s  <<<",value); h_text(p,10,0,b,red); }
-static void h_present(Platform *p){
+static void h_clear(Platform *p){
     HostPlat *h=H(p); int r;
+    for(r=0;r<ROWS;r++){ memset(h->rows[r],' ',COLUMNS); h->rows[r][COLUMNS]=0; memset(h->rev[r],0,COLUMNS); }
+}
+static void h_text(Platform *p, int row, int col, const char *s, int reverse){
+    HostPlat *h=H(p); int c=col;
+    if(row<0||row>=ROWS) return;
+    if(c<0) c=0;
+    while(*s && c<COLUMNS){ h->rows[row][c]=*s++; h->rev[row][c]=(unsigned char)(reverse?1:0); c++; }
+}
+static void h_alert(Platform *p, int row, int col, const char *s){
+    char bar[COLUMNS+1]; int n,i;
+    for(i=0;i<COLUMNS;i++) bar[i]=' ';
+    bar[COLUMNS]=0;
+    if(col<0) col=0;
+    if(col<COLUMNS){ n=(int)strlen(s); if(n>COLUMNS-col) n=COLUMNS-col; memcpy(bar+col,s,(size_t)n); }
+    h_text(p,row,0,bar,1);
+}
+static void h_large(Platform *p, const char *value, int red){
+    char line[COLUMNS+1]; char mid[32]; int n,col,i;
+    sprintf(mid,">>>  %s  <<<", value);
+    for(i=0;i<COLUMNS;i++) line[i]=' ';
+    line[COLUMNS]=0;
+    n=(int)strlen(mid); if(n>COLUMNS) n=COLUMNS;
+    col=(COLUMNS-n)/2; memcpy(line+col,mid,(size_t)n);
+    h_text(p,12,0,line,red);
+}
+static void h_present(Platform *p){
+    HostPlat *h=H(p); int r,c,any;
     if(h->capture){
         char path[128]; FILE *f; sprintf(path,"captures/%02d.txt", h->capture_n++);
-        f=fopen(path,"w"); if(f){ for(r=0;r<ROWS;r++) fprintf(f,"%s%s\n", h->reverse[r]?"*":" ", h->rows[r]); fclose(f); }
+        f=fopen(path,"w");
+        if(f){
+            for(r=0;r<ROWS;r++){
+                any=0; for(c=0;c<COLUMNS;c++) if(h->rev[r][c]) any=1;
+                fprintf(f,"%s%s\n", any?"*":" ", h->rows[r]);
+            }
+            fclose(f);
+        }
     }
 }
 static void h_palette(Platform *p, int pal){ H(p)->palette=pal; }
