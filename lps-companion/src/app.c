@@ -607,8 +607,12 @@ void app_render(App *a){
         if(dn>0 && dn<COLUMNS-2) memcpy(bar+COLUMNS-dn, date, (size_t)dn);
         a->hw->text(a->hw, 0, 0, bar, 1);
     }
+    /* Home shows XP in the summary pane. Activities and Kanban use the band
+     * under the title bar for their own headers, so a row-1 XP line there
+     * reads as a leftover. Other screens keep it. */
     sprintf(b, tr(a,"%lu XP earned","%lu XP acquis"), (unsigned long)a->state.xp);
-    if(a->screen!=SCR_HOME) line(a,1,b,0);
+    if(a->screen!=SCR_HOME && a->screen!=SCR_ACTIVITIES && a->screen!=SCR_KANBAN)
+        line(a,1,b,0);
     if(a->daysBack) center_line(a,2,tr(a,"ARCHIVED DAY - READ ONLY","JOUR ARCHIVE - LECTURE SEULE"),0);
 
     if(a->screen==SCR_HOME){
@@ -701,7 +705,7 @@ void app_render(App *a){
             sprintf(b,"%2u  %-24s [%c]", i+1, tr(a,ACTIVITIES_EN[i],ACTIVITIES_FR[i]), day->flags&(1u<<i)?'x':' ');
             field(a,row,col,37,b, i==a->selection);
         }
-        line(a,22, a->daysBack?tr(a,"<- -> pages   Esc: day menu","<- -> pages   Echap : menu du jour"):tr(a,"Enter: toggle  1-9: keys  <- -> pages","Entree: cocher  1-9: racc.  <- -> pages"),0);
+        line(a,22, a->daysBack?tr(a,"<- -> columns   Esc: day menu","<- -> colonnes   Echap : menu du jour"):tr(a,"Enter: toggle  1-9: keys  <- -> columns","Entree: cocher  1-9: racc.  <- -> colonnes"),0);
     }else if(a->screen==SCR_NOTE){
         center_line(a,3,tr(a,"NOTEPAD","BLOC NOTES"),0); wrap_text(a,5,a->draft,2);
         sprintf(b,tr(a,"%u/96 characters","%u/96 caracteres"),(unsigned)strlen(a->draft)); line(a,8,b,0);
@@ -718,21 +722,28 @@ void app_render(App *a){
         line(a,14,tr(a,"Blank = not recorded","Vide = non renseigne"),0);
         line(a,15, a->daysBack?tr(a,"Enter / Esc: day menu","Entree / Echap : menu du jour"):tr(a,"Up/Down: field - Enter: save","Haut/Bas : champ - Entree : valider"),0);
     }else if(a->screen==SCR_KANBAN){
+        /* Three equal 26-column bands, one blank column between them (26+1+26+1+26). */
         int col, starts[3];
         starts[0]=0; starts[1]=27; starts[2]=54;
-        center_line(a,2,"KANBAN",0);
+        center_line(a,3,"KANBAN",0);
         for(col=0; col<3; col++){
             unsigned n=tasks_in(a,col);
             int active=col==a->kanbanColumn;
+            char hdr[27]; int hn, pad, hi;
             if(active && n && a->selection>=n) a->selection=n-1;
             sprintf(b,"%s (%u)", task_status_name(a,col), n);
-            field(a,3,starts[col],26,b,active);
+            hn=(int)strlen(b); if(hn>26) hn=26;
+            for(hi=0;hi<26;hi++) hdr[hi]=' ';
+            hdr[26]=0;
+            pad=(26-hn)/2;
+            memcpy(hdr+pad, b, (size_t)hn);
+            field(a,5,starts[col],26,hdr,active);
             if(!n){
                 if(active && tasks_in(a,TASK_TODO)+tasks_in(a,TASK_DOING)+tasks_in(a,TASK_DONE)==0)
-                    line(a,5,tr(a,"No tasks. Press N to create one.","Aucune tache. Appuyez sur N."),0);
-                else if(active) field(a,5,starts[col],26,tr(a,"No tasks. Press N to create one.","Aucune tache. Appuyez sur N."),0);
+                    line(a,7,tr(a,"No tasks. Press N to create one.","Aucune tache. Appuyez sur N."),0);
+                else if(active) field(a,7,starts[col],26,tr(a,"No tasks. Press N to create one.","Aucune tache. Appuyez sur N."),0);
             }else{
-                unsigned visible=14, first, end, position;
+                unsigned visible=12, first, end, position;
                 unsigned sel=active?a->selection:0;
                 if(!active) sel=0;
                 first=sel>=visible?sel-visible+1:0;
@@ -741,7 +752,7 @@ void app_render(App *a){
                 for(position=first; position<end; position++){
                     unsigned index=task_at(a,col,position);
                     sprintf(b,"%2u %-22s", position+1, a->state.tasks[index].name);
-                    field(a,5+(int)(position-first), starts[col], 26, b, active && position==a->selection);
+                    field(a,7+(int)(position-first), starts[col], 26, b, active && position==a->selection);
                 }
             }
         }
