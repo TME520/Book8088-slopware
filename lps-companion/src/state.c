@@ -1,4 +1,4 @@
-/* state.c - dates, XP, encode/decode (Companion v1.11 wire formats 1-6). */
+/* state.c - dates, banked XP, encode/decode (Companion v1.11 wire formats 1-6). */
 #include "lps.h"
 #include <stdio.h>
 #include <string.h>
@@ -11,10 +11,6 @@ const char *ACTIVITIES_EN[ACTIVITY_COUNT] = {
     "Walk","Diet","Bible","Mass","Work","Project","Nap","Gurumed",
     "Illness","Day off","Weekend","Outing","Gaming","Doctor","Reading","Shopping"
 };
-/* French accented labels use ASCII fallbacks in DOS code page; UI maps display. */
-const char *GIFTS_FR[6] = {"Carnet de poche","Tasse de the","Boussole","Radio de poche","Mini-ordinateur","Lanterne"};
-const char *GIFTS_EN[6] = {"Pocket notebook","Cup of tea","Compass","Pocket radio","Mini computer","Lantern"};
-const uint32_t GIFT_XP[6] = {30,70,120,180,250,330};
 const Date FIRST_DATE = {2000,1,1};
 const Date LAST_DATE = {2099,12,31};
 const Date DEFAULT_DATE = {2026,9,17};
@@ -82,6 +78,30 @@ unsigned weekday(Date d){
     static const unsigned offsets[12]={0,3,2,5,0,3,5,1,4,6,2,4};
     unsigned y=d.year; if(d.month<3) --y;
     return (y+y/4-y/100+y/400+offsets[d.month-1]+d.day)%7;
+}
+/* ISO 8601 week: weeks start on Monday; week 1 holds the year's first Thursday.
+ * Same rule as PicoCalc v1.12 (LPS-112-CHG03). */
+static unsigned jan1_weekday(unsigned y){ unsigned p=y-1; return (p+1+p/4-p/100+p/400)%7; } /* 0=Sunday */
+static unsigned iso_weeks_in(unsigned y){ unsigned j=jan1_weekday(y); return (j==4 || (leap((uint16_t)y) && j==3))?53u:52u; }
+unsigned iso_week(Date d){
+    unsigned ordinal=d.day, m, iso; int week;
+    for(m=1;m<d.month;++m) ordinal+=days_in_month(d.year,(uint8_t)m);
+    iso=(weekday(d)+6)%7+1;
+    week=((int)ordinal-(int)iso+10)/7;
+    if(week<1) return iso_weeks_in(d.year-1u);
+    return (unsigned)week>iso_weeks_in(d.year)?1u:(unsigned)week;
+}
+/* Line 1 of every screen: "Sunday 8 November 2026 (week 45)".
+ * French accents are ASCII-folded until CP437 output lands (LPS-DOS-115-CHG03). */
+void long_date_text(Date d, int language, char *out, size_t n){
+    static const char *en_days[7]={"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"};
+    static const char *fr_days[7]={"Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"};
+    static const char *en_months[12]={"January","February","March","April","May","June","July","August","September","October","November","December"};
+    static const char *fr_months[12]={"Janvier","Fevrier","Mars","Avril","Mai","Juin","Juillet","Aout","Septembre","Octobre","Novembre","Decembre"};
+    int fr=language==LANG_FR; unsigned w=weekday(d);
+    (void)n; /* longest: "Wednesday 30 September 2099 (week 40)" = 38 chars */
+    sprintf(out, fr?"%s %u %s %u (semaine %u)":"%s %u %s %u (week %u)",
+        fr?fr_days[w]:en_days[w], (unsigned)d.day, fr?fr_months[d.month-1]:en_months[d.month-1], (unsigned)d.year, iso_week(d));
 }
 void state_init(State *s){
     unsigned i;

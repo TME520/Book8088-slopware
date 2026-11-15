@@ -11,7 +11,9 @@ PicoCalc firmware and LPS Console.
 
 Ready-to-run binaries are at the **repository root** (the directory above this one): [`../LPSCOMP.EXE`](../LPSCOMP.EXE) and [`../HELLO.EXE`](../HELLO.EXE). Copy those onto the Book 8088. `make dos` and `make hello` rebuild into this directory only; those local copies are gitignored. After a source change, copy the new files up (`cp LPSCOMP.EXE HELLO.EXE ..`) so the root copies stay current. CI rebuilds and fails if the root files differ.
 
-The screen is the full **80×25** text mode (no 43/50-line modes). Home is two panes: the menu on the left, and a day summary (date, XP, weight, note, reminders, kanban counts) on the right. All 16 activities sit on one page in two columns. Kanban shows TODO, DOING and DONE side by side. Rosary and the notepad use 80-character lines; the timer stays centered. Keys, English and French wording, palettes, and the SAVE/ICS/CSV bytes are unchanged. On the 8088 the video driver rewrites only the cells that changed.
+The screen is the full **80×25** text mode (no 43/50-line modes). Home is two panes: the menu on the left, and a day summary (date, weight, note, reminders, kanban counts) on the right. All 16 activities sit on one page in two columns. Kanban shows TODO, DOING and DONE side by side. Rosary and the notepad use 80-character lines; the timer stays centered. Keys, English and French wording, palettes, and the SAVE/ICS/CSV bytes are unchanged. On the 8088 the video driver rewrites only the cells that changed.
+
+As in PicoCalc v1.12, XP and keepsakes no longer appear on any screen (LPS-DOS-115-CHG01). The line under the title bar shows the long date and ISO week of the viewed day, for example **Sunday 8 November 2026 (week 45)** / **Dimanche 8 Novembre 2026 (semaine 45)**; it stays blank for an undated day. XP is still banked in `SAVE_A`/`SAVE_B` so old and new saves stay compatible, and the ICS description keeps an empty `XP:` line, byte for byte like the PicoCalc.
 
 ![Home screen](captures/01-home-en.png)
 
@@ -39,7 +41,7 @@ The screen is the full **80×25** text mode (no 43/50-line modes). Home is two p
 | Config language EN/FR + 5 palettes | Yes (text attributes) |
 | 3 reminders | Yes |
 | Timer 5/15/30 (BIOS tick) | Yes |
-| Close day + XP + 6 keepsakes | Yes |
+| Close day (XP and keepsakes hidden, as in v1.12) | Yes |
 | 31-day history ←/→ | Yes |
 | Dual A/B SAVE + CRC + v1–v6 migrate | Yes (read **and** write) |
 | ICS + weights CSV byte-compatible | Yes |
@@ -201,7 +203,7 @@ CSV stay byte-compatible with the firmware.
 
 | File | Role |
 |---|---|
-| `src/state.c` | Dates, XP, encode/decode v1–v6 |
+| `src/state.c` | Dates, ISO week, long date, banked XP, encode/decode v1–v6 |
 | `src/save.c` | A/B SAVE read/write |
 | `src/ics.c` | ICS + weights CSV |
 | `src/app.c` | Full UI state machine |
@@ -228,7 +230,9 @@ Memes formats `SAVE_A/B.BIN`, ICS et CSV que le firmware PicoCalc et LPS Console
 
 Les executables prets a lancer sont a la **racine du depot** : [`../LPSCOMP.EXE`](../LPSCOMP.EXE) et [`../HELLO.EXE`](../HELLO.EXE). Copiez-les sur le Book 8088. `make dos` / `make hello` reconstruisent seulement dans ce dossier (copies non versionnees). Apres une modification des sources, recopiez-les a la racine (`cp LPSCOMP.EXE HELLO.EXE ..`). La CI reconstruit et echoue si les fichiers a la racine different.
 
-L'ecran utilise tout le mode texte **80×25**. L'accueil a deux volets : le menu a gauche, le resume du jour a droite (date, XP, poids, note, rappels, kanban). Les 16 activites tiennent sur une page en deux colonnes. Le kanban montre A FAIRE, EN COURS et FINI cote a cote. Le rosaire et le bloc notes utilisent des lignes de 80 caracteres ; le minuteur reste centre. Les touches, les textes, les palettes et les octets SAVE/ICS/CSV ne changent pas. Sur 8088, seules les cellules modifiees sont reecrites.
+L'ecran utilise tout le mode texte **80×25**. L'accueil a deux volets : le menu a gauche, le resume du jour a droite (date, poids, note, rappels, kanban). Les 16 activites tiennent sur une page en deux colonnes. Le kanban montre A FAIRE, EN COURS et FINI cote a cote. Le rosaire et le bloc notes utilisent des lignes de 80 caracteres ; le minuteur reste centre. Les touches, les textes, les palettes et les octets SAVE/ICS/CSV ne changent pas. Sur 8088, seules les cellules modifiees sont reecrites.
+
+Comme sur la PicoCalc v1.12, l'XP et les souvenirs n'apparaissent plus sur aucun ecran (LPS-DOS-115-CHG01). La ligne sous la barre de titre affiche la date longue et la semaine ISO du jour affiche, par exemple **Dimanche 8 Novembre 2026 (semaine 45)** ; elle reste vide pour un jour sans date. L'XP reste enregistree dans `SAVE_A`/`SAVE_B` pour la compatibilite, et la description ICS garde une ligne `XP:` vide, comme sur la PicoCalc.
 
 ## Book 8088 / materiel reel
 

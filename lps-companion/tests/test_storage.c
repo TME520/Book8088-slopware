@@ -45,6 +45,34 @@ static int write_v12_fixture(const char *dir){
     return fclose(f)==0;
 }
 
+/* LPS-DOS-115-CHG01: XP must not appear on any screen row. */
+static int any_xp(Platform *hw){
+    int r; for(r=0;r<ROWS;r++) if(strstr(plat_host_row(hw,r),"XP")) return 1; return 0;
+}
+static int row_has(Platform *hw, int row, const char *text){ return strstr(plat_host_row(hw,row),text)!=NULL; }
+
+/* Independent ISO 8601 check: the week's Thursday decides the ISO year,
+ * and its ordinal day gives the week number. Covers 2000-01-01..2099-12-31. */
+static void check_iso_weeks(void){
+    static int32_t start[102]; /* day_index of Jan 1, years 1999..2100 */
+    Date d={2000,1,1}; unsigned y, days=0;
+    start[0]=1-365; /* 1999 */
+    for(y=2000;y<=2099;y++){ Date j; j.year=(uint16_t)y; j.month=1; j.day=1; start[y-1999]=(int32_t)day_index(j); }
+    start[101]=start[100]+365; /* 2100-01-01; 2099 is not a leap year */
+    for(;;){
+        int32_t idx=(int32_t)day_index(d), thursday=idx+4-(int32_t)((weekday(d)+6)%7+1);
+        unsigned k=(unsigned)(d.year-1999);
+        unsigned expect;
+        while(thursday<start[k]) k--;
+        while(k<101 && thursday>=start[k+1]) k++;
+        expect=(unsigned)((thursday-start[k])/7+1);
+        if(iso_week(d)!=expect){ fprintf(stderr,"iso_week %04u-%02u-%02u: %u != %u\n",d.year,d.month,d.day,iso_week(d),expect); assert(0); }
+        days++;
+        if(!next_date(&d)) break;
+    }
+    assert(days==36525);
+}
+
 int main(void){
     const char *tmpdir="/tmp/lps-msdos-test";
     State s, out; Blob b; int32_t g=0; Date calendar; Day day;
@@ -93,7 +121,9 @@ int main(void){
     assert(strstr(icsbuf,"BEGIN:VCALENDAR"));
     assert(strstr(icsbuf,"UID:lps-companion-20260917@picocalc"));
     assert(strstr(icsbuf,"Activities: "));
-    assert(strstr(icsbuf,"\\NXP: +40 (total 110)"));
+    /* LPS-DOS-115-CHG01: the XP line stays, empty, exactly like PicoCalc v1.12+. */
+    assert(strstr(icsbuf,"\\NXP:\\NExpected weight: 110.500 kg\\NActual weight: 111.200 kg\\NNote: OK\r\n"));
+    assert(!strstr(icsbuf,"XP: +") && !strstr(icsbuf,"total"));
     lps_path_join(export_dir,sizeof(export_dir),tmpdir,"EXPORT");
     assert(write_ics_file(export_dir,&day,110,40,LANG_EN));
     lps_path_join(weights_dir,sizeof(weights_dir),tmpdir,"WEIGHTS");
@@ -110,6 +140,8 @@ int main(void){
     app_start(app);
     if(app_screen(app)==SCR_REMINDER_POPUP) app_key(app,KEY_ENTER);
     assert(app_screen(app)==SCR_HOME);
+    assert(row_has(hw,1,"Thursday 17 September 2026 (week 38)") && !any_xp(hw));
+    assert(row_has(hw,5,"0/16 activities"));
     app_key(app,'1'); /* activities */
     app_key(app,'1'); app_key(app,'2'); app_key(app,'3');
     assert(points(&app_state(app)->today)==40);
@@ -117,10 +149,29 @@ int main(void){
     app_key(app,KEY_UP); /* Close the day */
     app_key(app,KEY_ENTER);
     assert(app_screen(app)==SCR_FINISH);
+    assert(row_has(hw,6,"Activities: 3") && !any_xp(hw));
+    assert(row_has(hw,1,"Thursday 17 September 2026 (week 38)"));
     app_key(app,KEY_ENTER);
-    assert(app_state(app)->xp==40);
+    assert(app_state(app)->xp==40); /* still banked silently */
     assert(app_state(app)->today.number==2);
+    assert(app_screen(app)==SCR_REWARD && row_has(hw,3,"DAY SAVED") && !any_xp(hw));
+    assert(!strstr(plat_host_row(hw,8),"KEEPSAKE") && !strstr(plat_host_row(hw,9),"Pocket notebook"));
     app_key(app,KEY_ENTER); /* reward -> home */
+    assert(app_screen(app)==SCR_HOME && row_has(hw,1,"Friday 18 September 2026 (week 38)") && !any_xp(hw));
+    app_key(app,KEY_LEFT); /* archive: previous day */
+    assert(row_has(hw,1,"Thursday 17 September 2026 (week 38)") && row_has(hw,2,"ARCHIVED DAY") && !any_xp(hw));
+    assert(row_has(hw,5,"3/16 activities"));
+    app_key(app,KEY_RIGHT);
+    app_key(app,'7'); app_key(app,'1'); app_key(app,'2'); app_key(app,'3'); /* Config: French, save */
+    assert(app_state(app)->language==LANG_FR && app_screen(app)==SCR_HOME);
+    assert(row_has(hw,1,"Vendredi 18 Septembre 2026 (semaine 38)") && row_has(hw,5,"0/16 activites") && !any_xp(hw));
+    { /* the exported ICS file on disk carries the empty XP line */
+        char path[256], got[2048]; FILE *f; size_t n;
+        /* write_ics_file joins with a DOS backslash, so on the host it is part of the name. */
+        sprintf(path,"%s/EXPORT\\2026-09-17_LPS-Companion.ics", tmpdir);
+        f=fopen(path,"rb"); assert(f); n=fread(got,1,sizeof(got)-1,f); fclose(f); got[n]=0;
+        assert(strstr(got,"DESCRIPTION:Activities: Walk, Diet, Bible\\NXP:\r\nEND:VEVENT"));
+    }
 
     /* Authentic PicoCalc v1.2 payload, wrapped as SAVE_A.BIN (not a machine-local path). */
     rm_tree(tmpdir); mkdir(tmpdir,0755);
@@ -143,7 +194,23 @@ int main(void){
     /* mystery weekday: 2026-10-01 Thursday -> Luminous */
     { Date d={2026,10,1}; assert(weekday(d)==4); }
 
-    printf("PASS: storage, ICS, CSV, A/B, app close-day, fixture decode (%u captures)\n", 0);
+    /* LPS-DOS-115-CHG01: long date line with ISO week (PicoCalc LPS-112-CHG03 wording). */
+    {
+        char t[64]; Date d;
+        d.year=2026; d.month=11; d.day=8;
+        long_date_text(d,LANG_FR,t,sizeof(t)); assert(strcmp(t,"Dimanche 8 Novembre 2026 (semaine 45)")==0);
+        long_date_text(d,LANG_EN,t,sizeof(t)); assert(strcmp(t,"Sunday 8 November 2026 (week 45)")==0);
+        d.year=2026; d.month=2; d.day=14;
+        long_date_text(d,LANG_FR,t,sizeof(t)); assert(strcmp(t,"Samedi 14 Fevrier 2026 (semaine 7)")==0);
+        d.year=2021; d.month=1; d.day=3; assert(iso_week(d)==53);
+        d.year=2020; d.month=12; d.day=31; assert(iso_week(d)==53);
+        d.year=2024; d.month=12; d.day=30; assert(iso_week(d)==1);
+        d.year=2000; d.month=1; d.day=1; assert(iso_week(d)==52);
+        d.year=2099; d.month=12; d.day=31; assert(iso_week(d)==53);
+        check_iso_weeks();
+    }
+
+    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

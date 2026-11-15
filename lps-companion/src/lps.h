@@ -85,7 +85,7 @@ typedef struct { Date from; uint16_t duration; char text[REMINDER_TEXT_LENGTH + 
 typedef struct {
     uint8_t language;
     uint8_t palette;
-    uint32_t xp;
+    uint32_t xp; /* banked in the save for compatibility; never shown since LPS-DOS-115-CHG01 */
     Day today;
     Day history[HISTORY_LENGTH];
     uint8_t next, count;
@@ -114,9 +114,6 @@ struct Platform {
 
 extern const char *ACTIVITIES_FR[ACTIVITY_COUNT];
 extern const char *ACTIVITIES_EN[ACTIVITY_COUNT];
-extern const char *GIFTS_FR[6];
-extern const char *GIFTS_EN[6];
-extern const uint32_t GIFT_XP[6];
 extern const Date FIRST_DATE, LAST_DATE, DEFAULT_DATE;
 
 int leap(uint16_t year);
@@ -136,6 +133,8 @@ void state_init(State *s);
 extern State lps_decode_scratch;
 uint32_t day_index(Date d);
 unsigned weekday(Date d); /* 0=Sunday */
+unsigned iso_week(Date d); /* ISO 8601, 1..53 */
+void long_date_text(Date d, int language, char *out, size_t n);
 
 /* ICS / CSV */
 int ics_escape_append(char *dst, size_t cap, size_t *used, const char *text);

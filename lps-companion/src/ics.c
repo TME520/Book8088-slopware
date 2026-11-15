@@ -14,7 +14,7 @@ int ics_escape_append(char *dst, size_t cap, size_t *used, const char *text){
 }
 
 int build_ics(const Day *day, uint32_t totalXp, uint32_t dayXp, int language, char *out, size_t cap){
-    char ymd[16], nxt[16], line[160], tmp[96];
+    char ymd[16], nxt[16], tmp[96];
     Date tomorrow; size_t u=0; int en=language!=LANG_FR; unsigned i; int first;
     if(!valid_date(day->date)) return 0;
     tomorrow=day->date; if(!next_date(&tomorrow)) return 0;
@@ -32,9 +32,11 @@ int build_ics(const Day *day, uint32_t totalXp, uint32_t dayXp, int language, ch
         first=0;
     }
     if(first){ if(u+4>=cap) return 0; memcpy(out+u,"none",4); u+=4; out[u]=0; }
-    sprintf(line,"\\NXP: +%lu (total %lu)",(unsigned long)dayXp,(unsigned long)totalXp);
-    if(u+strlen(line)>=cap) return 0;
-    memcpy(out+u,line,strlen(line)); u+=strlen(line); out[u]=0;
+    /* LPS-DOS-115-CHG01 (PicoCalc LPS-112-CHG03): the XP line stays, empty,
+     * so the ICS structure matches earlier exports. XP values are not written. */
+    (void)totalXp; (void)dayXp;
+    if(u+5>=cap) return 0;
+    memcpy(out+u,"\\NXP:",5); u+=5; out[u]=0;
     if(day->expected>=0){
         if(u+2>=cap) return 0;
         out[u++]='\\'; out[u++]='N'; out[u]=0;

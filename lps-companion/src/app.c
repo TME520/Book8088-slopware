@@ -21,8 +21,6 @@ struct App {
     char taskDraft[TASK_NAME_LENGTH+1];
     char weights[2][8];
     char message[100];
-    uint32_t earned;
-    uint8_t unlocked;
     int missingStorage;
     int kanbanColumn;
     unsigned reviewOffset;
@@ -571,7 +569,7 @@ void app_key(App *a, int k){
             if(a->state.today.number==0xfffffffful || a->state.xp>0xfffffffful-gain) say(a,tr(a,"Counter limit reached","Limite du compteur atteinte"));
             else if(!valid_date(a->state.today.date)) say(a,tr(a,"Set Date before closing the day","Renseignez Date avant de terminer le jour"));
             else {
-                Date tomorrow; uint8_t won=0; unsigned i;
+                Date tomorrow;
                 g_scratch=a->state;
                 g_scratch.history[g_scratch.next]=g_scratch.today;
                 g_scratch.next=(uint8_t)((g_scratch.next+1)%HISTORY_LENGTH);
@@ -581,8 +579,8 @@ void app_key(App *a, int k){
                 if(!a->hw->export_weight_csv(a->hw,&a->state.today)){ say(a,tr(a,"Weight CSV export failed; day remains open","Export CSV poids echoue ; journee reste ouverte")); app_render(a); return; }
                 if(!a->hw->export_ics(a->hw,&a->state.today,a->state.xp+gain,gain,a->state.language)){ say(a,tr(a,"ICS export failed; day remains open","Export ICS echoue ; journee reste ouverte")); app_render(a); return; }
                 g_scratch.xp+=gain; memset(&g_scratch.today,0,sizeof(Day)); g_scratch.today.number=a->state.today.number+1; g_scratch.today.date=tomorrow; g_scratch.today.expected=-1; g_scratch.today.actual=-1;
-                for(i=0;i<6;i++) if(a->state.xp<GIFT_XP[i] && g_scratch.xp>=GIFT_XP[i]) won|=(uint8_t)(1u<<i);
-                if(commit(a,&g_scratch) && flush_save(a)){ a->earned=gain; a->unlocked=won; go(a,SCR_REWARD); }
+                /* LPS-DOS-115-CHG01: XP is still banked in the save for compatibility, never shown. */
+                if(commit(a,&g_scratch) && flush_save(a)) go(a,SCR_REWARD);
             }
         }
     }else if(a->screen==SCR_REWARD && k==KEY_ENTER) go(a,SCR_HOME);
@@ -607,12 +605,9 @@ void app_render(App *a){
         if(dn>0 && dn<COLUMNS-2) memcpy(bar+COLUMNS-dn, date, (size_t)dn);
         a->hw->text(a->hw, 0, 0, bar, 1);
     }
-    /* Home shows XP in the summary pane. Activities and Kanban use the band
-     * under the title bar for their own headers, so a row-1 XP line there
-     * reads as a leftover. Other screens keep it. */
-    sprintf(b, tr(a,"%lu XP earned","%lu XP acquis"), (unsigned long)a->state.xp);
-    if(a->screen!=SCR_HOME && a->screen!=SCR_ACTIVITIES && a->screen!=SCR_KANBAN)
-        line(a,1,b,0);
+    /* LPS-DOS-115-CHG01: row 1 of every screen shows the long date and ISO
+     * week of the viewed day (blank for an undated day). No XP anywhere. */
+    if(valid_date(day->date)){ long_date_text(day->date,a->state.language,b,sizeof(b)); center_line(a,1,b,0); }
     if(a->daysBack) center_line(a,2,tr(a,"ARCHIVED DAY - READ ONLY","JOUR ARCHIVE - LECTURE SEULE"),0);
 
     if(a->screen==SCR_HOME){
@@ -632,17 +627,13 @@ void app_render(App *a){
         menu[9]=tr(a,"9  Timer","9  Minuteur");
         menu[10]=tr(a,"10 Close the day","10 Terminer le jour");
         field(a,4,1,37, a->daysBack?tr(a,"CLOSED DAY","JOUR TERMINE"):tr(a,"TODAY","AUJOURD'HUI"), 0);
-        sprintf(b,tr(a,"%u/%u activities - %lu XP %s","%u/%u activites - %lu XP %s"),
-            count_flags(day->flags), ACTIVITY_COUNT, (unsigned long)points(day),
-            a->daysBack?tr(a,"banked","valides"):tr(a,"pending","a valider"));
+        sprintf(b,tr(a,"%u/%u activities","%u/%u activites"), count_flags(day->flags), ACTIVITY_COUNT);
         field(a,5,1,37,b,0);
         for(i=0;i<total;i++) field(a,7+(int)i,1,37, menu[first+i], i==a->selection);
         field(a,20,1,37,tr(a,"<- Previous day   -> Current day","<- Jour precedent   -> Jour actuel"),0);
         for(gutter=3; gutter<=21; gutter++) a->hw->text(a->hw, gutter, 39, "|", 0);
         field(a,4,41,38, "DATE", 0);
         field(a,5,41,38, date, 0);
-        sprintf(b, tr(a,"%lu XP earned","%lu XP acquis"), (unsigned long)a->state.xp);
-        field(a,7,41,38, b, 0);
         field(a,9,41,38, tr(a,"WEIGHT TRACKER (kg)","SUIVI DU POIDS (kg)"), 0);
         weight_text(day->expected, wexp, sizeof(wexp));
         weight_text(day->actual, wact, sizeof(wact));
@@ -846,15 +837,10 @@ void app_render(App *a){
     }else if(a->screen==SCR_FINISH){
         center_line(a,3,tr(a,"CLOSE THE DAY?","TERMINER LE JOUR ?"),0);
         sprintf(b,tr(a,"Activities: %u","Activites : %u"), count_flags(a->state.today.flags)); line(a,6,b,0);
-        sprintf(b,tr(a,"Variety bonus: %u XP","Bonus variete : %u XP"), count_flags(a->state.today.flags)>=3?10u:0u); line(a,8,b,0);
-        sprintf(b,"Total : +%lu XP", (unsigned long)points(&a->state.today)); line(a,10,b,0);
         line(a,13,tr(a,"Enter: save and advance","Entree : enregistrer et avancer"),0);
         line(a,15,tr(a,"An empty day has no penalty.","Une journee vide ne coute rien."),0);
     }else{
-        int row=8;
         center_line(a,3,tr(a,"DAY SAVED","JOUR ENREGISTRE"),0);
-        sprintf(b,"+%lu XP",(unsigned long)a->earned); line(a,5,b,0);
-        for(i=0;i<6;i++) if(a->unlocked&(1u<<i)){ line(a,row++,tr(a,"NEW KEEPSAKE","NOUVEAU SOUVENIR"),0); line(a,row++,tr(a,GIFTS_EN[i],GIFTS_FR[i]),0); }
         line(a,15,tr(a,"Enter: start the new day","Entree : commencer le nouveau jour"),0);
     }
 
