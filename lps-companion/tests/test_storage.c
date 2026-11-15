@@ -183,6 +183,38 @@ static void check_menu_and_legacy_note(const char *tmpdir){
     app_key(a,KEY_ESCAPE); app_key(a,KEY_RIGHT);
 }
 
+/* LPS-DOS-115-CHG02b (PicoCalc LPS-112-CHG01/CHG02): 5/30/60 minutes on keys 1-3. */
+static void check_timer(const char *tmpdir){
+    static unsigned char store4[8192]; App *a=(App*)store4; Platform *hw; lps_tick_t t=1000;
+    rm_tree(tmpdir); mkdir(tmpdir,0755); lps_set_data_dir(tmpdir); lps_ensure_dirs();
+    hw=plat_host_create(0); app_init(a,hw); app_start(a); app_tick(a,t);
+    app_key(a,'8'); assert(app_screen(a)==SCR_TIMER_SELECT);
+    assert(strstr(plat_host_row(hw,8),"1  5 minutes") && strstr(plat_host_row(hw,10),"2  30 minutes") && strstr(plat_host_row(hw,12),"3  60 minutes"));
+    assert(!any_row(hw,"15 minutes"));
+    /* Each key starts its duration at once, without Enter. */
+    app_key(a,'1'); assert(app_screen(a)==SCR_TIMER_RUNNING && strstr(plat_host_row(hw,12),"05:00")); app_key(a,KEY_ESCAPE);
+    app_key(a,'8'); app_key(a,'2'); assert(app_screen(a)==SCR_TIMER_RUNNING && strstr(plat_host_row(hw,12),"30:00")); app_key(a,KEY_ESCAPE);
+    app_key(a,'8'); app_key(a,'3'); assert(app_screen(a)==SCR_TIMER_RUNNING && strstr(plat_host_row(hw,12),"60:00"));
+    /* Keys 1-3 are ignored while it runs; Enter pauses. */
+    app_key(a,'1'); assert(strstr(plat_host_row(hw,12),"60:00"));
+    t+=1000; app_tick(a,t); assert(strstr(plat_host_row(hw,12),"59:59"));
+    app_key(a,KEY_ENTER); t+=600000ul; app_tick(a,t); assert(strstr(plat_host_row(hw,12),"59:59") && any_row(hw,"PAUSED"));
+    app_key(a,KEY_ENTER); t+=3599000ul-60000ul; app_tick(a,t); assert(strstr(plat_host_row(hw,12),"01:00"));
+    t+=1000; app_tick(a,t); assert(strstr(plat_host_row(hw,12),"00:59"));
+    t+=59000; app_tick(a,t); assert(app_screen(a)==SCR_TIMER_COMPLETE && any_row(hw,"TIMER FINISHED!"));
+    assert(any_row(hw,"1-3: Restart  Enter: Menu  Esc: Back"));
+    /* On the completion screen 1-3 restart a countdown; Enter goes back to the menu. */
+    app_key(a,'2'); assert(app_screen(a)==SCR_TIMER_RUNNING && strstr(plat_host_row(hw,12),"30:00"));
+    t+=1800000ul; app_tick(a,t); assert(app_screen(a)==SCR_TIMER_COMPLETE);
+    app_key(a,KEY_ENTER); assert(app_screen(a)==SCR_TIMER_SELECT);
+    app_key(a,KEY_DOWN); app_key(a,KEY_DOWN); app_key(a,KEY_ENTER); assert(strstr(plat_host_row(hw,12),"60:00"));
+    app_key(a,KEY_ESCAPE); app_key(a,KEY_ESCAPE); assert(app_screen(a)==SCR_HOME);
+    /* French wording */
+    app_key(a,'6'); app_key(a,'1'); app_key(a,'2'); app_key(a,'3');
+    app_key(a,'8'); app_key(a,'1'); assert(app_state(a)->language==LANG_FR && any_row(hw,"MINUTEUR") && any_row(hw,"Enter: Pause   Esc: Annuler"));
+    t+=300000ul; app_tick(a,t); assert(any_row(hw,"MINUTEUR TERMINE !") && any_row(hw,"1-3: Relancer  Enter: Menu  Esc: Retour"));
+}
+
 int main(void){
     const char *tmpdir="/tmp/lps-msdos-test";
     State s, out; Blob b; int32_t g=0; Date calendar; Day day;
@@ -350,8 +382,9 @@ int main(void){
     }
 
     check_menu_and_legacy_note(tmpdir);
+    check_timer(tmpdir);
 
-    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, fixture decode (%u captures)\n", 0);
+    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

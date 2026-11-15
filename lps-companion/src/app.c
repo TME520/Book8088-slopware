@@ -44,6 +44,15 @@ static const char *tr(const App *a, const char *en, const char *fr){
 static void say(App *a, const char *text){ sprintf(a->message, "%s", text); }
 static void read_only(App *a){ say(a, tr(a,"Archived day: read-only","Jour archive : lecture seule")); }
 static unsigned timer_seconds(const App *a){ return (unsigned)((a->timerRemaining+999)/1000); }
+/* LPS-DOS-115-CHG02b (PicoCalc LPS-112-CHG01/CHG02): 5, 30 or 60 minutes,
+ * started directly with keys 1-3. Timing still comes from the BIOS tick. */
+static void go(App *a, int s);
+static void start_timer(App *a, unsigned option){
+    static const unsigned minutes[3]={5,30,60};
+    a->timerRemaining=(lps_tick_t)minutes[option]*60000ul;
+    a->timerLast=a->timerNow; a->timerPaused=0;
+    go(a,SCR_TIMER_RUNNING);
+}
 static int displayed_palette(const App *a){ return a->screen==SCR_COLORS?a->pendingPalette:a->state.palette; }
 
 static void line(App *a, int row, const char *text, int reverse){
@@ -383,11 +392,13 @@ void app_key(App *a, int k){
     }else if(a->screen==SCR_TIMER_SELECT){
         if(k==KEY_UP) a->selection=(a->selection+2)%3;
         if(k==KEY_DOWN) a->selection=(a->selection+1)%3;
-        if(k==KEY_ENTER){ static const unsigned minutes[]={5,15,30}; a->timerRemaining=(lps_tick_t)minutes[a->selection]*60000ul; a->timerLast=a->timerNow; a->timerPaused=0; go(a,SCR_TIMER_RUNNING); }
+        if(k>='1'&&k<='3'){ a->selection=(unsigned)(k-'1'); k=KEY_ENTER; }
+        if(k==KEY_ENTER) start_timer(a,a->selection);
     }else if(a->screen==SCR_TIMER_RUNNING){
         if(k==KEY_ENTER){ a->timerPaused=!a->timerPaused; a->timerLast=a->timerNow; }
     }else if(a->screen==SCR_TIMER_COMPLETE){
-        if(k==KEY_ENTER) go(a,SCR_TIMER_SELECT);
+        if(k>='1'&&k<='3') start_timer(a,(unsigned)(k-'1'));
+        else if(k==KEY_ENTER) go(a,SCR_TIMER_SELECT);
     }else if(a->screen==SCR_REMINDERS){
         if(k==KEY_UP && a->state.reminderCount) a->selection=(a->selection+a->state.reminderCount-1)%a->state.reminderCount;
         else if(k==KEY_DOWN && a->state.reminderCount) a->selection=(a->selection+1)%a->state.reminderCount;
@@ -640,7 +651,7 @@ void app_render(App *a){
             task_status_name(a,TASK_DONE), tasks_in(a,TASK_DONE));
         field(a,16,41,38, b, 0);
     }else if(a->screen==SCR_TIMER_SELECT){
-        const char *options[]={"5 minutes","15 minutes","30 minutes"};
+        const char *options[]={"1  5 minutes","2  30 minutes","3  60 minutes"};
         center_line(a,3,tr(a,"TIMER","MINUTEUR"),0);
         for(i=0;i<3;i++) field(a,8+(int)i*2, 25, 30, options[i], a->selection==i);
     }else if(a->screen==SCR_TIMER_RUNNING||a->screen==SCR_TIMER_COMPLETE){
@@ -650,7 +661,7 @@ void app_render(App *a){
         a->hw->large_text(a->hw,b,seconds<60);
         if(a->screen==SCR_TIMER_COMPLETE) center_line(a,16,tr(a,"TIMER FINISHED!","MINUTEUR TERMINE !"),0);
         else if(a->timerPaused) center_line(a,16,tr(a,"PAUSED","EN PAUSE"),0);
-        center_line(a,22, a->screen==SCR_TIMER_COMPLETE?tr(a,"Enter: Again   Esc: Back","Enter: Nouveau   Esc: Retour"):
+        center_line(a,22, a->screen==SCR_TIMER_COMPLETE?tr(a,"1-3: Restart  Enter: Menu  Esc: Back","1-3: Relancer  Enter: Menu  Esc: Retour"):
             (a->timerPaused?tr(a,"Enter: Resume   Esc: Cancel","Enter: Reprendre   Esc: Annuler"):tr(a,"Enter: Pause   Esc: Cancel","Enter: Pause   Esc: Annuler")),0);
     }else if(a->screen==SCR_REMINDER_POPUP){
         unsigned row=6;
