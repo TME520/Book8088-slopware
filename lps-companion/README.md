@@ -237,9 +237,16 @@ the same map (F1–F5 on Kanban, N/Del on Kanban and Reminders, etc.).
 C:\LPS\
   SAVE_A.BIN     dual-slot snapshots (magic LPR1 + generation + CRC)
   SAVE_B.BIN
-  EXPORT\YYYY-MM-DD_LPS-Companion.ics
+  EXPORT\YYYYMMDD.ICS        e.g. EXPORT\20260917.ICS
   WEIGHTS\YYYY.csv
 ```
+
+The ICS file name differs from the PicoCalc's `YYYY-MM-DD_LPS-Companion.ics`
+(LPS-DOS-115-CHG02c): DOS keeps only 8.3 names and cut the long name to
+`YYYY-MM-.ICS`, so every day of a month overwrote the same file. The new name is
+`YYYYMMDD.ICS`, one file per day; the file content is unchanged and older files
+already in `EXPORT\` are left alone. On Linux a FAT disk usually shows these
+names in upper case, so a reader that looks only for `*.ics` misses them.
 
 Files are interchangeable with the PicoCalc SD card and with LPS Console
 imports/exports. Do not change the on-disk layout: `SAVE_A`/`SAVE_B`, ICS, and
@@ -275,6 +282,8 @@ DOSBox 8086 home grab). Text dumps are not stored; `make captures` rewrites
 Port complet de [LPS Companion v1.11](https://github.com/TME520/LPS-Companion-PicoCalc)
 vers MS-DOS 16 bits (8088, 640 Ko), clavier uniquement, mode texte 80×25.
 Memes formats `SAVE_A/B.BIN`, ICS et CSV que le firmware PicoCalc et LPS Console.
+
+Seul le nom du fichier ICS differe de la PicoCalc (LPS-DOS-115-CHG02c) : `EXPORT\YYYYMMDD.ICS`, par exemple `EXPORT\20260917.ICS`, au lieu de `YYYY-MM-DD_LPS-Companion.ics`. DOS ne garde que des noms 8.3 et coupait le nom long en `YYYY-MM-.ICS` : tous les jours d'un mois ecrasaient le meme fichier. Le contenu ne change pas, et les anciens fichiers deja dans `EXPORT\` restent en place. Sous Linux, un disque FAT affiche en general ces noms en majuscules : un lecteur qui ne cherche que `*.ics` ne les voit pas.
 
 Les fichiers prets a lancer sont a la **racine du depot** : [`../LPSCOMP.EXE`](../LPSCOMP.EXE), [`../ROSARY.DAT`](../ROSARY.DAT) et [`../HELLO.EXE`](../HELLO.EXE). Copiez **`LPSCOMP.EXE` et `ROSARY.DAT` dans le meme dossier** sur le Book 8088 ; `ROSARY.DAT` contient les textes du rosaire. Sans lui, tout fonctionne sauf le rosaire, qui affiche *ROSARY.DAT introuvable : copiez-le a cote de LPSCOMP.EXE*. `make dos` / `make rosary` / `make hello` reconstruisent seulement dans ce dossier (copies non versionnees). Apres une modification des sources, recopiez-les a la racine (`cp LPSCOMP.EXE ROSARY.DAT HELLO.EXE ..`). La CI reconstruit et echoue si les fichiers a la racine different.
 

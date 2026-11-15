@@ -169,9 +169,20 @@ static void check_menu_and_legacy_note(const char *tmpdir){
     /* Close the day: the legacy note goes to the ICS and stays in the history. */
     app_key(a,KEY_ENTER); assert(app_screen(a)==SCR_REWARD); app_key(a,KEY_ENTER);
     assert(strcmp(app_state(a)->history[0].note,"Legacy note, kept; really")==0 && app_state(a)->today.note[0]==0);
-    sprintf(path,"%s/EXPORT\\2026-09-17_LPS-Companion.ics",tmpdir);
+    sprintf(path,"%s/EXPORT\\20260917.ICS",tmpdir);
     f=fopen(path,"rb"); assert(f); n=fread(got,1,sizeof(got)-1,f); fclose(f); got[n]=0;
     assert(strstr(got,"DESCRIPTION:Activities: Walk, Diet\\NXP:\\NNote: Legacy note\\, kept\\; really\r\nEND:VEVENT"));
+    { /* LPS-DOS-115-CHG02c: 8.3 name per day, so two days of one month give two files. */
+        static Day d2; char p2[256], exp_dir[256];
+        d2=app_state(a)->history[0]; d2.date.day=18; sprintf(exp_dir,"%s/EXPORT",tmpdir);
+        assert(write_ics_file(exp_dir,&d2,0,0,LANG_EN));
+        sprintf(p2,"%s/EXPORT\\20260918.ICS",tmpdir);
+        f=fopen(p2,"rb"); assert(f); fclose(f);
+        f=fopen(path,"rb"); assert(f); n=fread(got,1,sizeof(got)-1,f); fclose(f); got[n]=0;
+        assert(strstr(got,"DTSTART;VALUE=DATE:20260917\r\n"));
+        sprintf(p2,"%s/EXPORT\\2026-09-17_LPS-Companion.ics",tmpdir);
+        f=fopen(p2,"rb"); assert(!f);
+    }
     /* Archived day: 1 Activities, 2 Weight; other digits are read-only. */
     app_key(a,KEY_LEFT);
     assert(strstr(plat_host_row(hw,7),"1  Activities") && strstr(plat_host_row(hw,8),"2  Weight tracker") && !strstr(plat_host_row(hw,9),"Kanban"));
@@ -311,7 +322,7 @@ int main(void){
     { /* the exported ICS file on disk carries the empty XP line */
         char path[256], got[2048]; FILE *f; size_t n;
         /* write_ics_file joins with a DOS backslash, so on the host it is part of the name. */
-        sprintf(path,"%s/EXPORT\\2026-09-17_LPS-Companion.ics", tmpdir);
+        sprintf(path,"%s/EXPORT\\20260917.ICS", tmpdir);
         f=fopen(path,"rb"); assert(f); n=fread(got,1,sizeof(got)-1,f); fclose(f); got[n]=0;
         assert(strstr(got,"DESCRIPTION:Activities: Walk, Diet, Bible\\NXP:\r\nEND:VEVENT"));
     }
@@ -384,7 +395,7 @@ int main(void){
     check_menu_and_legacy_note(tmpdir);
     check_timer(tmpdir);
 
-    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, fixture decode (%u captures)\n", 0);
+    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

@@ -64,7 +64,10 @@ int write_ics_file(const char *export_dir, const Day *day, uint32_t totalXp, uin
     /* Far-heap buffer (lps_buffers_init), not the 4 KB DOS stack. */
     char *buf=lps_buf->ics; char path[200]; FILE *f;
     if(!build_ics(day,totalXp,dayXp,language,buf,sizeof(lps_buf->ics))) return 0;
-    sprintf(path,"%s\\%04u-%02u-%02u_LPS-Companion.ics", export_dir,
+    /* LPS-DOS-115-CHG02c: 8.3 name YYYYMMDD.ICS. The PicoCalc's long
+     * YYYY-MM-DD_LPS-Companion.ics was cut by DOS to YYYY-MM-.ICS, so every
+     * day of a month overwrote the same file. The content is unchanged. */
+    sprintf(path,"%s\\%04u%02u%02u.ICS", export_dir,
         (unsigned)day->date.year,(unsigned)day->date.month,(unsigned)day->date.day);
     f=fopen(path,"wb"); if(!f) return 0;
     if(fwrite(buf,1,strlen(buf),f)!=strlen(buf)){ fclose(f); remove(path); return 0; }
