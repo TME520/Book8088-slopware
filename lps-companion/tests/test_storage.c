@@ -1,4 +1,4 @@
-/* Host unit tests: encode/decode, ICS, CSV, A/B SAVE round-trip, ROSARY.DAT. */
+/* Host unit tests: JSON A/B saves and BIN migration, ICS, CSV, ROSARY.DAT, screens. */
 #define _POSIX_C_SOURCE 200112L
 #include "lps.h"
 #include "rosary.h"
@@ -155,8 +155,8 @@ static int any_row(Platform *hw, const char *text){
     int r; for(r=0;r<ROWS;r++) if(strstr(plat_host_row(hw,r),text)) return 1; return 0;
 }
 static void check_menu_and_legacy_note(const char *tmpdir){
-    static unsigned char store3[8192]; App *a=(App*)store3; Platform *hw; State s; Blob b;
-    uint32_t gen=0; int active=0; unsigned i; char path[256], got[2048]; FILE *f; size_t n;
+    static unsigned char store3[8192]; App *a=(App*)store3; Platform *hw; State s;
+    uint32_t gen=0; int active=-1; unsigned i; char path[256], got[2048]; FILE *f; size_t n;
     static const char *labels[10]={"0  Date","1  Activities","2  Weight tracker","3  Kanban","4  Christian Rosary",
         "5  Daily review","6  Config","7  Reminders","8  Timer","9  Close the day"};
     static const int screens[10]={SCR_DATE,SCR_ACTIVITIES,SCR_WEIGHT,SCR_KANBAN,SCR_ROSARY_MODE,
@@ -164,7 +164,7 @@ static void check_menu_and_legacy_note(const char *tmpdir){
     rm_tree(tmpdir); mkdir(tmpdir,0755); lps_set_data_dir(tmpdir); lps_ensure_dirs();
     /* A save written before v1.12 with a note on today. */
     state_init(&s); s.today.flags=3; strcpy(s.today.note,"Legacy note, kept; really");
-    encode_state(&s,&b); assert(save_write_ab(tmpdir,b.bytes,b.size,&gen,&active));
+    assert(save_store(tmpdir,&s,&gen,&active));
     hw=plat_host_create(0); app_init(a,hw); app_start(a);
     assert(app_screen(a)==SCR_HOME);
     for(i=0;i<10;i++) assert(strstr(plat_host_row(hw,7+(int)i),labels[i]));
@@ -389,11 +389,251 @@ static void check_wrap(const char *tmpdir){
     }
 }
 
+/* ---- LPS-DOS-115-CHG04: JSON saves SAVE_A/B.JSN (PicoCalc v1.15 schema 2) ---- */
+static char jbuf[65536], jbuf2[65536];
+static size_t slurp(const char *path, char *buf, size_t cap){
+    FILE *f=fopen(path,"rb"); size_t n; assert(f); n=fread(buf,1,cap-1,f); fclose(f); buf[n]=0; return n;
+}
+static void spit(const char *path, const char *buf, size_t n){
+    FILE *f=fopen(path,"wb"); assert(f); assert(fwrite(buf,1,n,f)==n); assert(fclose(f)==0);
+}
+static int exists(const char *path){ FILE *f=fopen(path,"rb"); if(f) fclose(f); return f!=NULL; }
+static void jpath(char *out, const char *dir, const char *name){ sprintf(out,"%s/%s",dir,name); }
+static void copy_file(const char *from, const char *to){ size_t n=slurp(from,jbuf2,sizeof(jbuf2)); spit(to,jbuf2,n); }
+/* "crc32" again over every byte before the key, as the PicoCalc tests do. */
+static void resign(char *buf){
+    char *at=NULL, *p=buf, hex[9];
+    while((p=strstr(p,"\"crc32\":\""))!=NULL){ at=p; p++; }
+    assert(at);
+    sprintf(hex,"%08lx",(unsigned long)crc32((const uint8_t*)buf,(size_t)(at-buf)));
+    memcpy(at+9,hex,8);
+}
+/* Insert what right after the first occurrence of after. */
+static void insert_after(char *buf, const char *after, const char *what){
+    char *p=strstr(buf,after); size_t w=strlen(what);
+    assert(p); p+=strlen(after);
+    memmove(p+w,p,strlen(p)+1); memcpy(p,what,w);
+}
+static void remove_span(char *buf, const char *from, const char *to){ /* from..to (to included) */
+    char *a=strstr(buf,from), *b; assert(a); b=strstr(a,to); assert(b); b+=strlen(to);
+    memmove(a,b,strlen(b)+1);
+}
+static const Day *ring(const State *s, unsigned i){ return &s->history[(s->next+HISTORY_LENGTH-s->count+i)%HISTORY_LENGTH]; }
+static int same_day(const Day *a, const Day *b){
+    return a->date.year==b->date.year && a->date.month==b->date.month && a->date.day==b->date.day && a->number==b->number
+        && a->flags==b->flags && a->expected==b->expected && a->actual==b->actual && !strcmp(a->note,b->note);
+}
+static int same_state(const State *a, const State *b){
+    unsigned i;
+    if(a->language!=b->language||a->palette!=b->palette||a->xp!=b->xp||a->count!=b->count||!same_day(&a->today,&b->today)) return 0;
+    for(i=0;i<a->count;i++) if(!same_day(ring(a,i),ring(b,i))) return 0;
+    if(a->taskCount!=b->taskCount||a->reminderCount!=b->reminderCount) return 0;
+    for(i=0;i<a->taskCount;i++) if(a->tasks[i].status!=b->tasks[i].status||strcmp(a->tasks[i].name,b->tasks[i].name)) return 0;
+    for(i=0;i<a->reminderCount;i++){
+        const Reminder *x=&a->reminders[i], *y=&b->reminders[i];
+        if(x->from.year!=y->from.year||x->from.month!=y->from.month||x->from.day!=y->from.day||x->duration!=y->duration||strcmp(x->text,y->text)) return 0;
+    }
+    return 1;
+}
+static void write_bin(const char *dir, const char *name, const State *s, uint32_t generation){
+    static Blob b; static uint8_t rec[RECORD_SIZE]; char path[256];
+    encode_state(s,&b); assert(b.size==WIRE_SIZE);
+    put32(rec,SAVE_MAGIC); put32(rec+4,generation); put32(rec+8,(uint32_t)b.size);
+    memcpy(rec+12,b.bytes,b.size); put32(rec+RECORD_SIZE-4,crc32(rec,RECORD_SIZE-4));
+    jpath(path,dir,name); spit(path,(const char*)rec,RECORD_SIZE);
+}
+static void fresh_dir(const char *dir){ rm_tree(dir); mkdir(dir,0755); lps_set_data_dir(dir); lps_ensure_dirs(); }
+static void sample_state(State *s, unsigned days){
+    unsigned i;
+    state_init(s); s->language=LANG_FR; s->palette=PAL_ORANGE; s->xp=990;
+    for(i=0;i<days;i++){
+        Day *d=&s->history[s->next]; d->date.year=2026; d->date.month=(uint8_t)(9+i/28); d->date.day=(uint8_t)(1+i%28);
+        d->number=1+i; d->flags=(uint16_t)(0x1111u<<(i%4)); d->expected=i%2?-1:(int32_t)(80000+i); d->actual=81000;
+        sprintf(d->note,"Jour %u : \"bien\" \\ fin",i);
+        s->next=(uint8_t)((s->next+1)%HISTORY_LENGTH); if(s->count<HISTORY_LENGTH) s->count++;
+    }
+    s->today.number=1+days; s->today.flags=0x8001; strcpy(s->today.note,"Café à l'église, très tôt");
+    s->taskCount=2; s->tasks[0].status=TASK_DOING; strcpy(s->tasks[0].name,"Réparer le vélo");
+    s->tasks[1].status=TASK_DONE; strcpy(s->tasks[1].name,"Plan \\ \"B\"");
+    s->reminderCount=1; s->reminders[0].from=DEFAULT_DATE; s->reminders[0].duration=365; strcpy(s->reminders[0].text,"Fête de Noël");
+}
+static void check_json_saves(const char *dir){
+    static State s, s2, out; static unsigned char store[8192];
+    char pa[256], pb[256], pba[256], pbb[256], path[256]; uint32_t gen=0, check=0; int active=-1; size_t n, n2;
+    App *app=(App*)store; Platform *hw;
+    jpath(pa,dir,"SAVE_A.JSN"); jpath(pb,dir,"SAVE_B.JSN"); jpath(pba,dir,"SAVE_A.BIN"); jpath(pbb,dir,"SAVE_B.BIN");
+
+    /* 1. Round trip, A/B alternation, generations, UTF-8 text in the file. */
+    fresh_dir(dir); sample_state(&s,31+5); /* the ring wrapped */
+    assert(save_load(dir,&out,&gen,&active)==LOAD_MISSING);
+    gen=0; active=-1;
+    assert(save_store(dir,&s,&gen,&active) && gen==1 && active==0 && exists(pa) && !exists(pb));
+    assert(save_store(dir,&s,&gen,&active) && gen==2 && active==1 && exists(pb));
+    assert(save_store(dir,&s,&gen,&active) && gen==3 && active==0);
+    assert(!exists(pba) && !exists(pbb));
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==3 && active==0 && same_state(&s,&out) && out.count==31);
+    n=slurp(pa,jbuf,sizeof(jbuf));
+    assert(strstr(jbuf,"{\"format\":\"lps-companion\",\"version\":2,\"generation\":3,\n\"state\":{\"language\":\"fr\",\"palette\":\"orange\",\"xp\":990,\n\"activities\":[\n{\"id\":1,\"fr\":\"Marche\",\"en\":\"Walk\"},")==jbuf);
+    assert(strstr(jbuf,"{\"id\":22,\"fr\":\"M\xc3\xa9" "ditation\",\"en\":\"Meditation\"}],\n\"today\":{"));
+    assert(strstr(jbuf,"\"activities\":[\"Marche\",\"Shopping\"],\"expected\":null,\"actual\":null,\"note\":\"Caf\xc3\xa9 \xc3\xa0 l'\xc3\xa9glise, tr\xc3\xa8s t\xc3\xb4t\"}"));
+    assert(strstr(jbuf,"{\"status\":\"doing\",\"name\":\"R\xc3\xa9parer le v\xc3\xa9lo\"},\n{\"status\":\"done\",\"name\":\"Plan \\\\ \\\"B\\\"\"}],"));
+    assert(strstr(jbuf,"\"note\":\"Jour 35 : \\\"bien\\\" \\\\ fin\"}],\n\"kanban\":["));
+    assert(strstr(jbuf,"],\n\"meals\":{\"played\":[]},\n\"homeHidden\":[]},\n\"crc32\":\"") && jbuf[n-1]=='\n' && jbuf[n-2]=='}');
+
+    /* 2. PicoCalc fixtures (tools/picocalc_fixture.cpp, the PicoCalc v1.15 writer):
+     * DOS reads them and writes back the very same bytes. */
+    fresh_dir(dir); copy_file("tests/fixtures/picocalc_custom.jsn",pa);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==7 && active==0);
+    assert(out.language==LANG_FR && out.palette==PAL_BLUE && out.xp==4321);
+    assert(out.today.number==40 && out.today.flags==(1u<<3)); /* Messe; Sport, Projet perso, Vélo, Chess are kept aside */
+    assert(!strcmp(out.today.note,"Noël en famille, gâteau à l'orange") && out.today.expected==82500 && out.today.actual==-1);
+    assert(out.count==5 && out.next==5);
+    assert(ring(&out,1)->number==36 && ring(&out,1)->flags==1u && !strcmp(ring(&out,1)->note,"Séance à la piscine, très bien"));
+    assert(ring(&out,2)->flags==((1u<<0)|(1u<<2)|(1u<<5))); /* the frozen "Projet" is the DOS Projet */
+    assert(ring(&out,3)->flags==((1u<<0)|(1u<<9)));
+    assert(out.taskCount==3 && out.tasks[0].status==TASK_DOING && !strcmp(out.tasks[0].name,"Réparer le vélo"));
+    assert(!strcmp(out.tasks[1].name,"Écrire à Hélène") && !strcmp(out.tasks[2].name,"Plan \\ \"B\""));
+    assert(out.reminderCount==2 && !strcmp(out.reminders[0].text,"Anniversaire de François") && out.reminders[0].duration==30);
+    jpath(path,dir,"OUT.JSN");
+    assert(jsave_write(path,&out,7,&check));
+    n=slurp("tests/fixtures/picocalc_custom.jsn",jbuf,sizeof(jbuf)); n2=slurp(path,jbuf2,sizeof(jbuf2));
+    assert(n==n2 && !memcmp(jbuf,jbuf2,n));
+    /* Through the app: tick Marche, close the day; the next slot keeps the
+     * PicoCalc data, names in catalog order ("Marche" is 17th there). */
+    hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    if(app_screen(app)==SCR_REMINDER_POPUP) app_key(app,KEY_ENTER);
+    assert(app_screen(app)==SCR_HOME);
+    app_key(app,'1'); app_key(app,'1'); app_key(app,KEY_ESCAPE); /* tick Marche on DOS */
+    app_key(app,'9'); assert(app_screen(app)==SCR_FINISH); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD);
+    n=slurp(pb,jbuf,sizeof(jbuf)); /* the tick, saved when leaving Activities */
+    assert(strstr(jbuf,"\"generation\":8,") && strstr(jbuf,"\"meals\":{\"played\":[3,0,15]},"));
+    n=slurp(pa,jbuf,sizeof(jbuf)); /* the closed day */
+    assert(strstr(jbuf,"\"generation\":9,"));
+    assert(strstr(jbuf,"{\"id\":24,\"fr\":\"\",\"en\":\"Chess\"}],"));
+    assert(strstr(jbuf,"{\"date\":\"2026-11-14\",\"number\":40,\"activities\":[\"Sport\",\"Messe\",\"Projet perso\",\"Marche\",\"V\xc3\xa9lo\",\"Chess\"],"));
+    assert(strstr(jbuf,"\"number\":36,\"activities\":[\"Sport\",\"Marche\",\"V\xc3\xa9lo\",\"Tai-chi\"],"));
+    assert(strstr(jbuf,"\"today\":{\"date\":\"2026-11-15\",\"number\":41,\"activities\":[],"));
+    assert(strstr(jbuf,"\"meals\":{\"played\":[]},\n\"homeHidden\":[\"kanban\",\"rosary\"]},")); /* new day, new deck */
+    /* Full PicoCalc state (all 22 activities, 31 days, 24 tasks, quotes and backslashes). */
+    fresh_dir(dir); copy_file("tests/fixtures/picocalc_full.jsn",pb);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==41 && active==1 && out.count==31 && out.taskCount==24 && out.reminderCount==3);
+    assert(out.today.flags==0xffffu && out.today.number==100 && !strcmp(out.today.note,"Note 100: \"quoted\" back\\slash y"));
+    jpath(path,dir,"OUT.JSN");
+    assert(jsave_write(path,&out,41,&check));
+    n=slurp("tests/fixtures/picocalc_full.jsn",jbuf,sizeof(jbuf)); n2=slurp(path,jbuf2,sizeof(jbuf2));
+    assert(n==n2 && !memcmp(jbuf,jbuf2,n));
+    assert(save_store(dir,&out,&gen,&active) && gen==42 && active==0); /* B active: the next save writes A */
+
+    /* 3. Migration from SAVE_A/B.BIN: the newest BIN loads, the app writes
+     * SAVE_A.JSN at once, the BIN files stay byte-for-byte untouched. */
+    fresh_dir(dir); sample_state(&s,3); strcpy(s.today.note,"ASCII only in BIN");
+    strcpy(s.tasks[0].name,"Fix the bike"); strcpy(s.reminders[0].text,"Christmas party");
+    s2=s; s2.xp=1000; s2.today.flags=0x0042;
+    write_bin(dir,"SAVE_A.BIN",&s,5); write_bin(dir,"SAVE_B.BIN",&s2,6);
+    n=slurp(pba,jbuf2,sizeof(jbuf2));
+    assert(save_load(dir,&out,&gen,&active)==LOAD_MIGRATED && gen==6 && active==-1 && same_state(&out,&s2));
+    hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    assert(exists(pa) && !exists(pb) && !app_is_dirty(app));
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==7 && active==0 && same_state(&out,&s2));
+    assert(slurp(pba,jbuf,sizeof(jbuf))==n && !memcmp(jbuf,jbuf2,n));
+    write_bin(dir,"SAVE_C.BIN",&s2,6); jpath(path,dir,"SAVE_C.BIN"); n=slurp(path,jbuf2,sizeof(jbuf2)); /* B as written */
+    assert(slurp(pbb,jbuf,sizeof(jbuf))==n && !memcmp(jbuf,jbuf2,n));
+    /* Older BIN slot newer than the damaged other one: A wins. */
+    fresh_dir(dir); write_bin(dir,"SAVE_A.BIN",&s,9); spit(pbb,"junk",4);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_MIGRATED && gen==9 && same_state(&out,&s));
+    /* A first JSON write that was cut short: still migrates from BIN. */
+    spit(pa,"{\"format\":\"lps-comp",19);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_MIGRATED && gen==9);
+    /* Both JSON slots damaged: the BIN files are older data, so nothing loads. */
+    spit(pb,"{}",2);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_ERROR);
+    /* A damaged JSON slot and no BIN at all: protected, not a fresh start. */
+    fresh_dir(dir); spit(pa,"{",1);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_ERROR);
+
+    /* 4. A damaged slot falls back to the other one. */
+    fresh_dir(dir); sample_state(&s,2); s2=s; s2.xp=5;
+    gen=0; active=-1;
+    assert(save_store(dir,&s2,&gen,&active) && save_store(dir,&s,&gen,&active) && save_store(dir,&s2,&gen,&active)); /* A:3 B:2 */
+    n=slurp(pa,jbuf,sizeof(jbuf)); jbuf[n/2]^=0x20; spit(pa,jbuf,n); /* corrupt the newest, A */
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==2 && active==1 && same_state(&out,&s));
+    assert(save_store(dir,&out,&gen,&active) && gen==3 && active==0); /* rewrites the damaged A */
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==3 && active==0);
+    n=slurp(pb,jbuf,sizeof(jbuf)); spit(pb,jbuf,n-30); /* truncated B, A still fine */
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==3 && active==0);
+    /* Files from another writer (first line in another order, spaces) are
+     * read in full; the newer valid slot still wins, a tie goes to A. */
+    assert(save_store(dir,&s,&gen,&active) && gen==4 && active==1); /* a sound B again */
+    n=slurp(pa,jbuf,sizeof(jbuf));
+    { char *nl=strchr(jbuf,'\n'); char head[96]; assert(nl);
+      sprintf(head,"{ \"generation\" : 7 , \"version\":2,\"format\":\"lps-companion\",");
+      memmove(jbuf+strlen(head),nl+1,strlen(nl+1)+1); memcpy(jbuf,head,strlen(head)); resign(jbuf); spit(pa,jbuf,strlen(jbuf)); }
+    assert(jsave_peek(pa,&check,&gen)==SAVE_DAMAGED && jsave_read(pa,&out,&gen,&check)==SAVE_VALID && gen==7);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==7 && active==0);
+    n=slurp(pb,jbuf,sizeof(jbuf)); { char *g=strstr(jbuf,"\"generation\":"); assert(g); memcpy(g+13,"8,",2); } resign(jbuf); spit(pb,jbuf,strlen(jbuf));
+    assert(strstr(jbuf,"\"generation\":8,"));
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==8 && active==1);
+    n=slurp(pb,jbuf,sizeof(jbuf)); { char *g=strstr(jbuf,"\"generation\":"); memcpy(g+13,"7,",2); } resign(jbuf); spit(pb,jbuf,strlen(jbuf));
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==7 && active==0); /* tie: A */
+    copy_file(pb,pa); assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==7 && active==0); /* tie, both short form: A */
+    /* App on a protected save: writes are blocked. */
+    spit(pa,"x",1); spit(pb,"{",1); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    assert(any_row(hw,"Read error: save protected") || any_row(hw,"Erreur lecture"));
+    app_key(app,'1'); app_key(app,'1'); app_key(app,KEY_ESCAPE); app_flush_save(app);
+    assert(slurp(pa,jbuf,sizeof(jbuf))==1 && slurp(pb,jbuf,sizeof(jbuf))==1); /* nothing written */
+
+    /* 5. Unknown keys are skipped (top level, state, days, tasks, reminders,
+     * catalog, meals); crc32 must be right and last; a newer schema is refused. */
+    fresh_dir(dir); sample_state(&s,2);
+    gen=0; active=-1; assert(save_store(dir,&s,&gen,&active));
+    n=slurp(pa,jbuf,sizeof(jbuf));
+    insert_after(jbuf,"\"generation\":1,","\"device\":{\"name\":\"PicoCalc\",\"list\":[1,2.5e3,-4,true,false,null,{\"a\":[[]]}]},");
+    insert_after(jbuf,"\"xp\":990,","\"theme\":\"dark\",\"aVeryLongUnknownKeyNameIndeed\":{\"x\":\"\\u00e9\\ud83d\\ude00\"},");
+    insert_after(jbuf,"\"today\":{","\"mood\":[\"ok\"],");
+    insert_after(jbuf,"{\"status\":\"doing\",","\"due\":null,");
+    insert_after(jbuf,"\"days\":365,","\"snooze\":3,");
+    insert_after(jbuf,"{\"id\":5,","\"icon\":\"work\",");
+    insert_after(jbuf,"\"meals\":{","\"date\":\"2026-09-17\",");
+    resign(jbuf); spit(pa,jbuf,strlen(jbuf));
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==1 && same_state(&out,&s));
+    jpath(path,dir,"OUT.JSN"); assert(jsave_write(path,&out,1,&check)); /* unknown keys are not written back */
+    n2=slurp(path,jbuf2,sizeof(jbuf2)); assert(!strstr(jbuf2,"device") && !strstr(jbuf2,"mood") && !strstr(jbuf2,"icon"));
+    { char *c=strstr(jbuf,"\"crc32\""); c[10]^=1; spit(pa,jbuf,strlen(jbuf)); } /* wrong CRC */
+    assert(jsave_read(pa,&out,&gen,&check)==SAVE_DAMAGED);
+    n=slurp(path,jbuf,sizeof(jbuf)); /* nothing may follow crc32 */
+    { char *end=strrchr(jbuf,'}'); strcpy(end,",\"late\":1}\n"); resign(jbuf); spit(pa,jbuf,strlen(jbuf)); }
+    assert(jsave_read(pa,&out,&gen,&check)==SAVE_DAMAGED);
+    n=slurp(path,jbuf,sizeof(jbuf)); { char *v=strstr(jbuf,"\"version\":2"); v[10]='3'; }
+    resign(jbuf); spit(pa,jbuf,strlen(jbuf)); remove(pb);
+    assert(jsave_read(pa,&out,&gen,&check)==SAVE_UNSUPPORTED);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_ERROR);
+    /* Schema 1 (no catalog) loads with the default list of 22, written back. */
+    n=slurp(path,jbuf,sizeof(jbuf)); { char *v=strstr(jbuf,"\"version\":2"); v[10]='1'; }
+    remove_span(jbuf,"\"activities\":[\n{","}],\n");
+    resign(jbuf); spit(pa,jbuf,strlen(jbuf));
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && same_state(&out,&s));
+    assert(jsave_write(path,&out,1,&check)); slurp(path,jbuf,sizeof(jbuf));
+    assert(strstr(jbuf,"{\"id\":17,\"fr\":\"Sport\",\"en\":\"Sport\"}") && strstr(jbuf,"\"version\":2,"));
+    /* Text CP437 lacks becomes '?'; \u escapes are decoded. */
+    n=slurp(path,jbuf,sizeof(jbuf));
+    { char *note=strstr(jbuf,"\"note\":\"Caf"); assert(note);
+      insert_after(note,"\"note\":\"","\\u00e9t\xc3\xa9 \xe2\x80\x93 \xe2\x82\xac \xc5\x93 \\ud83d\\ude00 "); }
+    resign(jbuf); spit(pa,jbuf,strlen(jbuf));
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK);
+    assert(!strncmp(out.today.note,"été ? ? ? ? Café",strlen("été ? ? ? ? Café")));
+    /* Field limits as on the PicoCalc: a 33-byte task name is damage. */
+    n=slurp(path,jbuf,sizeof(jbuf));
+    { char *name=strstr(jbuf,"\"name\":\"R"); assert(name); insert_after(name,"\"name\":\"","0123456789abcdef0123"); }
+    resign(jbuf); spit(pa,jbuf,strlen(jbuf));
+    assert(jsave_read(pa,&out,&gen,&check)==SAVE_DAMAGED);
+    jsave_reset();
+}
+
 int main(void){
     const char *tmpdir="/tmp/lps-msdos-test";
     State s, out; Blob b; int32_t g=0; Date calendar; Day day;
     char icsbuf[2048]; char export_dir[200], weights_dir[200];
-    uint8_t payload[BLOB_CAPACITY]; size_t psz=0; uint32_t gen=0; int active=0;
+    uint32_t gen=0; int active=-1;
     Platform *hw; App *app; static unsigned char store[8192];
     assert(lps_buffers_init() && lps_buffers_init()); /* idempotent */
     rm_tree(tmpdir); mkdir(tmpdir,0755);
@@ -422,16 +662,12 @@ int main(void){
     assert(out.reminderCount==1 && strcmp(out.reminders[0].text,"Call dentist")==0);
     assert(out.palette==PAL_RED);
 
-    /* A/B write/load */
-    gen=0; active=0;
-    assert(save_write_ab(tmpdir,b.bytes,b.size,&gen,&active));
-    assert(gen==1);
-    assert(save_load_ab(tmpdir,payload,sizeof(payload),&psz,&gen,&active)==LOAD_OK);
-    assert(psz==WIRE_SIZE && decode_state(payload,psz,&out));
-
-    /* Round-trip again to other slot */
-    assert(save_write_ab(tmpdir,b.bytes,b.size,&gen,&active));
-    assert(gen==2);
+    /* A/B write/load (JSON, LPS-DOS-115-CHG04; more in check_json_saves) */
+    gen=0; active=-1;
+    assert(save_store(tmpdir,&s,&gen,&active) && gen==1 && active==0);
+    assert(save_load(tmpdir,&out,&gen,&active)==LOAD_OK && gen==1 && active==0);
+    assert(out.xp==70 && out.today.flags==0x1ff && strcmp(out.tasks[0].name,"Write docs")==0);
+    assert(save_store(tmpdir,&s,&gen,&active) && gen==2 && active==1);
 
     day=s.today;
     assert(build_ics(&day, 110, 40, LANG_EN, icsbuf, sizeof(icsbuf)));
@@ -494,9 +730,8 @@ int main(void){
     rm_tree(tmpdir); mkdir(tmpdir,0755);
     assert(write_v12_fixture(tmpdir));
     {
-        enum LoadResult r=save_load_ab(tmpdir,payload,sizeof(payload),&psz,&gen,&active);
-        assert(r==LOAD_OK);
-        assert(decode_state(payload,psz,&out));
+        enum LoadResult r=save_load(tmpdir,&out,&gen,&active);
+        assert(r==LOAD_MIGRATED && gen==50 && active==-1);
         assert(out.xp==90 && out.language==LANG_EN);
         assert(out.today.number==3 && out.today.flags==1025);
         assert(out.today.expected==110500 && out.today.actual==111250);
@@ -504,8 +739,8 @@ int main(void){
         assert(out.count==2 && out.next==2);
         assert(out.history[1].flags==512 && out.history[1].actual==111500);
         assert(strcmp(out.history[1].note,"Yesterday from v1.2")==0);
-        printf("fixture SAVE ok version decoded xp=%lu tasks=%u reminders=%u gen=%lu slot=%c\n",
-            (unsigned long)out.xp,(unsigned)out.taskCount,(unsigned)out.reminderCount,(unsigned long)gen, active?'B':'A');
+        printf("fixture v1.2 SAVE_A.BIN migrated xp=%lu tasks=%u reminders=%u gen=%lu\n",
+            (unsigned long)out.xp,(unsigned)out.taskCount,(unsigned)out.reminderCount,(unsigned long)gen);
     }
 
     /* mystery weekday: 2026-10-01 Thursday -> Luminous */
@@ -559,8 +794,9 @@ int main(void){
     check_timer(tmpdir);
     check_french_cp437(tmpdir);
     check_wrap(tmpdir);
+    check_json_saves(tmpdir);
 
-    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, fixture decode (%u captures)\n", 0);
+    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback, unknown keys, newer schema), fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

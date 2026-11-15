@@ -6,8 +6,8 @@ A full port of [LPS Companion v1.11](https://github.com/TME520/LPS-Companion-Pic
 for Intel **8088**-class PCs with **640 KB** conventional memory. Keyboard only
 (no mouse). Text mode **80×25** (content laid out in 40 columns, same as the
 Companion). Data lives under `C:\LPS\` by default and uses the **same**
-`SAVE_A.BIN` / `SAVE_B.BIN`, `EXPORT\*.ics` and `WEIGHTS\*.csv` formats as the
-PicoCalc firmware and LPS Console.
+`SAVE_A.JSN` / `SAVE_B.JSN` (JSON save, schema 2), `EXPORT\*.ics` and
+`WEIGHTS\*.csv` formats as the PicoCalc firmware v1.13 and later.
 
 Ready-to-run files are at the **repository root** (the directory above this one): [`../LPSCOMP.EXE`](../LPSCOMP.EXE), [`../ROSARY.DAT`](../ROSARY.DAT) and [`../HELLO.EXE`](../HELLO.EXE). Copy **both `LPSCOMP.EXE` and `ROSARY.DAT` into the same directory** on the Book 8088; `ROSARY.DAT` holds the rosary prayer texts. Without it everything works except the Rosary, which then shows *ROSARY.DAT not found: copy it next to LPSCOMP.EXE*. `make dos`, `make rosary` and `make hello` rebuild into this directory only; those local copies are gitignored. After a source change, copy the new files up (`cp LPSCOMP.EXE ROSARY.DAT HELLO.EXE ..`) so the root copies stay current. CI rebuilds and fails if the root files differ.
 
@@ -23,6 +23,13 @@ The **Timer / Minuteur** offers **5, 30 or 60 minutes** (LPS-DOS-115-CHG02b, as 
 
 French is shown with its accents (LPS-DOS-115-CHG03): **Activités, Journée, Rosaire chrétien, Revue journalière, Février, Août, Décembre…**, with the PicoCalc's wording, in the PC's own code page 437 font. CP437 has é è ê ë à â ä ç î ï ô û ù ü and É, but no other accented capitals, so À, È, Ê, Ô and Â show without their accent (À FAIRE → A FAIRE, NOTRE PÈRE → NOTRE PERE, TÂCHE → TACHE). Files stay UTF-8 like the PicoCalc's: a French ICS now writes `Activités:` and accented activity names exactly as the PicoCalc does (earlier DOS builds wrote `Activites:`). See *Text encoding* below. A note already saved by an older version is kept in the save and still exported to the ICS (`\NNote: ...`) when its day is closed; it is no longer shown or editable.
 
+Saves are JSON files, `SAVE_A.JSN` and `SAVE_B.JSN`, exactly as on the PicoCalc v1.13 and later (LPS-DOS-115-CHG04, PicoCalc LPS-113-CHG06). The data folder can be copied both ways between the PicoCalc SD card (`LPS/`) and `C:\LPS\`: the two machines write the same schema 2 file, with the same keys in the same order, the A/B alternation, the generation number and the CRC-32 as the last key, and each machine opens the other's saves.
+- **Migration**: when `C:\LPS\` has no `.JSN` save yet, LPSCOMP reads the old `SAVE_A.BIN`/`SAVE_B.BIN` (formats v1 to v6, as before) and writes `SAVE_A.JSN` at start-up. The `.BIN` files are never modified or deleted; they stay as a backup. A `.JSN` save cannot be read by an earlier DOS build.
+- **PicoCalc data that DOS does not use yet is kept**: the activity catalog (custom, renamed and reordered activities, as `{"id","fr","en"}` entries), activity names in closed days that are not in the 16 DOS activities, the Meal Planner deck (`"meals":{"played":[…]}`) and the hidden Home entries (`"homeHidden"`). DOS writes them back unchanged. Closing the day on DOS resets the meal deck, as the PicoCalc does. A DOS tick on an activity that the PicoCalc renamed goes under the PicoCalc's name, as it does there.
+- **Text** (notes, tasks, reminders) is UTF-8 in the file, as on the PicoCalc, and CP437 on screen. A character that CP437 does not have (for example `€`, `œ` or an emoji) is read as `?` and written back as `?`.
+- Unknown keys are skipped, as on the PicoCalc, and are not written back. A save from a newer schema (version 3 or later) is refused and protected: LPSCOMP shows the read error and does not overwrite it.
+- After each write, LPSCOMP reads the file back and checks its CRC-32 and generation before it marks the slot as current. The PicoCalc parses the whole file again at this point; DOS checks the CRC only, which is much faster on the 8088.
+
 ![Home screen](captures/01-home-en.png)
 
 ![Home screen, French](captures/06-home-fr.png)
@@ -31,7 +38,7 @@ French is shown with its accents (LPS-DOS-115-CHG03): **Activités, Journée, Ro
 
 - MS-DOS 3.3+ / FreeDOS / MS-DOS 7.x (FAT12/16)
 - Intel 8088 or compatible (EXE built with Open Watcom `-0`)
-- ~75 KB free disk for `LPSCOMP.EXE` (~65 KB) and `ROSARY.DAT` (~10 KB); data folder grows with history
+- ~87 KB free disk for `LPSCOMP.EXE` (~77 KB) and `ROSARY.DAT` (~10 KB); the data folder grows with history (each JSON save is up to about 10 KB)
 - Colour text (CGA/EGA/VGA) for palettes; mono still readable
 - Open Watcom C/C++ (v2) to build; gcc to run the host tests
 
@@ -51,7 +58,8 @@ French is shown with its accents (LPS-DOS-115-CHG03): **Activités, Journée, Ro
 | Timer 5/30/60, keys 1-3 (BIOS tick) | Yes |
 | Close day (XP and keepsakes hidden, as in v1.12) | Yes |
 | 31-day history ←/→ | Yes |
-| Dual A/B SAVE + CRC + v1–v6 migrate | Yes (read **and** write) |
+| Dual A/B JSON save (`SAVE_A/B.JSN`, schema 2) + CRC | Yes (read **and** write, PicoCalc-compatible) |
+| `SAVE_A/B.BIN` v1–v6 migration | Yes (read once; `.BIN` files left untouched) |
 | ICS + weights CSV byte-compatible | Yes |
 
 ## Build
@@ -99,7 +107,7 @@ for f in src/*.c src/*.h tests/test_storage.c tools/mkrosary.c; do
   ./tools/cp437 "$f" build/cp437/$(basename "$f"); done
 G=build/cp437
 wcl -0 -bt=dos -ml -zt256 -ox -fpc -k4096 -dLPS_DOS -i=$G -fe=LPSCOMP.EXE \
-  $G/state.c $G/ics.c $G/save.c $G/paths.c $G/rosary.c $G/app.c $G/cp437.c $G/wrap.c \
+  $G/state.c $G/ics.c $G/save.c $G/jsave.c $G/paths.c $G/rosary.c $G/app.c $G/cp437.c $G/wrap.c \
   $G/plat_dos.c $G/main.c
 ```
 
@@ -107,7 +115,23 @@ wcl -0 -bt=dos -ml -zt256 -ox -fpc -k4096 -dLPS_DOS -i=$G -fe=LPSCOMP.EXE \
 
 `make test` builds `tools/mkrosary` and `ROSARY.DAT`, then
 `tests/test_storage` from the CP437 copies, and runs it from this directory so
-it finds `tests/fixtures/v12_payload.bin` and `ROSARY.DAT`.
+it finds `tests/fixtures/v12_payload.bin`, the PicoCalc JSON saves
+`tests/fixtures/picocalc_*.jsn` and `ROSARY.DAT`. The JSON tests cover the
+round trip and A/B alternation, byte-identical rewriting of the PicoCalc
+fixtures, BIN migration, a damaged A falling back to B, unknown keys and a
+newer schema.
+
+`tools/picocalc_fixture.cpp` builds the PicoCalc's own save code (from a
+checkout of [LPS-Companion-PicoCalc](https://github.com/TME520/LPS-Companion-PicoCalc))
+to regenerate the fixtures or to check a DOS save with the PicoCalc reader:
+
+```sh
+P=/path/to/LPS-Companion-PicoCalc
+g++ -std=c++17 -I$P/src -I$P/tests -o /tmp/pcfix tools/picocalc_fixture.cpp
+/tmp/pcfix full tests/fixtures/picocalc_full.jsn
+/tmp/pcfix custom tests/fixtures/picocalc_custom.jsn
+/tmp/pcfix check C:/LPS/SAVE_A.JSN      # prints valid / damaged / ...
+```
 
 ### Text encoding (LPS-DOS-115-CHG03)
 
@@ -123,9 +147,10 @@ it finds `tests/fixtures/v12_payload.bin` and `ROSARY.DAT`.
   Ô → O, œ → oe, curly quotes and dashes → ASCII). Any other character stops
   the build with its file and line, so nothing is lost silently.
 - **Files are UTF-8**, byte for byte like the PicoCalc: `ics.c` turns CP437
-  bytes back into UTF-8 (`cp437_to_utf8`, same table as the tool). User text
-  (notes, tasks, reminders) is printable ASCII only, as on the PicoCalc, so
-  the saves and the weights CSV do not change.
+  bytes back into UTF-8 (`cp437_to_utf8`, same table as the tool). The JSON
+  save (LPS-DOS-115-CHG04) converts user text (notes, tasks, reminders) from
+  UTF-8 to CP437 on read and back on write with the same table; a character
+  CP437 lacks becomes `?`.
 - This was chosen over hand-written `\x82` escapes: those are hard to read,
   easy to get wrong (`"\x82e"` is one byte, not two) and cannot be compared
   with the PicoCalc's sources.
@@ -134,8 +159,9 @@ it finds `tests/fixtures/v12_payload.bin` and `ROSARY.DAT`.
 
 The EXE uses Open Watcom's **large model** (`-ml`): far data pointers and one
 code segment per module. The 64 KB DGROUP (near data + 4 KB stack) used to be
-almost full (63,088 bytes); it is now about 14 KB, which leaves room for the
-JSON save, more activities and the EGA Meal Planner.
+almost full (63,088 bytes); it is now about 16 KB (16,704 bytes with
+LPS-DOS-115-CHG04), which leaves room for more activities and the EGA Meal
+Planner.
 
 - The prayer texts are not in the EXE. `tools/mkrosary` builds `ROSARY.DAT`
   from `src/rosary_text.c`, the single source of the texts, and LPSCOMP loads
@@ -143,10 +169,16 @@ JSON save, more activities and the EGA Meal Planner.
   `LPSCOMP` looks for it next to itself (the path in `argv[0]`), then in the
   current directory. A missing or damaged file shows a message on Home; it
   never crashes.
-- The big work buffers (two `State` copies, the encoded save, both SAVE
-  records, the ICS and CSV export buffers) are one far-heap block allocated
-  at start-up (`lps_buffers_init`), as are the `App` and the screen shadow.
-  The CSV buffer used to be an 8 KB local on the 4 KB stack.
+- The big work buffers (two `State` copies, the legacy BIN record, the ICS
+  and CSV export buffers) are one far-heap block allocated at start-up
+  (`lps_buffers_init`), as are the `App` and the screen shadow. The CSV buffer
+  used to be an 8 KB local on the 4 KB stack.
+- The JSON save (`jsave.c`) reads a whole slot into one far-heap buffer (up to
+  65,000 bytes, freed at once) and parses it in a single pass with a pointer,
+  without recursion or big locals. Writing goes through a 512-byte near buffer
+  and folds each chunk into the CRC-32. The PicoCalc data DOS keeps without
+  using it (activity catalog, day names, meals, hidden Home entries) sits in a
+  ~27 KB far-heap block.
 - `ROSARY.DAT` layout (little-endian): `LPSROSRY` magic, u16 version 2,
   u16 string count (138: 69 texts × EN/FR), u32 payload size, u32 CRC-32 of the
   payload, then a u16 offset table and the NUL-terminated strings: printable
@@ -189,10 +221,17 @@ unshifted top-row maps to digits for Date/Weight.
 ### Deferred SAVE (Book 8088 HDD)
 
 Edits (date, activities, weight, kanban, …) update **RAM only** and set a dirty
-flag. Disk write of one `SAVE_A`/`SAVE_B` slot (~4.6 KB) happens on:
+flag. Disk write of one `SAVE_A.JSN`/`SAVE_B.JSN` slot (2 to 10 KB) happens on:
 Esc back to Home (if dirty), confirming Date/Weight/Config, Close the day,
-and Quit (`Q`). Status shows `Saving...` / `Saved`. Post-write verify-read was
-removed (too slow on 8088 + tiny HDD).
+and Quit (`Q`). Status shows `Saving...` / `Saved`. Since LPS-DOS-115-CHG04 the
+written slot is read back and its CRC-32 checked (no full re-parse), so a bad
+write never replaces the good slot.
+
+Measured in DOSBox Staging, `cputype=8086`, `cycles=fixed 300` (about a
+4.77 MHz 8088; disk time on the real machine comes on top): a small save
+(2.3 KB) loads in 0.6 s and saves in 0.7 s; a full one (31 days, 24 tasks,
+about 10 KB) loads in 2.4 s and saves in 3.6 s. The old BIN code took 9.9 s to
+load and 6.2 s to save the same full state.
 
 ### What to try on the Book
 
@@ -260,7 +299,9 @@ the same map (F1–F5 on Kanban, N/Del on Kanban and Reminders, etc.).
 
 ```
 C:\LPS\
-  SAVE_A.BIN     dual-slot snapshots (magic LPR1 + generation + CRC)
+  SAVE_A.JSN     dual-slot JSON saves (schema 2, generation + CRC-32), as on the PicoCalc
+  SAVE_B.JSN
+  SAVE_A.BIN     old saves (before LPS-DOS-115-CHG04): read once for migration, never changed
   SAVE_B.BIN
   EXPORT\YYYYMMDD.ICS        e.g. EXPORT\20260917.ICS
   WEIGHTS\YYYY.csv
@@ -273,16 +314,18 @@ The ICS file name differs from the PicoCalc's `YYYY-MM-DD_LPS-Companion.ics`
 already in `EXPORT\` are left alone. On Linux a FAT disk usually shows these
 names in upper case, so a reader that looks only for `*.ics` misses them.
 
-Files are interchangeable with the PicoCalc SD card and with LPS Console
-imports/exports. Do not change the on-disk layout: `SAVE_A`/`SAVE_B`, ICS, and
-CSV stay byte-compatible with the firmware.
+The folder is interchangeable with the PicoCalc SD card's `LPS/` folder: copy
+`SAVE_A.JSN`, `SAVE_B.JSN`, `EXPORT\` and `WEIGHTS\` either way (copy both
+saves together). Do not change the on-disk layout: the saves, ICS and CSV stay
+byte-compatible with the firmware.
 
 ## Source layout
 
 | File | Role |
 |---|---|
 | `src/state.c` | Dates, ISO week, long date, banked XP, encode/decode v1–v6 |
-| `src/save.c` | A/B SAVE read/write |
+| `src/save.c` | A/B slot choice, load, store and BIN migration |
+| `src/jsave.c` | JSON save (schema 2): single-pass reader, writer, CRC readback, PicoCalc extras |
 | `src/ics.c` | ICS + weights CSV |
 | `src/app.c` | Full UI state machine |
 | `src/rosary.c` | Rosary step engine; loads `ROSARY.DAT` |
@@ -296,6 +339,8 @@ CSV stay byte-compatible with the firmware.
 | `src/hello.c` | `HELLO.EXE` BIOS smoke test |
 | `tests/test_storage.c` | Host encode/decode, ICS, CSV, A/B, `ROSARY.DAT`, v1.2 fixture, French CP437 screens |
 | `tests/fixtures/v12_payload.bin` | Synthetic Companion v1.2 payload |
+| `tests/fixtures/picocalc_*.jsn` | JSON saves written by the PicoCalc's own code |
+| `tools/picocalc_fixture.cpp` | Builds the PicoCalc save code on the host: fixtures and checks |
 
 ## Captures
 
@@ -309,7 +354,7 @@ DOSBox 8086 home grab). Text dumps are not stored; `make captures` rewrites
 
 Port complet de [LPS Companion v1.11](https://github.com/TME520/LPS-Companion-PicoCalc)
 vers MS-DOS 16 bits (8088, 640 Ko), clavier uniquement, mode texte 80×25.
-Memes formats `SAVE_A/B.BIN`, ICS et CSV que le firmware PicoCalc et LPS Console.
+Memes formats `SAVE_A/B.JSN` (sauvegarde JSON, schema 2), ICS et CSV que le firmware PicoCalc v1.13 et suivants.
 
 Seul le nom du fichier ICS differe de la PicoCalc (LPS-DOS-115-CHG02c) : `EXPORT\YYYYMMDD.ICS`, par exemple `EXPORT\20260917.ICS`, au lieu de `YYYY-MM-DD_LPS-Companion.ics`. DOS ne garde que des noms 8.3 et coupait le nom long en `YYYY-MM-.ICS` : tous les jours d'un mois ecrasaient le meme fichier. Le contenu ne change pas, et les anciens fichiers deja dans `EXPORT\` restent en place. Sous Linux, un disque FAT affiche en general ces noms en majuscules : un lecteur qui ne cherche que `*.ics` ne les voit pas.
 
@@ -325,6 +370,13 @@ Comme sur la PicoCalc v1.12, le bloc notes disparait (LPS-DOS-115-CHG02) et le m
 
 Le français s'affiche avec ses accents (LPS-DOS-115-CHG03) : **Activités, Journée, Rosaire chrétien, Revue journalière, Février, Août, Décembre…**, avec le texte exact de la PicoCalc, dans la police du PC (page de code 437). La CP437 a é è ê ë à â ä ç î ï ô û ù ü et É, mais pas les autres capitales accentuées : À, È, Ê, Ô et Â s'affichent sans accent (À FAIRE → A FAIRE, NOTRE PÈRE → NOTRE PERE, TÂCHE → TACHE). Les sources restent en UTF-8 comme celles de la PicoCalc ; `tools/cp437` convertit les chaînes en CP437 à la compilation (voir *Text encoding*). Les fichiers restent en UTF-8 : un ICS en français écrit désormais `Activités:` et les noms d'activités accentués, octet pour octet comme la PicoCalc (les versions DOS précédentes écrivaient `Activites:`). `ROSARY.DAT` passe en version 2 : un ancien fichier est refusé avec *ROSARY.DAT endommagé : recopiez-le* ; copiez toujours `LPSCOMP.EXE` et `ROSARY.DAT` ensemble.
 
+Les sauvegardes sont des fichiers JSON, `SAVE_A.JSN` et `SAVE_B.JSN`, exactement comme sur la PicoCalc v1.13 et suivantes (LPS-DOS-115-CHG04, PicoCalc LPS-113-CHG06). Le dossier de donnees se copie dans les deux sens entre la carte SD de la PicoCalc (`LPS/`) et `C:\LPS\` : les deux machines ecrivent le meme fichier schema 2, memes cles dans le meme ordre, alternance A/B, numero de generation et CRC-32 en derniere cle, et chacune ouvre les sauvegardes de l'autre.
+- **Migration** : si `C:\LPS\` n'a pas encore de sauvegarde `.JSN`, LPSCOMP lit les anciens `SAVE_A.BIN`/`SAVE_B.BIN` (formats v1 a v6, comme avant) et ecrit `SAVE_A.JSN` au demarrage. Les `.BIN` ne sont jamais modifies ni effaces ; ils restent comme copie de secours. Une sauvegarde `.JSN` ne se relit pas avec une version DOS precedente.
+- **Les donnees PicoCalc que DOS n'utilise pas encore sont conservees** : le catalogue d'activites (activites personnalisees, renommees ou reordonnees, entrees `{"id","fr","en"}`), les noms d'activites des jours clos absents des 16 activites DOS, le paquet du planificateur de repas (`"meals":{"played":[…]}`) et les entrees d'accueil masquees (`"homeHidden"`). DOS les reecrit telles quelles. Terminer le jour sur DOS remet le paquet de repas a zero, comme la PicoCalc. Une activite cochee sur DOS et renommee sur la PicoCalc s'enregistre sous le nom de la PicoCalc, comme la-bas.
+- **Le texte** (notes, taches, rappels) est en UTF-8 dans le fichier, comme sur la PicoCalc, et en CP437 a l'ecran. Un caractere absent de la CP437 (par exemple `€`, `œ` ou un emoji) est lu `?` et reecrit `?`.
+- Les cles inconnues sont ignorees, comme sur la PicoCalc, et ne sont pas reecrites. Une sauvegarde d'un schema plus recent (version 3 ou plus) est refusee et protegee : LPSCOMP affiche l'erreur de lecture et ne l'ecrase pas.
+- Apres chaque ecriture, LPSCOMP relit le fichier et verifie son CRC-32 et sa generation avant d'en faire le slot courant. La PicoCalc relit et analyse tout le fichier a ce moment ; DOS verifie seulement le CRC, bien plus rapide sur 8088.
+
 Le **Minuteur** propose **5, 30 ou 60 minutes** (LPS-DOS-115-CHG02b, comme les CHG01/CHG02 de la PicoCalc v1.12). Les touches **1**, **2** et **3** lancent directement une duree, sans Entree. Sur l'ecran de fin, elles relancent aussitot un compte a rebours et Entree revient au choix de la duree ; pendant un compte a rebours, elles sont ignorees et Entree met en pause ou reprend. Le temps vient toujours du tic BIOS (environ 55 ms). Une note deja enregistree par une ancienne version reste dans la sauvegarde et part toujours dans l'ICS (`\NNote: ...`) a la cloture du jour ; elle n'est plus affichee ni modifiable.
 
 ## Book 8088 / materiel reel
@@ -337,6 +389,29 @@ Correctifs : tampons en BSS, pile a **4 Ko** (`-k4096`; elle avait ete montee a
 trop gros sur la pile ; tout est en BSS, clavier en int 16h pur. Les editions
 restent en RAM (drapeau dirty) et un seul slot A/B est ecrit en quittant un
 ecran, en confirmant Date/Poids/Config, en cloturant le jour, ou avec **Q**.
+Depuis LPS-DOS-115-CHG04, le slot ecrit est relu et son CRC-32 verifie.
+
+Mesure sous DOSBox Staging, `cputype=8086`, `cycles=fixed 300` (environ un
+8088 a 4,77 MHz ; le temps disque reel s'ajoute) : une petite sauvegarde
+(2,3 Ko) se charge en 0,6 s et s'ecrit en 0,7 s ; une sauvegarde complete
+(31 jours, 24 taches, environ 10 Ko) se charge en 2,4 s et s'ecrit en 3,6 s.
+L'ancien code BIN mettait 9,9 s a charger et 6,2 s a ecrire le meme etat.
+
+## Donnees
+
+```
+C:\LPS\
+  SAVE_A.JSN     sauvegardes JSON A/B (schema 2, generation + CRC-32), comme sur la PicoCalc
+  SAVE_B.JSN
+  SAVE_A.BIN     anciennes sauvegardes (avant LPS-DOS-115-CHG04) : lues une fois, jamais modifiees
+  SAVE_B.BIN
+  EXPORT\YYYYMMDD.ICS
+  WEIGHTS\YYYY.csv
+```
+
+Le dossier s'echange avec le dossier `LPS/` de la carte SD de la PicoCalc :
+copiez `SAVE_A.JSN`, `SAVE_B.JSN`, `EXPORT\` et `WEIGHTS\` dans un sens ou
+dans l'autre (les deux sauvegardes ensemble).
 
 ## Compilation
 
@@ -359,9 +434,9 @@ DOSBox-X / DOSBox Staging (`cputype=8086`, `machine=ega`) : copier les EXE et `R
 
 ## Empreinte
 
-`LPSCOMP.EXE` fait environ **65 Ko** (modele large, 8086, pile 4 Ko) et `ROSARY.DAT` environ **10 Ko**. `HELLO.EXE` ~3 Ko.
+`LPSCOMP.EXE` fait environ **77 Ko** (modele large, 8086, pile 4 Ko) et `ROSARY.DAT` environ **10 Ko**. `HELLO.EXE` ~3 Ko.
 
-Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) passe d'environ 63 Ko a environ 14 Ko : les textes du rosaire sont dans `ROSARY.DAT`, charge en memoire lointaine a l'ouverture du rosaire, et les gros tampons (copies de `State`, sauvegarde, exports ICS/CSV) sont alloues en memoire lointaine au demarrage. Un `ROSARY.DAT` absent ou abime affiche un message, sans plantage.
+Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) passe d'environ 63 Ko a environ 14 Ko (16,3 Ko avec la sauvegarde JSON de LPS-DOS-115-CHG04) : les textes du rosaire sont dans `ROSARY.DAT`, charge en memoire lointaine a l'ouverture du rosaire, et les gros tampons (copies de `State`, sauvegarde, exports ICS/CSV) sont alloues en memoire lointaine au demarrage. Un `ROSARY.DAT` absent ou abime affiche un message, sans plantage.
 
 ## Ecarts connus
 
@@ -369,3 +444,6 @@ Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) p
   a pas (LPS-DOS-115-CHG03).
 - Pas d'avertissement batterie (pas de materiel equivalent).
 - Config n'a pas d'entree « import SD » : le disque DOS **est** le stockage.
+- Activites personnalisees, planificateur de repas et masquage de l'accueil de
+  la PicoCalc : pas encore sur DOS, mais leurs donnees sont conservees dans la
+  sauvegarde (LPS-DOS-115-CHG04).

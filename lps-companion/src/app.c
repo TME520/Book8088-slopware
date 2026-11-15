@@ -4,10 +4,9 @@
 #include <stdio.h>
 #include <string.h>
 
-/* State (~4.6K) and Blob (~4.7K) must NOT live on the tiny DOS stack, nor in
- * DGROUP: they are in the far-heap buffers (lps_buffers_init). */
+/* State (~4.6K) must NOT live on the tiny DOS stack, nor in DGROUP: the edit
+ * candidate is in the far-heap buffers (lps_buffers_init). */
 #define g_scratch (lps_buf->scratch)
-#define g_blob (lps_buf->blob)
 
 struct App {
     Platform *hw;
@@ -111,8 +110,7 @@ static int flush_save(App *a){
     if(a->missingStorage){ say(a, tr(a,"No storage","Pas de stockage")); return 0; }
     say(a, tr(a,"Saving...","Sauvegarde..."));
     app_render(a);
-    encode_state(&a->state, &g_blob);
-    if(!a->hw->save(a->hw, g_blob.bytes, g_blob.size)){
+    if(!a->hw->save(a->hw, &a->state)){
         say(a, tr(a,"Save failed: restart device","Échec sauvegarde : redémarrer"));
         app_render(a);
         return 0;
@@ -315,12 +313,13 @@ const Day *app_viewed_day(const App *app){
 }
 
 void app_start(App *app){
-    enum LoadResult r; size_t n=0;
-    r=app->hw->load(app->hw,g_blob.bytes,sizeof(g_blob.bytes),&n);
+    enum LoadResult r;
+    r=app->hw->load(app->hw,&app->state);
     if(r==LOAD_NO_STORAGE){ app->blocked=1; app->missingStorage=1; say(app,"[!] Missing SD card!"); }
-    else if(r==LOAD_ERROR || (r==LOAD_OK && !decode_state(g_blob.bytes,n,&app->state))){
+    else if(r==LOAD_ERROR){
         app->blocked=1; say(app, tr(app,"Read error: save protected","Erreur lecture : sauvegarde protégée"));
     }
+    else if(r==LOAD_MIGRATED) app->dirty=1; /* LPS-DOS-115-CHG04: write SAVE_A.JSN now */
     if(!app->blocked){ prune_reminders(app); if(app->dirty) flush_save(app); if(active_reminders(app)) app->screen=SCR_REMINDER_POPUP; }
     app_render(app);
 }
@@ -578,7 +577,7 @@ void app_key(App *a, int k){
                 if(!a->hw->export_ics(a->hw,&a->state.today,a->state.xp+gain,gain,a->state.language)){ say(a,tr(a,"ICS export failed; day remains open","Export ICS échoué ; journée reste ouverte")); app_render(a); return; }
                 g_scratch.xp+=gain; memset(&g_scratch.today,0,sizeof(Day)); g_scratch.today.number=a->state.today.number+1; g_scratch.today.date=tomorrow; g_scratch.today.expected=-1; g_scratch.today.actual=-1;
                 /* LPS-DOS-115-CHG01: XP is still banked in the save for compatibility, never shown. */
-                if(commit(a,&g_scratch) && flush_save(a)) go(a,SCR_REWARD);
+                if(commit(a,&g_scratch)){ jsave_new_day(); if(flush_save(a)) go(a,SCR_REWARD); }
             }
         }
     }else if(a->screen==SCR_REWARD && k==KEY_ENTER) go(a,SCR_HOME);

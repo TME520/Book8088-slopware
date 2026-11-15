@@ -63,7 +63,9 @@ enum Palette { PAL_RED = 0, PAL_GREEN = 1, PAL_BLUE = 2, PAL_ORANGE = 3, PAL_PIN
 enum TaskStatus { TASK_TODO = 0, TASK_DOING = 1, TASK_DONE = 2 };
 enum RosaryMode { ROS_DECADE = 0, ROS_FULL = 1, ROS_GUIDED = 2, ROS_CONTEMP = 3 };
 enum MysterySet { MYS_JOYFUL = 0, MYS_LUMINOUS = 1, MYS_SORROWFUL = 2, MYS_GLORIOUS = 3 };
-enum LoadResult { LOAD_MISSING = 0, LOAD_OK = 1, LOAD_NO_STORAGE = 2, LOAD_ERROR = 3 };
+/* LOAD_MIGRATED: loaded from the old SAVE_A/B.BIN; the app writes a JSON save at once. */
+enum LoadResult { LOAD_MISSING = 0, LOAD_OK = 1, LOAD_NO_STORAGE = 2, LOAD_ERROR = 3, LOAD_MIGRATED = 4 };
+enum SaveCheck { SAVE_MISSING = 0, SAVE_VALID, SAVE_DAMAGED, SAVE_UNSUPPORTED, SAVE_IOERROR };
 enum Screen {
     SCR_TIMER_SELECT = 0, SCR_TIMER_RUNNING, SCR_TIMER_COMPLETE,
     SCR_HOME, SCR_REMINDER_POPUP, SCR_REMINDERS, SCR_REMINDER_EDIT,
@@ -105,8 +107,8 @@ struct Platform {
     void (*present)(Platform *self);
     void (*set_palette)(Platform *self, int palette);
     int  (*battery_low)(Platform *self);
-    enum LoadResult (*load)(Platform *self, uint8_t *bytes, size_t capacity, size_t *size);
-    int  (*save)(Platform *self, const uint8_t *bytes, size_t size);
+    enum LoadResult (*load)(Platform *self, State *out); /* out is set only on LOAD_OK / LOAD_MIGRATED */
+    int  (*save)(Platform *self, const State *s);
     int  (*export_ics)(Platform *self, const Day *day, uint32_t totalXp, uint32_t dayXp, int language);
     int  (*export_weight_csv)(Platform *self, const Day *day);
     void *user;
@@ -127,6 +129,7 @@ uint32_t points(const Day *d);
 int parse_weight(const char *s, int32_t *grams);
 void weight_text(int32_t grams, char *out, size_t n);
 uint32_t crc32(const uint8_t *p, size_t n);
+uint32_t crc32_update(uint32_t c, const uint8_t *p, size_t n); /* running: start 0xffffffff, invert at the end */
 /* cp437.c (LPS-DOS-115-CHG03): screen text is CP437, files are UTF-8. */
 size_t cp437_to_utf8(unsigned char c, char *out); /* out: up to 3 bytes */
 int unicode_to_cp437(unsigned long cp);            /* -1 if CP437 lacks it */
@@ -136,18 +139,18 @@ int cp437_text_byte(unsigned char c);              /* printable ASCII or CP437 l
  * starts; wrap_count returns the number of lines. */
 const char *wrap_line(const char *text, unsigned width, unsigned *len);
 unsigned wrap_count(const char *text, unsigned width);
-void encode_state(const State *s, Blob *b);
+#ifndef LPS_DOS
+void encode_state(const State *s, Blob *b); /* binary format 6: only the tests still write it */
+#endif
 int decode_state(const uint8_t *bytes, size_t size, State *out);
 void state_init(State *s);
 /* Large working buffers (LPS-DOS-115-CHG03b). One block allocated at start-up
  * from the far heap (large model), so they sit outside DGROUP and add no
  * zero-filled bytes to LPSCOMP.EXE. lps_buffers_init() is idempotent. */
 typedef struct {
-    State decode;                 /* decode_state scratch, SAVE validation */
+    State decode;                 /* SAVE parsing / validation scratch */
     State scratch;                /* app: edit candidate before commit */
-    Blob blob;                    /* app: encoded SAVE payload */
-    uint8_t rec_a[RECORD_SIZE];   /* SAVE_A.BIN record / write buffer */
-    uint8_t rec_b[RECORD_SIZE];   /* SAVE_B.BIN record */
+    uint8_t rec[RECORD_SIZE];     /* one old SAVE_A/B.BIN record (migration) */
     char ics[2048];               /* one ICS export */
     char csv[8192];               /* one WEIGHTS\YYYY.csv (was on the stack) */
 } LpsBuffers;
@@ -165,9 +168,21 @@ int build_ics(const Day *day, uint32_t totalXp, uint32_t dayXp, int language, ch
 int write_ics_file(const char *export_dir, const Day *day, uint32_t totalXp, uint32_t dayXp, int language);
 int write_weight_csv(const char *weights_dir, const Day *day);
 
-/* A/B SAVE */
-enum LoadResult save_load_ab(const char *lps_dir, uint8_t *payload, size_t cap, size_t *size, uint32_t *generation_out, int *active_out);
-int save_write_ab(const char *lps_dir, const uint8_t *payload, size_t size, uint32_t *generation, int *active);
+/* JSON save file (jsave.c, LPS-DOS-115-CHG04): PicoCalc v1.15 schema 2. The
+ * catalog, extra day names, Meal Planner deck and hidden home entries the DOS
+ * port does not use are kept inside jsave.c and written back. */
+int jsave_init(void);   /* far-heap tables; 0 = out of memory. Idempotent. */
+void jsave_reset(void); /* forget kept data: default catalog, nothing else */
+void jsave_new_day(void); /* closing the day deals a new Meal Planner deck */
+enum SaveCheck jsave_read(const char *path, State *out, uint32_t *generation, uint32_t *checksum);
+int jsave_write(const char *path, const State *s, uint32_t generation, uint32_t *checksum);
+enum SaveCheck jsave_peek(const char *path, uint32_t *version, uint32_t *generation); /* first line only */
+int jsave_verify(const char *path, uint32_t generation, uint32_t checksum); /* read-back after a write */
+
+/* A/B SAVE (save.c): SAVE_A/B.JSN, migration from SAVE_A/B.BIN.
+ * *active: 0=A, 1=B, -1 = none yet (the next save writes A). */
+enum LoadResult save_load(const char *lps_dir, State *out, uint32_t *generation, int *active);
+int save_store(const char *lps_dir, const State *s, uint32_t *generation, int *active);
 
 /* App */
 typedef struct App App;

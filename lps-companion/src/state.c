@@ -68,11 +68,31 @@ void weight_text(int32_t grams, char *out, size_t n){
     if(grams<0){ sprintf(out,"--"); (void)n; }
     else sprintf(out,"%ld.%03ld",(long)(grams/1000),(long)(grams%1000));
 }
-uint32_t crc32(const uint8_t *p, size_t n){
-    uint32_t c=0xfffffffful;
-    while(n--){ int i; c^=*p++; for(i=0;i<8;i++) c=(c>>1)^(0xedb88320ul & (uint32_t)-(int32_t)(c&1)); }
-    return ~c;
+/* CRC-32 (IEEE). Table-driven since LPS-DOS-115-CHG04: the bitwise loop cost
+ * ~8x more on the 8088. The table is split in 16-bit halves so the loop has
+ * no 32-bit shift (a shift loop on the 8086); 1 KB in DGROUP, filled on first use. */
+#ifdef __WATCOMC__
+static uint16_t __near crc_lo[256], __near crc_hi[256];
+#else
+static uint16_t crc_lo[256], crc_hi[256];
+#endif
+uint32_t crc32_update(uint32_t c, const uint8_t *p, size_t n){
+    uint16_t lo=(uint16_t)c, hi=(uint16_t)(c>>16); unsigned i;
+    if(!crc_lo[1]){
+        unsigned k; uint32_t v;
+        for(i=0;i<256;i++){
+            v=i; for(k=0;k<8;k++) v=(v&1)?(v>>1)^0xedb88320ul:v>>1;
+            crc_lo[i]=(uint16_t)v; crc_hi[i]=(uint16_t)(v>>16);
+        }
+    }
+    while(n--){
+        i=(unsigned)((lo^*p++)&0xff);
+        lo=(uint16_t)(((lo>>8)|(hi<<8))^crc_lo[i]);
+        hi=(uint16_t)((hi>>8)^crc_hi[i]);
+    }
+    return ((uint32_t)hi<<16)|lo;
 }
+uint32_t crc32(const uint8_t *p, size_t n){ return ~crc32_update(0xfffffffful,p,n); }
 uint32_t day_index(Date d){
     uint32_t n=0; unsigned y,m;
     for(y=2000;y<d.year;++y) n+=leap((uint16_t)y)?366u:365u;
@@ -122,6 +142,8 @@ void state_init(State *s){
     }
 }
 
+#ifndef LPS_DOS
+/* Binary format 6 (LPS-DOS-115-CHG04: the app writes JSON; tests build old saves). */
 static void put_n(Blob *b, uint32_t v, unsigned n){
     while(n--){ b->bytes[b->size++]=(uint8_t)v; v>>=8; }
 }
@@ -150,6 +172,7 @@ void encode_state(const State *s, Blob *b){
     }
     crc=crc32(b->bytes,b->size); put_n(b,crc,4);
 }
+#endif
 
 static uint32_t get_n(const uint8_t *bytes, size_t *pos, unsigned n){
     uint32_t v=0; unsigned i; for(i=0;i<n;i++) v|=(uint32_t)bytes[(*pos)++]<<(i*8); return v;

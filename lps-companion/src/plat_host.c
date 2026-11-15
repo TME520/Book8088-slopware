@@ -71,19 +71,18 @@ static void h_present(Platform *p){
 }
 static void h_palette(Platform *p, int pal){ H(p)->palette=pal; }
 static int h_batt(Platform *p){ (void)p; return 0; }
-static enum LoadResult h_load(Platform *p, uint8_t *bytes, size_t capacity, size_t *size){
-    HostPlat *h=H(p); uint32_t gen=0; int active=0; enum LoadResult r;
+static enum LoadResult h_load(Platform *p, State *out){
+    HostPlat *h=H(p); enum LoadResult r;
     if(!h->mounted) return LOAD_NO_STORAGE;
-    r=save_load_ab(lps_data_dir(),bytes,capacity,size,&gen,&active);
-    if(r==LOAD_OK){ h->generation=gen; h->active=active; }
-    else if(r==LOAD_MISSING){ h->generation=0; h->active=0; }
+    r=save_load(lps_data_dir(),out,&h->generation,&h->active);
+    if(r==LOAD_MISSING){ h->generation=0; h->active=-1; }
     return r;
 }
-static int h_save(Platform *p, const uint8_t *bytes, size_t size){
+static int h_save(Platform *p, const State *s){
     HostPlat *h=H(p);
     if(!h->mounted||h->write_fault) return 0;
     lps_ensure_dirs();
-    if(!save_write_ab(lps_data_dir(),bytes,size,&h->generation,&h->active)){ h->write_fault=1; return 0; }
+    if(!save_store(lps_data_dir(),s,&h->generation,&h->active)){ h->write_fault=1; return 0; }
     return 1;
 }
 static int h_ics(Platform *p, const Day *day, uint32_t totalXp, uint32_t dayXp, int language){

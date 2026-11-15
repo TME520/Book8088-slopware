@@ -15,7 +15,7 @@ typedef struct {
     int painted; /* 0 until the first frame is copied to VRAM */
     int palette;
     uint32_t generation;
-    int active; /* 0=A, 1=B */
+    int active; /* 0=A, 1=B, -1=none yet */
     int write_fault;
     int mounted;
     unsigned video_seg; /* 0xB800 colour or 0xB000 mono */
@@ -237,19 +237,18 @@ static void dos_present(Platform *p){
 static void dos_set_palette(Platform *p, int palette){ self_of(p)->palette=palette; }
 static int dos_battery(Platform *p){ (void)p; return 0; }
 
-static enum LoadResult dos_load(Platform *p, uint8_t *bytes, size_t capacity, size_t *size){
-    DosPlat *d=self_of(p); uint32_t gen=0; int active=0; enum LoadResult r;
+static enum LoadResult dos_load(Platform *p, State *out){
+    DosPlat *d=self_of(p); enum LoadResult r;
     if(!d->mounted) return LOAD_NO_STORAGE;
-    r=save_load_ab(lps_data_dir(), bytes, capacity, size, &gen, &active);
-    if(r==LOAD_OK){ d->generation=gen; d->active=active; }
-    else if(r==LOAD_MISSING){ d->generation=0; d->active=0; }
+    r=save_load(lps_data_dir(),out,&d->generation,&d->active);
+    if(r==LOAD_MISSING){ d->generation=0; d->active=-1; }
     return r;
 }
-static int dos_save(Platform *p, const uint8_t *bytes, size_t size){
+static int dos_save(Platform *p, const State *s){
     DosPlat *d=self_of(p);
     if(!d->mounted || d->write_fault) return 0;
     lps_ensure_dirs();
-    if(!save_write_ab(lps_data_dir(), bytes, size, &d->generation, &d->active)){ d->write_fault=1; return 0; }
+    if(!save_store(lps_data_dir(),s,&d->generation,&d->active)){ d->write_fault=1; return 0; }
     return 1;
 }
 static int dos_export_ics(Platform *p, const Day *day, uint32_t totalXp, uint32_t dayXp, int language){

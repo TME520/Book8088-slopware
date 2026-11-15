@@ -11,3 +11,24 @@ are retained. Day 2 has flags 512, actual weight 111.500 kg, and note
 
 `tests/test_storage.c` wraps these bytes in an `LPR1` `SAVE_A.BIN` envelope and
 checks that this port still decodes them.
+
+# PicoCalc JSON saves
+
+`picocalc_full.jsn` and `picocalc_custom.jsn` are `SAVE_B.JSN` / `SAVE_A.JSN`
+files written by the PicoCalc's own save code (`writeSave` in
+[LPS-Companion-PicoCalc](https://github.com/TME520/LPS-Companion-PicoCalc)
+v1.15), built on the host by `tools/picocalc_fixture.cpp`. They are synthetic,
+not user data.
+
+- `picocalc_full.jsn` (generation 41): the PicoCalc test suite's full state,
+  with the 22 default activities, 31 closed days, 24 tasks with quotes and
+  backslashes, 3 reminders, meals `[7,2]` and the timer hidden from Home.
+- `picocalc_custom.jsn` (generation 7): a reordered catalog (Sport first), a
+  custom activity `Vélo`/`Cycling` (id 23), an English-only `Chess` (id 24),
+  `Projet` renamed `Projet perso`, frozen day names (`Tai-chi`, `Projet`),
+  accented French notes, tasks and reminders, meals `[3,0,15]`, and Kanban and
+  Rosary hidden from Home.
+
+`tests/test_storage.c` loads both and checks that DOS writes them back byte
+for byte, then edits one through the app. Regenerate them with
+`/tmp/pcfix full|custom FILE` (see the main README).

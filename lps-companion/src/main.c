@@ -63,9 +63,9 @@ int main(int argc, char **argv){
      * buffers come from the far heap, outside DGROUP. */
     app=(App*)calloc(1,app_bytes());
 #ifdef LPS_DOS
-    hw=app&&lps_buffers_init()?plat_dos_create():0;
+    hw=app&&lps_buffers_init()&&jsave_init()?plat_dos_create():0;
 #else
-    hw=app&&lps_buffers_init()?plat_host_create(0):0;
+    hw=app&&lps_buffers_init()&&jsave_init()?plat_host_create(0):0;
 #endif
     if(!hw){
 #ifdef LPS_DOS
