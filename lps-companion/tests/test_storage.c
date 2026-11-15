@@ -12,6 +12,7 @@
 Platform *plat_host_create(int capture);
 const char *plat_host_row(Platform *p, int row);
 int plat_host_rev(Platform *p, int row, int col);
+int plat_host_key(int azerty, unsigned char ch);
 
 static void put32(uint8_t *p, uint32_t v){
     p[0]=(uint8_t)v; p[1]=(uint8_t)(v>>8); p[2]=(uint8_t)(v>>16); p[3]=(uint8_t)(v>>24);
@@ -687,7 +688,7 @@ static void check_activities(const char *dir){
     app_key(app,KEY_ENTER); assert(app_state(app)->today.flags==(1ul<<21));
     app_key(app,' '); assert(app_state(app)->today.flags==((1ul<<21)|(1ul<<10)) && cell_is(hw,7,27,"3 [x] Weekend"));
     app_key(app,'0'); assert(app_state(app)->today.flags==((1ul<<21)|(1ul<<10))); /* 8 rows: no row 10 */
-    app_key(app,KEY_LEFT); app_key(app,'&'); assert(app_state(app)->today.flags==((1ul<<21)|(1ul<<10)|1ul)); /* AZERTY 1 */
+    app_key(app,KEY_LEFT); app_key(app,plat_host_key(1,'&')); assert(app_state(app)->today.flags==((1ul<<21)|(1ul<<10)|1ul)); /* AZERTY 1 */
     app_key(app,'1'); app_key(app,KEY_ESCAPE);
     assert(app_screen(app)==SCR_HOME && row_has(hw,5,"2/22 activities"));
     app_key(app,'5'); assert(any_row(hw,"ACTIVITIES (2)") && any_row(hw,"  Weekend") && any_row(hw,"  Meditation")); app_key(app,KEY_ESCAPE);
@@ -856,19 +857,19 @@ static void check_custom_activities(const char *dir){
     /* Too long: 24 characters at most, and 24 UTF-8 bytes (an accent counts twice). */
     app_key(app,'e'); erase(app,4); for(i=0;i<30;i++) app_key(app,'a');
     assert(row_has(hw,9,"24/24 characters")); erase(app,24);
-    for(i=0;i<13;i++) app_key(app,130);
+    for(i=0;i<13;i++) app_key(app,plat_host_key(1,130));
     app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_ACTIVITY_EDIT && any_row(hw,"Name is too long"));
     app_key(app,KEY_ESCAPE);
     /* Create in French only, typing an accent: English shows the same name. */
     app_key(app,KEY_ESCAPE); choose_language(app,1);
     app_key(app,'1'); app_key(app,'n'); assert(app_screen(app)==SCR_ACTIVITY_EDIT && row_has(hw,3,"NOUVELLE ACTIVIT\220"));
-    app_key(app,'R'); app_key(app,130); type_text(app,"veil"); assert(row_has(hw,6,"R\202veil")); app_key(app,KEY_ENTER);
+    app_key(app,'R'); app_key(app,plat_host_key(1,130)); type_text(app,"veil"); assert(row_has(hw,6,"R\202veil")); app_key(app,KEY_ENTER);
     assert(app_state(app)->activityCount==23 && app_state(app)->activities[22].id==23 && app_selection(app)==22);
     assert(!strcmp(app_state(app)->activities[22].fr,"R\xc3\xa9veil") && !app_state(app)->activities[22].en[0]);
     assert(cell_is(hw,11,54,"7 [ ] R\202veil"));
-    app_key(app,130); /* é outside a name is the AZERTY 2: ticks row 2 of the column */
+    app_key(app,plat_host_key(1,130)); /* é outside a name is the AZERTY 2: ticks row 2 of the column */
     assert(app_state(app)->today.flags==(1ul<<17));
-    app_key(app,130); assert(app_state(app)->today.flags==0);
+    app_key(app,plat_host_key(1,130)); assert(app_state(app)->today.flags==0);
     app_key(app,KEY_ESCAPE); choose_language(app,0);
     app_key(app,'1'); assert(cell_is(hw,11,54,"  [ ] R\202veil"));
     /* The custom list goes through the JSON save. */
@@ -952,6 +953,58 @@ static void check_custom_activities(const char *dir){
     activity_rotate(&s,1); activity_refresh(&s); assert(s.history[0].flags==(1ul<<21));
     assert(activity_names_equal("M\xc3\xa9nage","m\xc3\x89NAGE") && !activity_names_equal("Sport","Sports"));
     day_names_clear();
+}
+
+/* LPS-DOS-115-CHG06b: top-row keys by BIOS scan code, any layout, no Shift. */
+static void fr_type(App *app, const char *cp437){ while(*cp437) app_key(app,plat_host_key(1,(unsigned char)*cp437++)); }
+static void check_bios_keys(const char *dir){
+    static unsigned char store[16384]; App *app=(App*)store; Platform *hw; static State out; uint32_t gen=0; int active=-1;
+    /* The mapping itself. */
+    assert(app_bios_key('1',0x02)==KEY_TOPROW('1','1') && app_bios_key('0',0x0B)==KEY_TOPROW('0','0'));
+    assert(app_bios_key(130,0x03)==KEY_TOPROW(130,'2') && KEY_CHAR(app_bios_key(130,0x03))==130 && KEY_TOPROW_DIGIT(app_bios_key(130,0x03))=='2');
+    assert(app_bios_key('&',0x08)==KEY_TOPROW('&','7'));              /* US Shift+7 */
+    assert(app_bios_key('&',0x02)==KEY_TOPROW('&','1'));              /* AZERTY 1 */
+    assert(app_bios_key('7',0x47)=='7' && app_bios_key('0',0x52)=='0'); /* keypad with NumLock */
+    assert(app_bios_key(0,0x48)==KEY_UP && app_bios_key(0xE0,0x53)==KEY_DELETE && app_bios_key(0,0x3E)==KEY_F4);
+    assert(app_bios_key(13,0x1C)==KEY_ENTER && app_bios_key(27,0x01)==KEY_ESCAPE && app_bios_key(8,0x0E)==KEY_BACKSPACE);
+    assert(app_bios_key('q',0x1E)=='q' && app_bios_key(1,0x1E)==-1 && app_bios_key(0,0x47)==-1);
+    assert(plat_host_key(1,'-')==KEY_TOPROW('-','6') && plat_host_key(0,'-')=='-' && plat_host_key(1,',')==',');
+
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    /* Home: AZERTY & is 1; US Shift+7 (&) is 7, not 1; a bare & is nothing. */
+    app_key(app,plat_host_key(1,'&')); assert(app_screen(app)==SCR_ACTIVITIES); app_key(app,KEY_ESCAPE);
+    app_key(app,plat_host_key(0,'&')); assert(app_screen(app)==SCR_REMINDERS); app_key(app,KEY_ESCAPE);
+    app_key(app,'&'); assert(app_screen(app)==SCR_HOME);
+    app_key(app,app_bios_key('3',0x51)); assert(app_screen(app)==SCR_KANBAN); app_key(app,KEY_ESCAPE); /* keypad 3 */
+    /* Config with the AZERTY top row: - (6) Config, & Language, é French, " Save. */
+    fr_type(app,"-&\202\""); assert(app_screen(app)==SCR_HOME && app_state(app)->language==LANG_FR);
+    /* Timer: _ (8) then & starts 5 minutes. */
+    fr_type(app,"_&"); assert(app_screen(app)==SCR_TIMER_RUNNING); app_key(app,KEY_ESCAPE); app_key(app,KEY_ESCAPE);
+    assert(app_screen(app)==SCR_HOME);
+    /* Date: à (0); unshifted 6 is '-' as AZERTY prints it, Shift+6 is 6. */
+    fr_type(app,"\205"); assert(app_screen(app)==SCR_DATE); erase(app,10);
+    fr_type(app,"\202\205\2026-&&-&6"); assert(row_has(hw,6,"2026-11-16")); app_key(app,KEY_ENTER);
+    assert(app_screen(app)==SCR_HOME && app_state(app)->today.date.year==2026 && app_state(app)->today.date.month==11 && app_state(app)->today.date.day==16);
+    /* Weight: é (2), then &&à,5 = 110,5. */
+    fr_type(app,"\202"); assert(app_screen(app)==SCR_WEIGHT); erase(app,8); fr_type(app,"&&\205,5"); app_key(app,KEY_ENTER);
+    assert(app_screen(app)==SCR_HOME && app_state(app)->today.expected==110500);
+    /* Activities: AZERTY é ticks row 2; US Shift+7 ticks row 7 (Nap), never row 1. */
+    fr_type(app,"&"); fr_type(app,"\202"); assert(app_state(app)->today.flags==(1ul<<1));
+    app_key(app,plat_host_key(0,'&')); assert(app_state(app)->today.flags==((1ul<<1)|(1ul<<6)));
+    app_key(app,'&'); assert(app_state(app)->today.flags==((1ul<<1)|(1ul<<6)));
+    /* Text entry keeps the characters: activity name, task, reminder text. */
+    app_key(app,'n'); fr_type(app,"\202t\202 & \205"); assert(row_has(hw,6,"\202t\202 & \205")); app_key(app,KEY_ENTER);
+    assert(!strcmp(app_state(app)->activities[22].fr,"\xc3\xa9t\xc3\xa9 & \xc3\xa0"));
+    app_key(app,KEY_ESCAPE);
+    fr_type(app,"\""); assert(app_screen(app)==SCR_KANBAN); app_key(app,'n'); fr_type(app,"a&(_'\"-\202"); app_key(app,KEY_ENTER); /* task text is ASCII: é is dropped, as before */
+    assert(app_state(app)->taskCount==1 && !strcmp(app_state(app)->tasks[0].name,"a&(_'\"-") && app_screen(app)==SCR_KANBAN);
+    app_key(app,KEY_ESCAPE);
+    fr_type(app,"\212"); assert(app_screen(app)==SCR_REMINDERS); app_key(app,'n'); assert(app_screen(app)==SCR_REMINDER_EDIT);
+    app_key(app,KEY_DOWN); fr_type(app,"&"); /* days field: & is 1 */
+    app_key(app,KEY_DOWN); fr_type(app,"&\"'("); assert(row_has(hw,11,"&\"'("));
+    app_key(app,KEY_ENTER); assert(app_state(app)->reminderCount==1 && !strcmp(app_state(app)->reminders[0].text,"&\"'(") && app_state(app)->reminders[0].duration==11);
+    app_key(app,KEY_ESCAPE); app_flush_save(app);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && out.language==LANG_FR && out.taskCount==1 && out.activityCount==23);
 }
 
 int main(void){
@@ -1124,9 +1177,10 @@ int main(void){
     check_custom_activities(tmpdir);
     check_fast_rematch("tests/fixtures/picocalc_full.jsn");
     check_fast_rematch("tests/fixtures/picocalc_custom.jsn");
+    check_bios_keys(tmpdir);
     assert(orphan_hits>0); /* some edit took a name history had stored */
 
-    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback, unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), fixture decode (%u captures)\n", 0);
+    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback, unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

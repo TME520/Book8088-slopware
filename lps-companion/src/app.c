@@ -367,22 +367,6 @@ static void go(App *a, int s){
         date_text(d,a->dateDraft,sizeof(a->dateDraft));
     }
 }
-/* AZERTY (FR) unshifted top-row → digit, so Date/Weight work without Shift. */
-static int azerty_digit(int key){
-    switch(key){
-    case '&': return '1';
-    case 130: return '2'; /* é */
-    case '"': return '3';
-    case '\'': return '4';
-    case '(': return '5';
-    /* '-' is ASCII hyphen AND AZERTY unshifted 6 — keep as '-' for ISO dates */
-    case 138: return '7'; /* è */
-    case '_': return '8';
-    case 135: return '9'; /* ç */
-    case 133: return '0'; /* à */
-    default: return key;
-    }
-}
 static void edit_buf(char *value, size_t cap, int key){
     size_t len=strlen(value);
     if(key==KEY_BACKSPACE||key==127){ if(len) value[len-1]=0; }
@@ -507,20 +491,52 @@ void app_tick(App *app, lps_tick_t ms){
 
 /* --- key handler continues in app_key.c style: keep in this file --- */
 
-/* The AZERTY top row without Shift gives é, è, ç and à. They type digits
- * everywhere except in the activity name, where they are letters
- * (LPS-DOS-115-CHG06; plat_dos used to turn them into digits). */
-static int accent_digit(int key){
-    switch(key){
-    case 130: return '2'; /* é */
-    case 138: return '7'; /* è */
-    case 135: return '9'; /* ç */
-    case 133: return '0'; /* à */
-    default: return key;
+/* LPS-DOS-115-CHG06b: keys from the BIOS. The top row (scan 02h-0Bh) is
+ * tagged with the digit on the key, so it works without Shift on AZERTY and
+ * any other layout; the numeric keypad sends plain digit characters. */
+int app_bios_key(unsigned ascii, unsigned scan){
+    ascii&=0xFF; scan&=0xFF;
+    if(ascii==0 || ascii==0xE0){
+        switch(scan){
+        case 72: return KEY_UP;
+        case 80: return KEY_DOWN;
+        case 75: return KEY_LEFT;
+        case 77: return KEY_RIGHT;
+        case 83: return KEY_DELETE;
+        case 14: return KEY_BACKSPACE; /* some BIOS */
+        case 59: return KEY_F1;
+        case 60: return KEY_F2;
+        case 61: return KEY_F3;
+        case 62: return KEY_F4;
+        case 63: return KEY_F5;
+        default: return -1;
+        }
     }
+    if(ascii==13) return KEY_ENTER;
+    if(ascii==27) return KEY_ESCAPE;
+    if(ascii==8 || ascii==127) return KEY_BACKSPACE;
+    if(ascii==9) return KEY_TAB;
+    if(!cp437_text_byte((unsigned char)ascii)) return -1;
+    if(scan>=0x02 && scan<=0x0B) return KEY_TOPROW(ascii, scan==0x0B ? '0' : (int)('1'+scan-0x02));
+    return (int)ascii;
+}
+/* Text fields keep the character; every other screen takes the top row's
+ * digit. A '-' stays a hyphen where one is typed (dates, Kanban reorder):
+ * it is AZERTY's unshifted 6, as before. */
+static int text_entry(const App *a){
+    return a->screen==SCR_ACTIVITY_EDIT || a->screen==SCR_TASK_EDIT
+        || (a->screen==SCR_REMINDER_EDIT && a->reminderField==2);
+}
+static int resolve_key(const App *a, int k){
+    int ch;
+    if(k<0 || !KEY_IS_TOPROW(k)) return k;
+    ch=KEY_CHAR(k);
+    if(text_entry(a)) return ch;
+    if(ch=='-' && (a->screen==SCR_DATE || a->screen==SCR_KANBAN || (a->screen==SCR_REMINDER_EDIT && a->reminderField==0))) return '-';
+    return KEY_TOPROW_DIGIT(k);
 }
 void app_key(App *a, int k){
-    if(a->screen!=SCR_ACTIVITY_EDIT) k=accent_digit(k);
+    k=resolve_key(a,k);
     if(k==KEY_ESCAPE && a->screen==SCR_ACTIVITIES && a->confirmingDelete){
         a->confirmingDelete=0; a->message[0]=0; app_render(a); return;
     }
@@ -623,8 +639,7 @@ void app_key(App *a, int k){
             if(!parse_date(a->dateDraft,&d)) say(a,tr(a,"Invalid date: YYYY-MM-DD, 2000-2099","Date invalide : AAAA-MM-JJ, 2000-2099"));
             else { g_scratch.today.date=d; if(commit(a,&g_scratch)){ flush_save(a); go(a,SCR_HOME); } }
         }else {
-            int dk=azerty_digit(k);
-            if((dk>='0'&&dk<='9')||dk=='-'||k==KEY_BACKSPACE||k==127) edit_buf(a->dateDraft,sizeof(a->dateDraft), (k==KEY_BACKSPACE||k==127)?k:dk);
+            if((k>='0'&&k<='9')||k=='-'||k==KEY_BACKSPACE||k==127) edit_buf(a->dateDraft,sizeof(a->dateDraft),k);
             /* other keys ignored — never freeze */
         }
     }else if(a->screen==SCR_ACTIVITIES){
@@ -634,10 +649,9 @@ void app_key(App *a, int k){
          * carry those labels (PicoCalc LPS-113-CHG08b/08c: keys act on the
          * current page); Enter or Space ticks the cursor's entry. */
         unsigned n=grid_items(a), rows=grid_rows(n), col, row, len, cols;
-        int dk=azerty_digit(k);
         if(a->confirmingDelete){ if(k==KEY_ENTER) confirm_activity_delete(a); } /* Esc is handled above; other keys wait */
         else if(k=='e'||k=='E'||k=='n'||k=='N'||k==KEY_DELETE||k==KEY_F4||k==KEY_F5) activity_edit_key(a,k);
-        else if(n==0){ if(k==KEY_ENTER||(dk>='0'&&dk<='9')) say(a,tr(a,"No activities in the list","Aucune activité dans la liste")); }
+        else if(n==0){ if(k==KEY_ENTER||(k>='0'&&k<='9')) say(a,tr(a,"No activities in the list","Aucune activité dans la liste")); }
         else {
             if(a->selection>=n) a->selection=0;
             col=a->selection/rows; row=a->selection%rows;
@@ -649,11 +663,11 @@ void app_key(App *a, int k){
                 len=grid_column_length(n,rows,col);
                 a->selection=col*rows+(row<len?row:len-1);
             }
-            else if(a->daysBack && (k==KEY_ENTER||k==' '||(dk>='0'&&dk<='9'))) read_only(a);
-            else if(k==KEY_ENTER||k==' '||(dk>='0'&&dk<='9')){
+            else if(a->daysBack && (k==KEY_ENTER||k==' '||(k>='0'&&k<='9'))) read_only(a);
+            else if(k==KEY_ENTER||k==' '||(k>='0'&&k<='9')){
                 unsigned id=a->selection;
                 if(k!=KEY_ENTER&&k!=' '){
-                    unsigned r=dk=='0'?9u:(unsigned)(dk-'1');
+                    unsigned r=k=='0'?9u:(unsigned)(k-'1');
                     id=r<len ? col*rows+r : n; /* past the column's end: ignored */
                 }
                 if(id<a->state.activityCount){
@@ -677,7 +691,7 @@ void app_key(App *a, int k){
             if(!parse_weight(a->weights[0],&g_scratch.today.expected)||!parse_weight(a->weights[1],&g_scratch.today.actual))
                 say(a,tr(a,"Invalid weight (example: 110.500)","Poids invalide (exemple : 110,500)"));
             else if(commit(a,&g_scratch)){ flush_save(a); go(a,SCR_HOME); }
-        }else { int dk=azerty_digit(k); if((dk>='0'&&dk<='9')||dk=='.'||dk==','||k==KEY_BACKSPACE||k==127) edit_buf(a->weights[a->field],8,(k==KEY_BACKSPACE||k==127)?k:dk); }
+        }else if((k>='0'&&k<='9')||k=='.'||k==','||k==KEY_BACKSPACE||k==127) edit_buf(a->weights[a->field],8,k);
     }else if(a->screen==SCR_KANBAN){
         unsigned n=tasks_in(a,a->kanbanColumn); if(n && a->selection>=n) a->selection=n-1;
         if(k==KEY_LEFT||k==KEY_RIGHT){

@@ -55,6 +55,15 @@ typedef uint64_t lps_tick_t;
 #define KEY_F3 1007
 #define KEY_F4 1008
 #define KEY_F5 1009
+/* LPS-DOS-115-CHG06b: a key on the main keyboard's top row (BIOS scan codes
+ * 02h-0Bh) carries its character and the digit printed on the key, whatever
+ * the layout and Shift: AZERTY é (scan 03h) is digit 2. Screens keyed by
+ * digits take the digit, text entry takes the character (app_key). */
+#define KEY_TOPROW_FLAG 0x4000
+#define KEY_TOPROW(ch, digit) (KEY_TOPROW_FLAG | (((digit) - '0') << 8) | ((ch) & 0xFF))
+#define KEY_IS_TOPROW(k) (((k) & KEY_TOPROW_FLAG) != 0)
+#define KEY_TOPROW_DIGIT(k) ('0' + (((k) >> 8) & 0x0F))
+#define KEY_CHAR(k) ((k) & 0xFF)
 
 #define WIRE_V1 3568
 #define WIRE_V2 (WIRE_V1 + 1)
@@ -243,6 +252,10 @@ size_t app_bytes(void);
 void app_init(App *app, Platform *hw);
 void app_start(App *app);
 void app_key(App *app, int k);
+/* BIOS INT 16h AH=00h result (AL ascii, AH scan) to an app key: arrows,
+ * Del, F1-F5, Enter, Esc, Backspace, Tab, CP437 text; top-row keys tagged
+ * with KEY_TOPROW. -1 for keys the app does not use. */
+int app_bios_key(unsigned ascii, unsigned scan);
 void app_tick(App *app, lps_tick_t ms);
 void app_render(App *app);
 const State *app_state(const App *app);

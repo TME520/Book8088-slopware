@@ -318,31 +318,9 @@ int plat_dos_get_key(void){
     int86(0x16, &r, &r);
     ascii = r.h.al;
     scan = r.h.ah;
-    if(ascii == 0 || ascii == 0xE0){
-        switch(scan){
-        case 72: return KEY_UP;
-        case 80: return KEY_DOWN;
-        case 75: return KEY_LEFT;
-        case 77: return KEY_RIGHT;
-        case 83: return KEY_DELETE;
-        case 14: return KEY_BACKSPACE; /* some BIOS */
-        case 59: return KEY_F1;
-        case 60: return KEY_F2;
-        case 61: return KEY_F3;
-        case 62: return KEY_F4;
-        case 63: return KEY_F5;
-        default: return -1;
-        }
-    }
-    if(ascii == 13) return KEY_ENTER;
-    if(ascii == 27) return KEY_ESCAPE;
-    if(ascii == 8 || ascii == 127) return KEY_BACKSPACE;
-    if(ascii == 9) return KEY_TAB;
-    /* LPS-DOS-115-CHG06: CP437 letters (é, è, ç, à from the AZERTY top row,
-     * and the others) reach the app as they are; app_key turns é è ç à into
-     * digits except while an activity name is typed. */
-    if(cp437_text_byte((unsigned char)ascii)) return (int)ascii;
-    return -1;
+    /* LPS-DOS-115-CHG06b: the scan code tells top-row digits apart from the
+     * layout's characters; app_bios_key does the mapping (host-testable). */
+    return app_bios_key(ascii, scan);
 }
 
 lps_tick_t plat_dos_millis(void){

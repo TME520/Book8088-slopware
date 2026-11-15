@@ -14,6 +14,7 @@ void plat_dos_bios_puts(const char *s);
 #else
 Platform *plat_host_create(int capture);
 void plat_host_dump(Platform *p, FILE *out);
+int plat_host_key(int azerty, unsigned char ch);
 #endif
 
 static void usage(void){
@@ -107,7 +108,7 @@ int main(int argc, char **argv){
             else if(strcmp(line,"enter")==0||n==0) app_key(app,KEY_ENTER);
             else if(strcmp(line,"esc")==0) app_key(app,KEY_ESCAPE);
             else if(strcmp(line,"back")==0) app_key(app,KEY_BACKSPACE);
-            else if(n==1) app_key(app,(unsigned char)line[0]);
+            else if(n==1){ int k=plat_host_key(0,(unsigned char)line[0]); if(k>=0) app_key(app,k); } /* US keyboard */
             plat_host_dump(hw,stdout);
         }
     }

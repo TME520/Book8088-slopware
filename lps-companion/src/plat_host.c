@@ -111,3 +111,17 @@ void plat_host_dump(Platform *p, FILE *out){
 }
 const char *plat_host_row(Platform *p, int row){ return H(p)->rows[row]; }
 int plat_host_rev(Platform *p, int row, int col){ return H(p)->rev[row][col]; }
+
+/* LPS-DOS-115-CHG06b: the BIOS pair (character, scan code) a key typed on a
+ * US (azerty 0) or French AZERTY (azerty 1, KEYB FR) keyboard gives, run
+ * through app_bios_key as plat_dos does. Top-row keys with or without Shift
+ * get scan codes 02h-0Bh; anything else gets a scan code off the top row. */
+int plat_host_key(int azerty, unsigned char ch){
+    static const char us_plain[]="1234567890", us_shift[]="!@#$%^&*()";
+    static const char fr_plain[]="&é\"'(-è_çà", fr_shift[]="1234567890";
+    const char *plain=azerty?fr_plain:us_plain, *shift=azerty?fr_shift:us_shift;
+    unsigned i, scan=0x39; /* the space bar: not on the top row */
+    for(i=0;i<10;i++) if((unsigned char)plain[i]==ch || (unsigned char)shift[i]==ch) scan=0x02+i;
+    if(ch==13) scan=0x1C;
+    return app_bios_key(ch,scan);
+}
