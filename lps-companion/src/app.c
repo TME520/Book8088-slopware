@@ -18,7 +18,6 @@ struct App {
     int pendingLanguage;
     int pendingPalette;
     char dateDraft[11];
-    char draft[NOTE_LENGTH+1];
     char taskDraft[TASK_NAME_LENGTH+1];
     char weights[2][8];
     char message[100];
@@ -77,25 +76,6 @@ static void center_line(App *a, int row, const char *text, int reverse){
         if(n>COLUMNS){ a->hw->text(a->hw, row, 0, text, 0); return; }
         col=(COLUMNS-n)/2;
         a->hw->text(a->hw, row, col, text, 0);
-    }
-}
-static void wrap_text(App *a, int row, const char *text, unsigned limit){
-    unsigned i; char b[COLUMNS+1]; size_t n;
-    for(i=0;*text && i<limit;i++){
-        n=strlen(text); if(n>(size_t)COLUMNS) n=(size_t)COLUMNS;
-        memcpy(b,text,n); b[n]=0;
-        line(a,row+(int)i,b,0);
-        text+=n;
-    }
-}
-static void wrap_field(App *a, int row, int col, int width, const char *text, unsigned limit){
-    unsigned i; char b[COLUMNS+1]; size_t n;
-    if(width>COLUMNS) width=COLUMNS;
-    for(i=0;*text && i<limit;i++){
-        n=strlen(text); if(n>(size_t)width) n=(size_t)width;
-        memcpy(b,text,n); b[n]=0;
-        field(a,row+(int)i,col,width,b,0);
-        text+=n;
     }
 }
 #define REVIEW_PAGE 15
@@ -209,7 +189,6 @@ static void go(App *a, int s){
     if(s==SCR_DAILY_REVIEW) a->reviewOffset=0;
     if(s==SCR_LANGUAGE) a->selection=(unsigned)a->pendingLanguage;
     if(s==SCR_COLORS) a->selection=(unsigned)a->pendingPalette;
-    if(s==SCR_NOTE){ vd=app_viewed_day(a); memcpy(a->draft, vd->note, NOTE_LENGTH+1); }
     if(s==SCR_WEIGHT){
         int i; a->field=0; vd=app_viewed_day(a);
         for(i=0;i<2;i++){ int32_t v=i?vd->actual:vd->expected; memset(a->weights[i],0,8); if(v>=0) weight_text(v,a->weights[i],8); }
@@ -364,9 +343,9 @@ void app_key(App *a, int k){
         else if(a->screen==SCR_TASK_EDIT) target=SCR_KANBAN;
         else if(a->screen==SCR_ROSARY_SET) target=SCR_ROSARY_MODE;
         else if(a->screen==SCR_ROSARY_DECADE) target=SCR_ROSARY_SET;
-        /* Persist when leaving an editor back to Home (date/activities/note/...). */
+        /* Persist when leaving an editor back to Home (date/activities/weight/...). */
         if(target==SCR_HOME && a->dirty
-           && (from==SCR_DATE||from==SCR_ACTIVITIES||from==SCR_NOTE||from==SCR_WEIGHT
+           && (from==SCR_DATE||from==SCR_ACTIVITIES||from==SCR_WEIGHT
                ||from==SCR_KANBAN||from==SCR_REMINDERS||from==SCR_CONFIG
                ||from==SCR_COLORS||from==SCR_LANGUAGE||from==SCR_DAILY_REVIEW
                ||from==SCR_ROSARY_MODE||from==SCR_ROSARY_COMPLETE||from==SCR_FINISH
@@ -378,7 +357,9 @@ void app_key(App *a, int k){
     a->message[0]=0;
     if(a->screen==SCR_REMINDER_POPUP){ go(a,SCR_HOME);
     }else if(a->screen==SCR_HOME){
-        unsigned menuCount=a->daysBack?3u:11u;
+        /* LPS-DOS-115-CHG02 (PicoCalc LPS-112-CHG05): no notepad; 0-9 today,
+         * 1-2 on an archived day. */
+        unsigned menuCount=a->daysBack?2u:10u;
         if(k==KEY_LEFT){
             if(a->daysBack<a->state.count){ a->daysBack++; a->selection=0; a->page=0; }
             else say(a, a->state.count?tr(a,"Oldest saved day","Plus ancien jour conserve"):tr(a,"No archived days","Aucun jour archive"));
@@ -387,12 +368,12 @@ void app_key(App *a, int k){
         if(k==KEY_UP) a->selection=(a->selection+menuCount-1)%menuCount;
         if(k==KEY_DOWN) a->selection=(a->selection+1)%menuCount;
         if(!a->daysBack && k=='0'){ a->selection=0; k=KEY_ENTER; }
-        else if(a->daysBack && k>='1' && k<='3'){ a->selection=(unsigned)(k-'1'); k=KEY_ENTER; }
+        else if(a->daysBack && k>='1' && k<='2'){ a->selection=(unsigned)(k-'1'); k=KEY_ENTER; }
         else if(!a->daysBack && k>='1' && k<='9'){ a->selection=(unsigned)(k-'0'); k=KEY_ENTER; }
-        if((k=='0'||(k>='4'&&k<='9')) && a->daysBack) read_only(a);
+        if((k=='0'||(k>='3'&&k<='9')) && a->daysBack) read_only(a);
         if(k==KEY_ENTER){
-            static const int currentScreens[]={SCR_DATE,SCR_ACTIVITIES,SCR_NOTE,SCR_WEIGHT,SCR_KANBAN,SCR_ROSARY_MODE,SCR_DAILY_REVIEW,SCR_CONFIG,SCR_REMINDERS,SCR_TIMER_SELECT,SCR_FINISH};
-            static const int archiveScreens[]={SCR_ACTIVITIES,SCR_NOTE,SCR_WEIGHT};
+            static const int currentScreens[]={SCR_DATE,SCR_ACTIVITIES,SCR_WEIGHT,SCR_KANBAN,SCR_ROSARY_MODE,SCR_DAILY_REVIEW,SCR_CONFIG,SCR_REMINDERS,SCR_TIMER_SELECT,SCR_FINISH};
+            static const int archiveScreens[]={SCR_ACTIVITIES,SCR_WEIGHT};
             int target=a->daysBack?archiveScreens[a->selection]:currentScreens[a->selection];
             if(target==SCR_KANBAN) a->kanbanColumn=TASK_TODO;
             if(target==SCR_REMINDERS) prune_reminders(a);
@@ -474,10 +455,6 @@ void app_key(App *a, int k){
                 if(commit(a,&g_scratch)) a->selection=id;
             }
         }
-    }else if(a->screen==SCR_NOTE){
-        if(a->daysBack){ if(k==KEY_ENTER) go(a,SCR_HOME); else read_only(a); }
-        else if(k==KEY_ENTER){ g_scratch=a->state; memcpy(g_scratch.today.note,a->draft,NOTE_LENGTH+1); if(commit(a,&g_scratch)){ flush_save(a); go(a,SCR_HOME); } }
-        else edit_buf(a->draft,sizeof(a->draft),k);
     }else if(a->screen==SCR_WEIGHT){
         if(a->daysBack){ if(k==KEY_ENTER) go(a,SCR_HOME); else read_only(a); }
         else if(k==KEY_UP||k==KEY_DOWN||k==KEY_TAB) a->field=1-a->field;
@@ -625,44 +602,43 @@ void app_render(App *a){
     if(a->daysBack) center_line(a,2,tr(a,"ARCHIVED DAY - READ ONLY","JOUR ARCHIVE - LECTURE SEULE"),0);
 
     if(a->screen==SCR_HOME){
-        const char *menu[11];
-        unsigned first=a->daysBack?1u:0u, total=a->daysBack?3u:11u;
+        const char *menu[10];
+        unsigned first=a->daysBack?1u:0u, total=a->daysBack?2u:10u;
         char wexp[16], wact[16];
         int gutter;
         menu[0]="0  Date";
         menu[1]=tr(a,"1  Activities","1  Activites");
-        menu[2]=tr(a,"2  Notepad","2  Bloc notes");
-        menu[3]=tr(a,"3  Weight tracker","3  Suivi du poids");
-        menu[4]="4  Kanban";
-        menu[5]=tr(a,"5  Christian Rosary","5  Rosaire chretien");
-        menu[6]=tr(a,"6  Daily review","6  Revue journaliere");
-        menu[7]="7  Config";
-        menu[8]=tr(a,"8  Reminders","8  Rappels");
-        menu[9]=tr(a,"9  Timer","9  Minuteur");
-        menu[10]=tr(a,"10 Close the day","10 Terminer le jour");
+        menu[2]=tr(a,"2  Weight tracker","2  Suivi du poids");
+        menu[3]="3  Kanban";
+        menu[4]=tr(a,"4  Christian Rosary","4  Rosaire chretien");
+        menu[5]=tr(a,"5  Daily review","5  Revue journaliere");
+        menu[6]="6  Config";
+        menu[7]=tr(a,"7  Reminders","7  Rappels");
+        menu[8]=tr(a,"8  Timer","8  Minuteur");
+        menu[9]=tr(a,"9  Close the day","9  Terminer le jour");
         field(a,4,1,37, a->daysBack?tr(a,"CLOSED DAY","JOUR TERMINE"):tr(a,"TODAY","AUJOURD'HUI"), 0);
         sprintf(b,tr(a,"%u/%u activities","%u/%u activites"), count_flags(day->flags), ACTIVITY_COUNT);
         field(a,5,1,37,b,0);
         for(i=0;i<total;i++) field(a,7+(int)i,1,37, menu[first+i], i==a->selection);
-        field(a,20,1,37,tr(a,"<- Previous day   -> Current day","<- Jour precedent   -> Jour actuel"),0);
-        for(gutter=3; gutter<=21; gutter++) a->hw->text(a->hw, gutter, 39, "|", 0);
+        field(a,18,1,37,tr(a,"<- Previous day   -> Current day","<- Jour precedent   -> Jour actuel"),0);
+        /* Right pane, tightened after the notepad left (LPS-DOS-115-CHG02):
+         * blocks start on the menu's rows 4, 7, 11 and 16. */
+        for(gutter=3; gutter<=18; gutter++) a->hw->text(a->hw, gutter, 39, "|", 0);
         field(a,4,41,38, "DATE", 0);
         field(a,5,41,38, date, 0);
-        field(a,9,41,38, tr(a,"WEIGHT TRACKER (kg)","SUIVI DU POIDS (kg)"), 0);
+        field(a,7,41,38, tr(a,"WEIGHT TRACKER (kg)","SUIVI DU POIDS (kg)"), 0);
         weight_text(day->expected, wexp, sizeof(wexp));
         weight_text(day->actual, wact, sizeof(wact));
-        sprintf(b,tr(a,"Expected : %s","Attendu  : %s"), wexp); field(a,10,41,38,b,0);
-        sprintf(b,tr(a,"Actual   : %s","Effectif : %s"), wact); field(a,11,41,38,b,0);
-        field(a,13,41,38, tr(a,"NOTEPAD","BLOC NOTES"), 0);
-        if(day->note[0]) wrap_field(a,14,41,38, day->note, 2);
-        field(a,17,41,38, tr(a,"REMINDERS","RAPPELS"), 0);
-        if(!a->state.reminderCount) field(a,18,41,38, tr(a,"No reminders","Aucun rappel"), 0);
-        else for(i=0;i<a->state.reminderCount && i<3;i++) field(a,18+(int)i,41,38, a->state.reminders[i].text, 0);
+        sprintf(b,tr(a,"Expected : %s","Attendu  : %s"), wexp); field(a,8,41,38,b,0);
+        sprintf(b,tr(a,"Actual   : %s","Effectif : %s"), wact); field(a,9,41,38,b,0);
+        field(a,11,41,38, tr(a,"REMINDERS","RAPPELS"), 0);
+        if(!a->state.reminderCount) field(a,12,41,38, tr(a,"No reminders","Aucun rappel"), 0);
+        else for(i=0;i<a->state.reminderCount && i<3;i++) field(a,12+(int)i,41,38, a->state.reminders[i].text, 0);
         sprintf(b,"KANBAN  %s %u  %s %u  %s %u",
             task_status_name(a,TASK_TODO), tasks_in(a,TASK_TODO),
             task_status_name(a,TASK_DOING), tasks_in(a,TASK_DOING),
             task_status_name(a,TASK_DONE), tasks_in(a,TASK_DONE));
-        field(a,21,41,38, b, 0);
+        field(a,16,41,38, b, 0);
     }else if(a->screen==SCR_TIMER_SELECT){
         const char *options[]={"5 minutes","15 minutes","30 minutes"};
         center_line(a,3,tr(a,"TIMER","MINUTEUR"),0);
@@ -711,10 +687,6 @@ void app_render(App *a){
             field(a,row,col,37,b, i==a->selection);
         }
         line(a,22, a->daysBack?tr(a,"<- -> columns   Esc: day menu","<- -> colonnes   Echap : menu du jour"):tr(a,"Enter: toggle  1-9: keys  <- -> columns","Entree: cocher  1-9: racc.  <- -> colonnes"),0);
-    }else if(a->screen==SCR_NOTE){
-        center_line(a,3,tr(a,"NOTEPAD","BLOC NOTES"),0); wrap_text(a,5,a->draft,2);
-        sprintf(b,tr(a,"%u/96 characters","%u/96 caracteres"),(unsigned)strlen(a->draft)); line(a,8,b,0);
-        line(a,14, a->daysBack?tr(a,"Enter / Esc: day menu","Entree / Echap : menu du jour"):tr(a,"Enter: save / Esc: cancel","Entree : valider / Echap : annuler"),0);
     }else if(a->screen==SCR_WEIGHT){
         int32_t expg=0,actg=0; int valid;
         center_line(a,3,tr(a,"WEIGHT TRACKER (kg)","SUIVI DU POIDS (kg)"),0);

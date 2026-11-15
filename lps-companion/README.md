@@ -11,9 +11,11 @@ PicoCalc firmware and LPS Console.
 
 Ready-to-run files are at the **repository root** (the directory above this one): [`../LPSCOMP.EXE`](../LPSCOMP.EXE), [`../ROSARY.DAT`](../ROSARY.DAT) and [`../HELLO.EXE`](../HELLO.EXE). Copy **both `LPSCOMP.EXE` and `ROSARY.DAT` into the same directory** on the Book 8088; `ROSARY.DAT` holds the rosary prayer texts. Without it everything works except the Rosary, which then shows *ROSARY.DAT not found: copy it next to LPSCOMP.EXE*. `make dos`, `make rosary` and `make hello` rebuild into this directory only; those local copies are gitignored. After a source change, copy the new files up (`cp LPSCOMP.EXE ROSARY.DAT HELLO.EXE ..`) so the root copies stay current. CI rebuilds and fails if the root files differ.
 
-The screen is the full **80×25** text mode (no 43/50-line modes). Home is two panes: the menu on the left, and a day summary (date, weight, note, reminders, kanban counts) on the right. All 16 activities sit on one page in two columns. Kanban shows TODO, DOING and DONE side by side. Rosary and the notepad use 80-character lines; the timer stays centered. Keys, English and French wording, palettes, and the SAVE/ICS/CSV bytes are unchanged. On the 8088 the video driver rewrites only the cells that changed.
+The screen is the full **80×25** text mode (no 43/50-line modes). Home is two panes: the menu on the left, and a day summary (date, weight, reminders, kanban counts) on the right. All 16 activities sit on one page in two columns. Kanban shows TODO, DOING and DONE side by side. The rosary uses 80-character lines; the timer stays centered. Keys, English and French wording, palettes, and the SAVE/ICS/CSV bytes are unchanged. On the 8088 the video driver rewrites only the cells that changed.
 
 As in PicoCalc v1.12, XP and keepsakes no longer appear on any screen (LPS-DOS-115-CHG01). The line under the title bar shows the long date and ISO week of the viewed day, for example **Sunday 8 November 2026 (week 45)** / **Dimanche 8 Novembre 2026 (semaine 45)**; it stays blank for an undated day. XP is still banked in `SAVE_A`/`SAVE_B` so old and new saves stay compatible, and the ICS description keeps an empty `XP:` line, byte for byte like the PicoCalc.
+
+As in PicoCalc v1.12, the notepad is gone (LPS-DOS-115-CHG02) and the Home menu is renumbered **0 Date, 1 Activities, 2 Weight tracker, 3 Kanban, 4 Christian Rosary, 5 Daily review, 6 Config, 7 Reminders, 8 Timer, 9 Close the day**; an archived day offers **1 Activities, 2 Weight tracker**. A note already saved by an older version is kept in the save and still exported to the ICS (`\NNote: ...`) when its day is closed; it is no longer shown or editable.
 
 ![Home screen](captures/01-home-en.png)
 
@@ -33,7 +35,7 @@ As in PicoCalc v1.12, XP and keepsakes no longer appear on any screen (LPS-DOS-1
 |---|---|
 | Date entry (2000–2099) | Yes |
 | 16 activities, 2 pages | Yes |
-| Notepad 96 chars | Yes |
+| Notepad | Removed, as in v1.12 (legacy notes kept in SAVE and ICS) |
 | Weight expected/measured | Yes |
 | Kanban 24 tasks TODO/DOING/DONE | Yes |
 | Christian Rosary (4 modes, FR/EN) | Yes (accents ASCII-folded for CP437) |
@@ -159,9 +161,9 @@ unshifted top-row maps to digits for Date/Weight.
 
 ### Deferred SAVE (Book 8088 HDD)
 
-Edits (date, activities, note, kanban, …) update **RAM only** and set a dirty
+Edits (date, activities, weight, kanban, …) update **RAM only** and set a dirty
 flag. Disk write of one `SAVE_A`/`SAVE_B` slot (~4.6 KB) happens on:
-Esc back to Home (if dirty), confirming Date/Note/Weight/Config, Close the day,
+Esc back to Home (if dirty), confirming Date/Weight/Config, Close the day,
 and Quit (`Q`). Status shows `Saving...` / `Saved`. Post-write verify-read was
 removed (too slow on 8088 + tiny HDD).
 
@@ -207,8 +209,21 @@ DOSBox 0.74 cannot set `cputype=8086`; use DOSBox-X or DOSBox Staging.
 
 Global: **Up/Down** select, **Enter** confirm, **Esc** back. **Q** quits on Home.
 
-Home digits `0`–`9` open Date / Activities / Note / Weight / Kanban / Rosary /
-Daily review / Config / Reminders / Timer; item 10 closes the day.
+Home digits, as in PicoCalc v1.12:
+
+| Key | Today | Archived day |
+|---|---|---|
+| `0` | Date | — |
+| `1` | Activities | Activities (read-only) |
+| `2` | Weight tracker | Weight tracker (read-only) |
+| `3` | Kanban | — |
+| `4` | Christian Rosary | — |
+| `5` | Daily review | — |
+| `6` | Config | — |
+| `7` | Reminders | — |
+| `8` | Timer | — |
+| `9` | Close the day | — |
+
 **Left/Right** browse the last 31 closed days (read-only).
 
 The PicoCalc README documents the full per-screen binding list; this port follows
@@ -261,9 +276,11 @@ Memes formats `SAVE_A/B.BIN`, ICS et CSV que le firmware PicoCalc et LPS Console
 
 Les fichiers prets a lancer sont a la **racine du depot** : [`../LPSCOMP.EXE`](../LPSCOMP.EXE), [`../ROSARY.DAT`](../ROSARY.DAT) et [`../HELLO.EXE`](../HELLO.EXE). Copiez **`LPSCOMP.EXE` et `ROSARY.DAT` dans le meme dossier** sur le Book 8088 ; `ROSARY.DAT` contient les textes du rosaire. Sans lui, tout fonctionne sauf le rosaire, qui affiche *ROSARY.DAT introuvable : copiez-le a cote de LPSCOMP.EXE*. `make dos` / `make rosary` / `make hello` reconstruisent seulement dans ce dossier (copies non versionnees). Apres une modification des sources, recopiez-les a la racine (`cp LPSCOMP.EXE ROSARY.DAT HELLO.EXE ..`). La CI reconstruit et echoue si les fichiers a la racine different.
 
-L'ecran utilise tout le mode texte **80×25**. L'accueil a deux volets : le menu a gauche, le resume du jour a droite (date, poids, note, rappels, kanban). Les 16 activites tiennent sur une page en deux colonnes. Le kanban montre A FAIRE, EN COURS et FINI cote a cote. Le rosaire et le bloc notes utilisent des lignes de 80 caracteres ; le minuteur reste centre. Les touches, les textes, les palettes et les octets SAVE/ICS/CSV ne changent pas. Sur 8088, seules les cellules modifiees sont reecrites.
+L'ecran utilise tout le mode texte **80×25**. L'accueil a deux volets : le menu a gauche, le resume du jour a droite (date, poids, rappels, kanban). Les 16 activites tiennent sur une page en deux colonnes. Le kanban montre A FAIRE, EN COURS et FINI cote a cote. Le rosaire utilise des lignes de 80 caracteres ; le minuteur reste centre. Les touches, les textes, les palettes et les octets SAVE/ICS/CSV ne changent pas. Sur 8088, seules les cellules modifiees sont reecrites.
 
 Comme sur la PicoCalc v1.12, l'XP et les souvenirs n'apparaissent plus sur aucun ecran (LPS-DOS-115-CHG01). La ligne sous la barre de titre affiche la date longue et la semaine ISO du jour affiche, par exemple **Dimanche 8 Novembre 2026 (semaine 45)** ; elle reste vide pour un jour sans date. L'XP reste enregistree dans `SAVE_A`/`SAVE_B` pour la compatibilite, et la description ICS garde une ligne `XP:` vide, comme sur la PicoCalc.
+
+Comme sur la PicoCalc v1.12, le bloc notes disparait (LPS-DOS-115-CHG02) et le menu d'accueil est renumerote : **0 Date, 1 Activites, 2 Suivi du poids, 3 Kanban, 4 Rosaire chretien, 5 Revue journaliere, 6 Config, 7 Rappels, 8 Minuteur, 9 Terminer le jour**. Un jour archive propose **1 Activites, 2 Suivi du poids**. Une note deja enregistree par une ancienne version reste dans la sauvegarde et part toujours dans l'ICS (`\NNote: ...`) a la cloture du jour ; elle n'est plus affichee ni modifiable.
 
 ## Book 8088 / materiel reel
 
@@ -274,7 +291,7 @@ Correctifs : tampons en BSS, pile a **4 Ko** (`-k4096`; elle avait ete montee a
 `HELLO.EXE`. Deuxieme bug : gel clavier sur Date/Activites — tampons SAVE encore
 trop gros sur la pile ; tout est en BSS, clavier en int 16h pur. Les editions
 restent en RAM (drapeau dirty) et un seul slot A/B est ecrit en quittant un
-ecran, en confirmant Date/Note/Poids/Config, en cloturant le jour, ou avec **Q**.
+ecran, en confirmant Date/Poids/Config, en cloturant le jour, ou avec **Q**.
 
 ## Compilation
 

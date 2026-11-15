@@ -137,6 +137,52 @@ static void check_rosary_dat(const char *tmpdir){
     rosary_unload(); rosary_set_path(ROSARY_DAT_NAME);
 }
 
+/* LPS-DOS-115-CHG02 (PicoCalc LPS-112-CHG05): no notepad, menu 0-9, archive
+ * menu 1-2, legacy notes kept in the save and exported to the ICS. */
+static int any_row(Platform *hw, const char *text){
+    int r; for(r=0;r<ROWS;r++) if(strstr(plat_host_row(hw,r),text)) return 1; return 0;
+}
+static void check_menu_and_legacy_note(const char *tmpdir){
+    static unsigned char store3[8192]; App *a=(App*)store3; Platform *hw; State s; Blob b;
+    uint32_t gen=0; int active=0; unsigned i; char path[256], got[2048]; FILE *f; size_t n;
+    static const char *labels[10]={"0  Date","1  Activities","2  Weight tracker","3  Kanban","4  Christian Rosary",
+        "5  Daily review","6  Config","7  Reminders","8  Timer","9  Close the day"};
+    static const int screens[10]={SCR_DATE,SCR_ACTIVITIES,SCR_WEIGHT,SCR_KANBAN,SCR_ROSARY_MODE,
+        SCR_DAILY_REVIEW,SCR_CONFIG,SCR_REMINDERS,SCR_TIMER_SELECT,SCR_FINISH};
+    rm_tree(tmpdir); mkdir(tmpdir,0755); lps_set_data_dir(tmpdir); lps_ensure_dirs();
+    /* A save written before v1.12 with a note on today. */
+    state_init(&s); s.today.flags=3; strcpy(s.today.note,"Legacy note, kept; really");
+    encode_state(&s,&b); assert(save_write_ab(tmpdir,b.bytes,b.size,&gen,&active));
+    hw=plat_host_create(0); app_init(a,hw); app_start(a);
+    assert(app_screen(a)==SCR_HOME);
+    for(i=0;i<10;i++) assert(strstr(plat_host_row(hw,7+(int)i),labels[i]));
+    assert(!any_row(hw,"Notepad") && !any_row(hw,"NOTEPAD") && !any_row(hw,"Legacy note") && !any_row(hw,"10 "));
+    assert(strstr(plat_host_row(hw,7),"WEIGHT TRACKER") && strstr(plat_host_row(hw,11),"REMINDERS") && strstr(plat_host_row(hw,16),"KANBAN"));
+    for(i=0;i<10;i++){
+        rosary_set_path(ROSARY_DAT_NAME);
+        app_key(a,(int)('0'+i));
+        if((int)app_screen(a)!=screens[i]){ fprintf(stderr,"key %u -> screen %d\n",i,(int)app_screen(a)); assert(0); }
+        app_key(a,KEY_ESCAPE); assert(app_screen(a)==SCR_HOME);
+    }
+    for(i=0;i<10;i++) app_key(a,KEY_DOWN); /* wraps over exactly 10 entries */
+    app_key(a,KEY_UP); app_key(a,KEY_ENTER); assert(app_screen(a)==SCR_FINISH);
+    /* Close the day: the legacy note goes to the ICS and stays in the history. */
+    app_key(a,KEY_ENTER); assert(app_screen(a)==SCR_REWARD); app_key(a,KEY_ENTER);
+    assert(strcmp(app_state(a)->history[0].note,"Legacy note, kept; really")==0 && app_state(a)->today.note[0]==0);
+    sprintf(path,"%s/EXPORT\\2026-09-17_LPS-Companion.ics",tmpdir);
+    f=fopen(path,"rb"); assert(f); n=fread(got,1,sizeof(got)-1,f); fclose(f); got[n]=0;
+    assert(strstr(got,"DESCRIPTION:Activities: Walk, Diet\\NXP:\\NNote: Legacy note\\, kept\\; really\r\nEND:VEVENT"));
+    /* Archived day: 1 Activities, 2 Weight; other digits are read-only. */
+    app_key(a,KEY_LEFT);
+    assert(strstr(plat_host_row(hw,7),"1  Activities") && strstr(plat_host_row(hw,8),"2  Weight tracker") && !strstr(plat_host_row(hw,9),"Kanban"));
+    assert(!any_row(hw,"Legacy note"));
+    app_key(a,'3'); assert(app_screen(a)==SCR_HOME && strstr(plat_host_row(hw,23),"read-only"));
+    app_key(a,'1'); assert(app_screen(a)==SCR_ACTIVITIES); app_key(a,KEY_ESCAPE);
+    app_key(a,'2'); assert(app_screen(a)==SCR_WEIGHT); app_key(a,KEY_ESCAPE);
+    app_key(a,KEY_DOWN); app_key(a,KEY_DOWN); app_key(a,KEY_ENTER); assert(app_screen(a)==SCR_ACTIVITIES); /* 2 entries wrap */
+    app_key(a,KEY_ESCAPE); app_key(a,KEY_RIGHT);
+}
+
 int main(void){
     const char *tmpdir="/tmp/lps-msdos-test";
     State s, out; Blob b; int32_t g=0; Date calendar; Day day;
@@ -227,7 +273,7 @@ int main(void){
     assert(row_has(hw,1,"Thursday 17 September 2026 (week 38)") && row_has(hw,2,"ARCHIVED DAY") && !any_xp(hw));
     assert(row_has(hw,5,"3/16 activities"));
     app_key(app,KEY_RIGHT);
-    app_key(app,'7'); app_key(app,'1'); app_key(app,'2'); app_key(app,'3'); /* Config: French, save */
+    app_key(app,'6'); app_key(app,'1'); app_key(app,'2'); app_key(app,'3'); /* Config: French, save */
     assert(app_state(app)->language==LANG_FR && app_screen(app)==SCR_HOME);
     assert(row_has(hw,1,"Vendredi 18 Septembre 2026 (semaine 38)") && row_has(hw,5,"0/16 activites") && !any_xp(hw));
     { /* the exported ICS file on disk carries the empty XP line */
@@ -281,7 +327,7 @@ int main(void){
         rm_tree(tmpdir); mkdir(tmpdir,0755); lps_set_data_dir(tmpdir); lps_ensure_dirs();
         rh=plat_host_create(0); app_init(ra,rh); app_start(ra);
         rosary_set_path(ROSARY_DAT_NAME);
-        app_key(ra,'5'); assert(app_screen(ra)==SCR_ROSARY_MODE && rosary_loaded());
+        app_key(ra,'4'); assert(app_screen(ra)==SCR_ROSARY_MODE && rosary_loaded());
         app_key(ra,KEY_ENTER); app_key(ra,KEY_ENTER); /* decade mode, today's set */
         app_key(ra,KEY_ENTER); app_key(ra,KEY_RIGHT); /* first decade, mystery step */
         assert(app_screen(ra)==SCR_ROSARY_PRAYER);
@@ -290,20 +336,22 @@ int main(void){
             char cwd[512]; assert(getcwd(cwd,sizeof(cwd)));
             assert(chdir(tmpdir)==0);
             rosary_set_path("/tmp/lps-msdos-test/none/ROSARY.DAT");
-            app_key(ra,'5');
+            app_key(ra,'4');
             assert(app_screen(ra)==SCR_HOME && !rosary_loaded());
             assert(strstr(plat_host_row(rh,23),"ROSARY.DAT not found: copy it next to LPSCOMP.EXE"));
             {   unsigned char junk[32]; memset(junk,'z',sizeof(junk));
-                write_file("ROSARY.DAT",junk,sizeof(junk)); app_key(ra,'5');
+                write_file("ROSARY.DAT",junk,sizeof(junk)); app_key(ra,'4');
                 assert(app_screen(ra)==SCR_HOME && strstr(plat_host_row(rh,23),"ROSARY.DAT is damaged: copy it again"));
                 remove("ROSARY.DAT"); }
             assert(chdir(cwd)==0);
             rosary_set_path(ROSARY_DAT_NAME);
-            app_key(ra,'5'); assert(app_screen(ra)==SCR_ROSARY_MODE); app_key(ra,KEY_ESCAPE);
+            app_key(ra,'4'); assert(app_screen(ra)==SCR_ROSARY_MODE); app_key(ra,KEY_ESCAPE);
         }
     }
 
-    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, fixture decode (%u captures)\n", 0);
+    check_menu_and_legacy_note(tmpdir);
+
+    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }
