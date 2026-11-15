@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <dos.h>
+#include <conio.h>
 
 typedef struct {
     Platform iface;
@@ -20,6 +21,9 @@ typedef struct {
     unsigned video_seg; /* 0xB800 colour or 0xB000 mono */
     int mono;
     int use_bios; /* 1 = int 10h teletype only (safest) */
+    int ega;            /* EGA/VGA BIOS present (INT 10h AH=12h answers) */
+    int blink_was_on;   /* attribute bit 7 meant blink when we started */
+    unsigned cursor_shape; /* BIOS cursor start/end lines, restored on exit */
 } DosPlat;
 
 static DosPlat *self_of(Platform *p){ return (DosPlat*)p->user; }
@@ -78,6 +82,52 @@ static void ensure_text_mode(DosPlat *d){
     /* Hide hardware cursor (optional; ignore failure) */
     r.h.ah = 0x01; r.h.ch = 0x20; r.h.cl = 0x00;
     int86(0x10, &r, &r);
+}
+
+/* LPS-DOS-115-CHG03c: highlighted bars use a bright background (attribute
+ * bit 7). By default CGA/EGA/VGA read bit 7 as "blink", so the bar text
+ * flashed. We switch bit 7 to "bright background" at start-up and put the
+ * blink setting back on exit.
+ *  - EGA/VGA: INT 10h AX=1003h, BL=0 off / 1 on.
+ *  - CGA (no AX=1003h): the mode control register 3D8h, bit 5; the BIOS keeps
+ *    its last value at 0040:0065, which we update too.
+ *  - MDA/mono: attribute 70h has no bit 7; nothing to do. */
+static unsigned char far *bios_mode_ctl(void){ return (unsigned char far *)MK_FP(0x40,0x65); }
+static void set_blink(DosPlat *d, int on){
+    union REGS r;
+    if(d->mono) return;
+    if(d->ega){
+        r.x.ax=0x1003; r.h.bl=(unsigned char)(on?1:0); r.h.bh=0;
+        int86(0x10,&r,&r);
+    }else{
+        unsigned char v=*bios_mode_ctl();
+        if(!(v&0x08)) v=0x09; /* no valid copy: 80x25 colour text, video on */
+        v=(unsigned char)(on ? (v|0x20) : (v&~0x20));
+        outp(0x3D8,v);
+        *bios_mode_ctl()=v;
+    }
+}
+static void detect_adapter(DosPlat *d){
+    union REGS r; unsigned char v;
+    r.h.ah=0x12; r.h.bl=0x10; r.h.bh=0xFF; r.x.cx=0xFFFF;
+    int86(0x10,&r,&r);
+    d->ega = r.h.bl!=0x10; /* a CGA/MDA BIOS leaves BL unchanged */
+    v=*bios_mode_ctl();
+    d->blink_was_on = !(v&0x08) || (v&0x20); /* unknown -> DOS default: on */
+    r.h.ah=0x03; r.h.bh=0; int86(0x10,&r,&r);
+    d->cursor_shape=r.x.cx;
+}
+/* Leave DOS as found: last frame kept but without bit 7 (so it cannot start
+ * blinking), blink setting and cursor shape restored. */
+void plat_dos_shutdown(Platform *p){
+    DosPlat *d=self_of(p); union REGS r; int i;
+    if(!d->mono && !d->use_bios){
+        unsigned char far *vid=(unsigned char far *)MK_FP(d->video_seg,0);
+        for(i=0;i<ROWS*COLUMNS;i++) vid[i*2+1]&=0x7F;
+    }
+    set_blink(d,d->blink_was_on);
+    r.h.ah=0x01; r.x.cx=d->cursor_shape; int86(0x10,&r,&r);
+    r.h.ah=0x02; r.h.bh=0; r.h.dh=ROWS-1; r.h.dl=0; int86(0x10,&r,&r);
 }
 
 static void dos_clear(Platform *p){
@@ -243,7 +293,9 @@ Platform *plat_dos_create(void){
     dp->iface.export_weight_csv=dos_export_csv;
     dp->palette=PAL_GREEN;
     detect_video(dp);
+    detect_adapter(dp);
     ensure_text_mode(dp);
+    set_blink(dp,0); /* after any mode set, which turns blink back on */
     /* Storage probe AFTER video so a slow/failing disk never blanks with no banner */
     dp->mounted=probe_storage();
     return &dp->iface;

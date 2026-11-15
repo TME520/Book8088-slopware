@@ -7,6 +7,7 @@
 
 #ifdef LPS_DOS
 Platform *plat_dos_create(void);
+void plat_dos_shutdown(Platform *p);
 int plat_dos_get_key(void);
 lps_tick_t plat_dos_millis(void);
 void plat_dos_bios_puts(const char *s);
@@ -86,6 +87,7 @@ int main(int argc, char **argv){
             if(app_screen(app)==SCR_HOME && (k=='q'||k=='Q')){
                 app_flush_save(app);
                 app_render(app);
+                plat_dos_shutdown(hw);
                 break;
             }
             app_key(app,k);

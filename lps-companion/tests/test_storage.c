@@ -322,6 +322,73 @@ static void check_french_cp437(const char *tmpdir){
     else french_screen_ok(hw,"close the day refused");
 }
 
+/* LPS-DOS-115-CHG03c: word wrap at spaces, CP437 one byte per cell. */
+static void wrap_expect(const char *text, unsigned width, const char *const *want){
+    const char *p=text; unsigned len, n=0;
+    while(*p){
+        const char *next=wrap_line(p,width,&len);
+        assert(want[n] && len==strlen(want[n]) && memcmp(p,want[n],len)==0);
+        assert(next>p); p=next; n++;
+    }
+    assert(!want[n] && wrap_count(text,width)==n);
+}
+static void check_wrapped(const char *text, unsigned width){
+    const char *p=text; unsigned len;
+    while(*p){
+        const char *next=wrap_line(p,width,&len);
+        assert(len<=width && len>0);
+        assert(p[0]!=' ' && p[len-1]!=' ');             /* no edge spaces */
+        assert(p[len]==' ' || p[len]==0);                /* breaks only at a space: no word split */
+        if(*next){ /* the next word did not fit on this line */
+            const char *w=next; unsigned wl=0; while(w[wl] && w[wl]!=' ') wl++;
+            assert(len+1+wl>width);
+        }
+        p=next;
+    }
+}
+static void check_wrap(const char *tmpdir){
+    static const char *const a[]={"aaa bbb","ccc",0};
+    static const char *const b[]={"abcd","efgh","ij",0};
+    static const char *const c[]={"one","two",0};
+    static const char *const d[]={"\202t\202","\212re",0};
+    static const char *const e[]={"ab","cdef","gh i",0};
+    static const char *const f[]={"exactly8","next",0};
+    static const char *const g[]={"x",0};
+    unsigned id; int lang;
+    wrap_expect("aaa bbb ccc",7,a);
+    wrap_expect("abcdefghij",4,b);          /* longer than the line: hard break */
+    wrap_expect("one   two",4,c);           /* spaces at the break are dropped */
+    wrap_expect("été ère",4,d);             /* CP437: one byte per cell */
+    wrap_expect("ab cdefgh i",4,e);
+    wrap_expect("exactly8 next",8,f);       /* a line can fill the width exactly */
+    wrap_expect("x",80,g);
+    assert(wrap_count("",80)==0);
+    /* Every rosary text, EN and FR: no line over 80, no word split. */
+    for(id=0;id<ROS_T_COUNT;id++) for(lang=0;lang<2;lang++) check_wrapped(rosary_source_text(id,lang),COLUMNS);
+    {   /* On screen: the French Hail Mary, rows 6.., joined with single spaces, is the text. */
+        static unsigned char store6[8192]; App *ap=(App*)store6; Platform *hw; char joined[1024]; int r; unsigned i;
+        const char *want;
+        rm_tree(tmpdir); mkdir(tmpdir,0755); lps_set_data_dir(tmpdir); lps_ensure_dirs();
+        hw=plat_host_create(0); app_init(ap,hw); app_start(ap); rosary_set_path(ROSARY_DAT_NAME);
+        app_key(ap,'6'); app_key(ap,'1'); app_key(ap,'2'); app_key(ap,'3');
+        app_key(ap,'4'); app_key(ap,KEY_ENTER); app_key(ap,KEY_ENTER); app_key(ap,KEY_ENTER);
+        for(i=0;i<3;i++) app_key(ap,KEY_RIGHT);
+        want=rosary_source_text(ROS_T_HAIL,LANG_FR);
+        assert(app_screen(ap)==SCR_ROSARY_PRAYER && any_row(hw,"JE VOUS SALUE MARIE"));
+        joined[0]=0;
+        for(r=6;r<22;r++){
+            char row[COLUMNS+1]; int n; strcpy(row,plat_host_row(hw,r));
+            n=(int)strlen(row); while(n>0 && row[n-1]==' ') row[--n]=0;
+            if(!n) continue;
+            if(joined[0]) strcat(joined," ");
+            strcat(joined,row);
+        }
+        assert(strcmp(joined,want)==0);
+        assert(wrap_count(want,COLUMNS)>=3);
+        app_key(ap,KEY_ESCAPE);
+    }
+}
+
 int main(void){
     const char *tmpdir="/tmp/lps-msdos-test";
     State s, out; Blob b; int32_t g=0; Date calendar; Day day;
@@ -491,8 +558,9 @@ int main(void){
     check_menu_and_legacy_note(tmpdir);
     check_timer(tmpdir);
     check_french_cp437(tmpdir);
+    check_wrap(tmpdir);
 
-    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, fixture decode (%u captures)\n", 0);
+    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

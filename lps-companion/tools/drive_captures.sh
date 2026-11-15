@@ -6,7 +6,7 @@ set -e
 cd "$(dirname "$0")/.."
 G=build/cp437
 gcc -std=c89 -Wall -I$G -DLPS_HOST -o tools/capture_drive $G/capture_drive.c \
-  $G/state.c $G/ics.c $G/save.c $G/paths.c $G/rosary.c $G/app.c $G/cp437.c $G/plat_host.c
+  $G/state.c $G/ics.c $G/save.c $G/paths.c $G/rosary.c $G/app.c $G/cp437.c $G/wrap.c $G/plat_host.c
 mkdir -p captures
 rm -rf /tmp/lps-msdos-cap
 mkdir -p /tmp/lps-msdos-cap

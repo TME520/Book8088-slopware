@@ -16,7 +16,7 @@ HOST_WARN = -std=c89 -Wall -Wextra -Wno-unused-parameter -O2 -DLPS_HOST
 GEN = build/cp437
 HOST_CFLAGS = $(HOST_WARN) -I$(GEN)
 
-SRC_COMMON = state.c ics.c save.c paths.c rosary.c app.c cp437.c
+SRC_COMMON = state.c ics.c save.c paths.c rosary.c app.c cp437.c wrap.c
 HEADERS = $(GEN)/lps.h $(GEN)/rosary.h
 # rosary_text.c is the single source of the prayer texts. It is NOT linked into
 # LPSCOMP.EXE: tools/mkrosary turns it into ROSARY.DAT (LPS-DOS-115-CHG03b).

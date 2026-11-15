@@ -131,6 +131,11 @@ uint32_t crc32(const uint8_t *p, size_t n);
 size_t cp437_to_utf8(unsigned char c, char *out); /* out: up to 3 bytes */
 int unicode_to_cp437(unsigned long cp);            /* -1 if CP437 lacks it */
 int cp437_text_byte(unsigned char c);              /* printable ASCII or CP437 letter */
+/* wrap.c (LPS-DOS-115-CHG03c): word wrap. wrap_line sets *len to the cells of
+ * the line starting at text (at most width) and returns where the next line
+ * starts; wrap_count returns the number of lines. */
+const char *wrap_line(const char *text, unsigned width, unsigned *len);
+unsigned wrap_count(const char *text, unsigned width);
 void encode_state(const State *s, Blob *b);
 int decode_state(const uint8_t *bytes, size_t size, State *out);
 void state_init(State *s);

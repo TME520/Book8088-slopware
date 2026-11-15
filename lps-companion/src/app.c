@@ -89,12 +89,10 @@ static void center_line(App *a, int row, const char *text, int reverse){
 }
 #define REVIEW_PAGE 15
 #define ROSARY_LINES 16
-static unsigned display_cells(const char *text){ unsigned n=0; while(*text++) n++; return n; }
-static void cell_slice(const char *text, unsigned first, unsigned count, char *out, size_t capacity){
-    size_t n=0;
-    while(*text && first){ text++; first--; }
-    while(*text && count && n+1<capacity){ out[n++]=*text++; count--; }
-    out[n]=0;
+/* Rosary pages: ROSARY_LINES word-wrapped lines each (LPS-DOS-115-CHG03c). */
+static unsigned rosary_pages(const char *text){
+    unsigned pages=(wrap_count(text,COLUMNS)+ROSARY_LINES-1)/ROSARY_LINES;
+    return pages?pages:1;
 }
 
 /* Apply edit in RAM only — disk writes go through flush_save (slow on 8088 HDD). */
@@ -552,12 +550,10 @@ void app_key(App *a, int k){
         if(k==KEY_ENTER){ a->rosaryDecade=a->selection; a->rosaryStep=a->rosaryPage=0; go(a,SCR_ROSARY_PRAYER); }
     }else if(a->screen==SCR_ROSARY_PRAYER){
         const char *text=rosary_text(a->state.language,a->rosaryMode,a->rosarySet,a->rosaryDecade,a->rosaryStep);
-        unsigned page_chars=ROSARY_LINES*(unsigned)COLUMNS;
-        unsigned pages=(display_cells(text)+page_chars-1)/page_chars;
-        if(!pages) pages=1;
+        unsigned pages=rosary_pages(text);
         if(k==KEY_LEFT){
             if(a->rosaryPage) a->rosaryPage--;
-            else if(a->rosaryStep){ a->rosaryStep--; text=rosary_text(a->state.language,a->rosaryMode,a->rosarySet,a->rosaryDecade,a->rosaryStep); a->rosaryPage=(display_cells(text)+page_chars-1)/page_chars-1; }
+            else if(a->rosaryStep){ a->rosaryStep--; text=rosary_text(a->state.language,a->rosaryMode,a->rosarySet,a->rosaryDecade,a->rosaryStep); a->rosaryPage=rosary_pages(text)-1; }
         }else if(k==KEY_RIGHT||k==KEY_ENTER||k==' '){
             if(a->rosaryPage+1<pages) a->rosaryPage++;
             else if(a->rosaryStep+1<rosary_steps(a->rosaryMode)){ a->rosaryStep++; a->rosaryPage=0; }
@@ -802,9 +798,7 @@ void app_render(App *a){
         unsigned decade=rosary_view_decade(a->rosaryMode,a->rosaryDecade,a->rosaryStep);
         unsigned count=rosary_view_count(a->rosaryMode,a->rosaryDecade,a->rosaryStep);
         const char *text=rosary_text(a->state.language,a->rosaryMode,a->rosarySet,a->rosaryDecade,a->rosaryStep);
-        unsigned page_chars=ROSARY_LINES*(unsigned)COLUMNS;
-        unsigned pages=(display_cells(text)+page_chars-1)/page_chars;
-        if(!pages) pages=1;
+        unsigned pages=rosary_pages(text);
         sprintf(b,"%s  %u/%u", rosary_part_name(a->state.language,a->rosaryMode,a->rosaryDecade,a->rosaryStep), a->rosaryStep+1, rosary_steps(a->rosaryMode));
         center_line(a,3,b,1);
         if(part==RP_MYSTERY||part==RP_SCRIPTURE||part==RP_MEDITATION||part==RP_SILENCE){
@@ -818,10 +812,14 @@ void app_render(App *a){
             beads[10]=0;
             line(a,5,beads,0);
         }else if(part==RP_OPEN_HAIL){ sprintf(b,tr(a,"Opening Hail Mary %u/3","Ave Maria d'ouverture %u/3"), count); line(a,4,b,0); }
-        for(i=0;i<ROSARY_LINES;i++){
-            char slice[COLUMNS+1];
-            cell_slice(text, a->rosaryPage*page_chars+i*(unsigned)COLUMNS, (unsigned)COLUMNS, slice, sizeof(slice));
-            line(a,6+(int)i,slice,0);
+        {   const char *p=text; unsigned len, n;
+            for(n=0; *p && n<a->rosaryPage*ROSARY_LINES; n++) p=wrap_line(p,COLUMNS,&len);
+            for(i=0;i<ROSARY_LINES && *p;i++){
+                char slice[COLUMNS+1]; const char *next=wrap_line(p,COLUMNS,&len);
+                memcpy(slice,p,len); slice[len]=0;
+                line(a,6+(int)i,slice,0);
+                p=next;
+            }
         }
         if(pages>1){ sprintf(b,tr(a,"Page %u/%u  Enter: continue","Page %u/%u  Entrée : continuer"), a->rosaryPage+1, pages); line(a,22,b,0); }
         else line(a,22,tr(a,"Enter: next prayer   <- previous","Entrée : suite       <- précédent"),0);
