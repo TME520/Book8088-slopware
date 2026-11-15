@@ -996,8 +996,8 @@ static void check_bios_keys(const char *dir){
     app_key(app,'n'); fr_type(app,"\202t\202 & \205"); assert(row_has(hw,6,"\202t\202 & \205")); app_key(app,KEY_ENTER);
     assert(!strcmp(app_state(app)->activities[22].fr,"\xc3\xa9t\xc3\xa9 & \xc3\xa0"));
     app_key(app,KEY_ESCAPE);
-    fr_type(app,"\""); assert(app_screen(app)==SCR_KANBAN); app_key(app,'n'); fr_type(app,"a&(_'\"-\202"); app_key(app,KEY_ENTER); /* task text is ASCII: é is dropped, as before */
-    assert(app_state(app)->taskCount==1 && !strcmp(app_state(app)->tasks[0].name,"a&(_'\"-") && app_screen(app)==SCR_KANBAN);
+    fr_type(app,"\""); assert(app_screen(app)==SCR_KANBAN); app_key(app,'n'); fr_type(app,"a&(_'\"-\202"); app_key(app,KEY_ENTER); /* é is a letter here too (CHG06c) */
+    assert(app_state(app)->taskCount==1 && !strcmp(app_state(app)->tasks[0].name,"a&(_'\"-\202") && app_screen(app)==SCR_KANBAN);
     app_key(app,KEY_ESCAPE);
     fr_type(app,"\212"); assert(app_screen(app)==SCR_REMINDERS); app_key(app,'n'); assert(app_screen(app)==SCR_REMINDER_EDIT);
     app_key(app,KEY_DOWN); fr_type(app,"&"); /* days field: & is 1 */
@@ -1005,6 +1005,89 @@ static void check_bios_keys(const char *dir){
     app_key(app,KEY_ENTER); assert(app_state(app)->reminderCount==1 && !strcmp(app_state(app)->reminders[0].text,"&\"'(") && app_state(app)->reminders[0].duration==11);
     app_key(app,KEY_ESCAPE); app_flush_save(app);
     assert(save_load(dir,&out,&gen,&active)==LOAD_OK && out.language==LANG_FR && out.taskCount==1 && out.activityCount==23);
+}
+
+/* LPS-DOS-115-CHG06c: accented task names and reminder texts. CP437 on screen
+ * and in the State, UTF-8 in the save, within the PicoCalc's 32 UTF-8 bytes. */
+static size_t both_saves(const char *dir, char *buf, size_t cap){
+    char p[256]; size_t n; jpath(p,dir,"SAVE_A.JSN"); n=exists(p)?slurp(p,buf,cap):0;
+    jpath(p,dir,"SAVE_B.JSN"); if(exists(p)) n+=slurp(p,buf+n,cap-n); buf[n]=0; return n;
+}
+static void check_accented_text(const char *dir){
+    static unsigned char store[16384]; static State s, out; App *app=(App*)store; Platform *hw;
+    uint32_t gen=0, check=0; int active=-1; unsigned i; char path[256], name[40];
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    choose_language(app,1);
+    app_key(app,'0'); erase(app,10); type_text(app,"2026-11-16"); app_key(app,KEY_ENTER);
+    /* Kanban: KEYB FR keys (é è ç à from the top row, ê ô î ï û from dead keys).
+     * 26 letters, 33 UTF-8 bytes: the final s does not fit. */
+    app_key(app,'3'); app_key(app,'n'); fr_type(app,"\220crire \205 H\202l\212ne, c\223t\202 ma\213s");
+    assert(row_has(hw,6,"\220crire \205 H\202l\212ne, c\223t\202 ma\213") && !row_has(hw,6,"ma\213s") && row_has(hw,9,"32/32 caract\212res"));
+    app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_KANBAN && any_row(hw,"\220crire \205 H\202l\212ne")); /* the column cuts long names */
+    assert(!strcmp(app_state(app)->tasks[0].name,"\220crire \205 H\202l\212ne, c\223t\202 ma\213"));
+    /* 16 é = 32 bytes; ₧ takes 3 (10 of them and "ab" = 32); a 2-byte letter does not fit in 1 byte. */
+    app_key(app,'n'); for(i=0;i<17;i++) app_key(app,plat_host_key(1,130));
+    assert(strlen(plat_host_row(hw,6))>=16 && row_has(hw,9,"32/32") && !row_has(hw,6,"\202\202\202\202\202\202\202\202\202\202\202\202\202\202\202\202\202"));
+    app_key(app,'a'); assert(row_has(hw,9,"32/32")); app_key(app,KEY_ENTER);
+    app_key(app,'n'); for(i=0;i<11;i++) app_key(app,0x9E); type_text(app,"abc"); assert(row_has(hw,9,"32/32")); app_key(app,KEY_ENTER);
+    app_key(app,'n'); for(i=0;i<30;i++) app_key(app,'x'); app_key(app,0x97); app_key(app,0x88); app_key(app,'y'); assert(row_has(hw,9,"32/32")); app_key(app,KEY_ENTER);
+    app_key(app,'n'); fr_type(app,"\226\203\214\210\211\201\230 \227\207\205\212 \237"); assert(row_has(hw,9,"26/32")); app_key(app,KEY_ENTER);
+    assert(app_state(app)->taskCount==5);
+    for(i=0;i<16;i++){ name[i]=(char)130; } name[16]=0;
+    assert(!strcmp(app_state(app)->tasks[1].name,name));
+    for(i=0;i<10;i++){ name[i]=(char)0x9E; } strcpy(name+10,"ab");
+    assert(!strcmp(app_state(app)->tasks[2].name,name));
+    /* Editing an accented name: Backspace takes one letter. */
+    app_key(app,KEY_UP); app_key(app,KEY_UP); app_key(app,KEY_UP); app_key(app,KEY_UP); app_key(app,KEY_ENTER);
+    assert(app_screen(app)==SCR_TASK_EDIT && row_has(hw,9,"32/32")); erase(app,1); assert(row_has(hw,9,"30/32")); /* ï */
+    fr_type(app,"s"); app_key(app,KEY_ENTER); assert(!strcmp(app_state(app)->tasks[0].name,"\220crire \205 H\202l\212ne, c\223t\202 mas"));
+    app_key(app,KEY_ESCAPE);
+    /* Reminder text, same 32-byte limit. */
+    app_key(app,'7'); app_key(app,'n'); app_key(app,KEY_DOWN); app_key(app,KEY_DOWN);
+    fr_type(app,"F\210te : cr\212me br\226l\202e \205 20h, d\202j\205 !");
+    assert(row_has(hw,11,"F\210te : cr\212me br\226l\202e \205 20h, ") && !row_has(hw,11,", d")); /* 32 bytes: the rest does not fit */
+    app_key(app,KEY_ENTER); assert(app_state(app)->reminderCount==1 && !strcmp(app_state(app)->reminders[0].text,"F\210te : cr\212me br\226l\202e \205 20h, "));
+    assert(any_row(hw,"F\210te : cr\212me br\226l\202e"));
+    app_key(app,KEY_ESCAPE); app_flush_save(app);
+    /* The save holds UTF-8, every byte of it (no cut at 32 bytes). */
+    both_saves(dir,jbuf,sizeof(jbuf));
+    assert(strstr(jbuf,"\"name\":\"\xc3\x89" "crire \xc3\xa0 H\xc3\xa9l\xc3\xa8ne, c\xc3\xb4t\xc3\xa9 mas\"}"));
+    assert(strstr(jbuf,"\"name\":\"\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\"}"));
+    assert(strstr(jbuf,"\"name\":\"\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7" "ab\"}"));
+    assert(strstr(jbuf,"xxxxxxx\xc3\xb9\"}") && strstr(jbuf,"\"name\":\"\xc3\xbb\xc3\xa2\xc3\xae\xc3\xaa\xc3\xab\xc3\xbc\xc3\xbf \xc3\xb9\xc3\xa7\xc3\xa0\xc3\xa8 \xc6\x92\"}"));
+    assert(strstr(jbuf,"\"text\":\"F\xc3\xaate : cr\xc3\xa8me br\xc3\xbbl\xc3\xa9" "e \xc3\xa0 20h, \"}"));
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && out.taskCount==5 && !strcmp(out.tasks[1].name,app_state(app)->tasks[1].name)
+        && !strcmp(out.reminders[0].text,app_state(app)->reminders[0].text));
+    /* The PicoCalc re-saves this one byte for byte (tests/fixtures/picocalc_accents.jsn,
+     * a DOS save of this kind passed through the PicoCalc writer): DOS loads
+     * it, shows the letters, and writes the same bytes. */
+    fresh_dir(dir); jpath(path,dir,"SAVE_A.JSN"); copy_file("tests/fixtures/picocalc_accents.jsn",path);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && out.taskCount==5 && out.reminderCount==1);
+    assert(!strcmp(out.tasks[0].name,"\220crire \205 H\202l\212ne, c\223t\202 mas") && !strcmp(out.tasks[2].name,name));
+    jpath(path,dir,"OUT.JSN"); assert(jsave_write(path,&out,gen,&check));
+    { size_t n=slurp("tests/fixtures/picocalc_accents.jsn",jbuf,sizeof(jbuf)), n2=slurp(path,jbuf2,sizeof(jbuf2)); assert(n==n2 && !memcmp(jbuf,jbuf2,n)); }
+    /* ICS: as on the PicoCalc, tasks and reminders are not exported; the
+     * note and activity names are UTF-8. */
+    { static char ics[2048]; strcpy(out.today.note,"No\211l \205 la for\210t");
+      assert(build_ics(&out.today,&out,0,0,LANG_FR,ics,sizeof(ics)));
+      assert(strstr(ics,"\\NNote: No\xc3\xabl \xc3\xa0 la for\xc3\xaat\r\n") && !strstr(ics,"crire") && !strstr(ics,"te : cr")); }
+    hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    if(app_screen(app)==SCR_REMINDER_POPUP) app_key(app,KEY_ENTER);
+    app_key(app,'3'); assert(any_row(hw,"\220crire \205 H\202l\212ne") && any_row(hw,"\202\202\202\202\202\202\202\202"));
+    app_key(app,KEY_ESCAPE); app_key(app,'7'); assert(any_row(hw,"F\210te : cr\212me br\226l\202e"));
+    /* BIN migration: the old binary saves only ever held ASCII (both writers
+     * were ASCII-only, and both readers refuse other bytes); accents typed
+     * after the migration go to the JSON save. */
+    fresh_dir(dir); sample_state(&s,1); strcpy(s.today.note,"ASCII"); strcpy(s.history[0].note,"ASCII"); s.tasks[0].status=TASK_TODO; strcpy(s.tasks[0].name,"Fix the bike"); strcpy(s.reminders[0].text,"Christmas");
+    write_bin(dir,"SAVE_A.BIN",&s,3);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_MIGRATED);
+    hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    if(app_screen(app)==SCR_REMINDER_POPUP) app_key(app,KEY_ENTER);
+    app_key(app,'3'); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_TASK_EDIT); type_text(app," \207a"); app_key(app,KEY_ENTER);
+    app_key(app,KEY_ESCAPE); app_flush_save(app); both_saves(dir,jbuf,sizeof(jbuf));
+    assert(strstr(jbuf,"\"name\":\"Fix the bike \xc3\xa7" "a\"}"));
+    fresh_dir(dir); strcpy(s.tasks[0].name,"Fix \202"); write_bin(dir,"SAVE_A.BIN",&s,3);
+    assert(save_load(dir,&out,&gen,&active)!=LOAD_MIGRATED);
 }
 
 int main(void){
@@ -1178,9 +1261,10 @@ int main(void){
     check_fast_rematch("tests/fixtures/picocalc_full.jsn");
     check_fast_rematch("tests/fixtures/picocalc_custom.jsn");
     check_bios_keys(tmpdir);
+    check_accented_text(tmpdir);
     assert(orphan_hits>0); /* some edit took a name history had stored */
 
-    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback, unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), fixture decode (%u captures)\n", 0);
+    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback, unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture), fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

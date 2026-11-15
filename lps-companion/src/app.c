@@ -372,6 +372,22 @@ static void edit_buf(char *value, size_t cap, int key){
     if(key==KEY_BACKSPACE||key==127){ if(len) value[len-1]=0; }
     else if(key>=32 && key<=126 && len+1<cap){ value[len]=(char)key; value[len+1]=0; }
 }
+/* LPS-DOS-115-CHG06c: bytes a CP437 text takes in UTF-8 (the save and the
+ * PicoCalc count these). */
+static unsigned utf8_length(const char *cp437){
+    char u[3]; unsigned n=0;
+    while(*cp437) n+=(unsigned)cp437_to_utf8((unsigned char)*cp437++,u);
+    return n;
+}
+/* Task name and reminder text: printable ASCII and the CP437 letters, as an
+ * activity name, while the UTF-8 form fits the PicoCalc field (utf8cap
+ * bytes); a letter that would not fit is not typed. */
+static void edit_text(char *value, unsigned utf8cap, int key){
+    size_t len=strlen(value); char u[3];
+    if(key==KEY_BACKSPACE||key==127){ if(len) value[len-1]=0; }
+    else if(key>=0 && key<=255 && cp437_text_byte((unsigned char)key)
+        && utf8_length(value)+(unsigned)cp437_to_utf8((unsigned char)key,u)<=utf8cap){ value[len]=(char)key; value[len+1]=0; }
+}
 static void begin_reminder_edit(App *a, unsigned index){
     Reminder r; memset(&r,0,sizeof(r));
     a->editingReminder=index; a->reminderField=0;
@@ -628,10 +644,10 @@ void app_key(App *a, int k){
                 if(index==g_scratch.reminderCount) g_scratch.reminderCount++;
                 if(commit(a,&g_scratch)) go(a,SCR_REMINDERS);
             }
-        }else if(k==KEY_BACKSPACE||k==127||(k>=32&&k<=126)){
+        }else if(k==KEY_BACKSPACE||k==127||(k>=32&&k<=255)){ /* 128-255: CP437 letters in the text (CHG06c) */
             if(a->reminderField==0){ if((k>='0'&&k<='9')||k=='-'||k==KEY_BACKSPACE||k==127) edit_buf(a->reminderDate,sizeof(a->reminderDate),k); }
             else if(a->reminderField==1){ if((k>='0'&&k<='9')||k==KEY_BACKSPACE||k==127) edit_buf(a->reminderDuration,sizeof(a->reminderDuration),k); }
-            else edit_buf(a->reminderText,sizeof(a->reminderText),k);
+            else edit_text(a->reminderText,REMINDER_TEXT_LENGTH,k);
         }
     }else if(a->screen==SCR_DATE){
         if(k==KEY_ENTER){ Date d;
@@ -723,7 +739,7 @@ void app_key(App *a, int k){
                 else { destination=g_scratch.taskCount; g_scratch.tasks[g_scratch.taskCount].status=(uint8_t)a->kanbanColumn; memcpy(g_scratch.tasks[g_scratch.taskCount].name,a->taskDraft,TASK_NAME_LENGTH+1); g_scratch.taskCount++; }
                 if(commit(a,&g_scratch)){ a->editedTask=destination; a->selection=task_position(a,a->kanbanColumn,a->editedTask); a->screen=SCR_KANBAN; a->message[0]=0; }
             }
-        }else edit_buf(a->taskDraft,sizeof(a->taskDraft),k);
+        }else edit_text(a->taskDraft,TASK_NAME_LENGTH,k);
     }else if(a->screen==SCR_DAILY_REVIEW){
         unsigned maximum=review_rows(a)>REVIEW_PAGE?review_rows(a)-REVIEW_PAGE:0;
         if(k==KEY_DOWN && a->reviewOffset<maximum) a->reviewOffset++;
@@ -1008,7 +1024,8 @@ void app_render(App *a){
     }else if(a->screen==SCR_TASK_EDIT){
         center_line(a,3, a->editedTask<TASK_CAPACITY?tr(a,"EDIT TASK","MODIFIER LA TÂCHE"):tr(a,"NEW TASK","NOUVELLE TÂCHE"),0);
         line(a,6,a->taskDraft,1);
-        sprintf(b,tr(a,"%u/32 characters","%u/32 caractères"),(unsigned)strlen(a->taskDraft)); line(a,9,b,0);
+        /* As the PicoCalc: the count is the name's bytes in UTF-8 (CHG06c). */
+        sprintf(b,tr(a,"%u/32 characters","%u/32 caractères"),utf8_length(a->taskDraft)); line(a,9,b,0);
         line(a,13,tr(a,"Enter: save task","Entrée : enregistrer la tâche"),0);
         line(a,15,tr(a,"Backspace: erase  Esc: cancel","Retour: effacer  Échap: annuler"),0);
     }else if(a->screen==SCR_DAILY_REVIEW){

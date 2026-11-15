@@ -29,6 +29,12 @@ not user data.
   accented French notes, tasks and reminders, meals `[3,0,15]`, and Kanban and
   Rosary hidden from Home.
 
-`tests/test_storage.c` loads both and checks that DOS writes them back byte
+- `picocalc_accents.jsn` (generation 4, LPS-DOS-115-CHG06c): a DOS save with
+  accented task names and a reminder typed through the app, at the PicoCalc's
+  32-byte UTF-8 limits (16 `é`, 10 `₧` + `ab`, `ûâîêëüÿ ùçàè ƒ`, `Fête : crème
+  brûlée à 20h, `), passed through the PicoCalc writer with
+  `/tmp/pcfix resave`: the PicoCalc accepted it and wrote the same bytes.
+
+`tests/test_storage.c` loads them and checks that DOS writes them back byte
 for byte, then edits one through the app. Regenerate them with
 `/tmp/pcfix full|custom FILE` (see the main README).
