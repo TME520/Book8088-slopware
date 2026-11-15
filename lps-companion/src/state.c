@@ -1,6 +1,7 @@
 /* state.c - dates, banked XP, encode/decode (Companion v1.11 wire formats 1-6). */
 #include "lps.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 const char *ACTIVITIES_FR[ACTIVITY_COUNT] = {
@@ -15,8 +16,12 @@ const Date FIRST_DATE = {2000,1,1};
 const Date LAST_DATE = {2099,12,31};
 const Date DEFAULT_DATE = {2026,9,17};
 
-/* DOS stack is tiny: decode into BSS then copy out on success. */
-State lps_decode_scratch; /* shared BSS; also used by save verify */
+/* DOS stack is tiny: decode into the far scratch then copy out on success. */
+LpsBuffers *lps_buf;
+int lps_buffers_init(void){
+    if(!lps_buf) lps_buf=(LpsBuffers*)calloc(1,sizeof(LpsBuffers));
+    return lps_buf!=0;
+}
 
 int leap(uint16_t year){ return year%4==0 && (year%100!=0 || year%400==0); }
 unsigned days_in_month(uint16_t year, uint8_t month){

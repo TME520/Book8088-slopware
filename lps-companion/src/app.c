@@ -4,9 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 
-/* State (~4.6K) and Blob (~6K) must NOT live on the tiny DOS stack. */
-static State g_scratch;
-static Blob g_blob;
+/* State (~4.6K) and Blob (~4.7K) must NOT live on the tiny DOS stack, nor in
+ * DGROUP: they are in the far-heap buffers (lps_buffers_init). */
+#define g_scratch (lps_buf->scratch)
+#define g_blob (lps_buf->blob)
 
 struct App {
     Platform *hw;
@@ -190,8 +191,20 @@ static void prune_reminders(App *a){
         g_scratch.reminderCount=(uint8_t)kept; commit(a,&g_scratch);
     }
 }
+static int is_rosary_screen(int s){ return s>=SCR_ROSARY_MODE && s<=SCR_ROSARY_COMPLETE; }
 static void go(App *a, int s){
     const Day *vd;
+    /* LPS-DOS-115-CHG03b: the prayer texts live in ROSARY.DAT. Load them when
+     * the Rosary opens; on failure stay put and say why. Free them on leaving. */
+    if(is_rosary_screen(s)){
+        int r=rosary_load();
+        if(r!=ROSARY_OK){
+            if(r==ROSARY_MISSING) say(a,tr(a,"ROSARY.DAT not found: copy it next to LPSCOMP.EXE","ROSARY.DAT introuvable : copiez-le a cote de LPSCOMP.EXE"));
+            else if(r==ROSARY_NO_MEMORY) say(a,tr(a,"Not enough memory for the rosary","Memoire insuffisante pour le rosaire"));
+            else say(a,tr(a,"ROSARY.DAT is damaged: copy it again","ROSARY.DAT endommage : recopiez-le"));
+            return;
+        }
+    }else rosary_unload();
     a->screen=s; a->selection=0; a->message[0]=0;
     if(s==SCR_DAILY_REVIEW) a->reviewOffset=0;
     if(s==SCR_LANGUAGE) a->selection=(unsigned)a->pendingLanguage;
@@ -295,6 +308,7 @@ static int suggested_mysteries(const App *a){
 
 size_t app_bytes(void){ return sizeof(struct App); }
 void app_init(App *app, Platform *hw){
+    lps_buffers_init(); /* idempotent; main checks it before app_init */
     memset(app,0,sizeof(*app));
     app->hw=hw;
     state_init(&app->state);

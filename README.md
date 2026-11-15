@@ -7,10 +7,13 @@ Lightweight programs for a Book 8088: Intel 8088, 640 KB RAM, HDD, EGA, MS-DOS 7
 Ready-to-run LPS Companion binaries are at the repository root. Copy them straight onto the Book 8088:
 
 - [`LPSCOMP.EXE`](LPSCOMP.EXE) — the companion
+- [`ROSARY.DAT`](ROSARY.DAT) — the rosary prayer texts; keep it **in the same directory as `LPSCOMP.EXE`**
 - [`HELLO.EXE`](HELLO.EXE) — BIOS smoke test
 
-Sources and rebuild instructions are in [`lps-companion/`](lps-companion/). A local `make dos` writes new EXEs there; those copies stay untracked. The root files above are the ones to download.
+Copy both `LPSCOMP.EXE` and `ROSARY.DAT`. Without `ROSARY.DAT` everything works except the Rosary, which then says the file is missing.
+
+Sources and rebuild instructions are in [`lps-companion/`](lps-companion/). A local `make dos rosary` writes new copies there; those copies stay untracked. The root files above are the ones to download.
 
 | Program | Directory | What it is |
 |---|---|---|
-| LPS Companion | [`lps-companion/`](lps-companion/) | MS-DOS port of [LPS Companion v1.11](https://github.com/TME520/LPS-Companion-PicoCalc) (Open Watcom, real-mode 8086, 80×25 text). Run [`LPSCOMP.EXE`](LPSCOMP.EXE) and [`HELLO.EXE`](HELLO.EXE) from this repository root. |
+| LPS Companion | [`lps-companion/`](lps-companion/) | MS-DOS port of [LPS Companion v1.11](https://github.com/TME520/LPS-Companion-PicoCalc) (Open Watcom, real-mode 8086, 80×25 text). Run [`LPSCOMP.EXE`](LPSCOMP.EXE) (with [`ROSARY.DAT`](ROSARY.DAT) beside it) and [`HELLO.EXE`](HELLO.EXE) from this repository root. |

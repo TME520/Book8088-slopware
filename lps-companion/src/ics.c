@@ -61,8 +61,9 @@ int build_ics(const Day *day, uint32_t totalXp, uint32_t dayXp, int language, ch
 }
 
 int write_ics_file(const char *export_dir, const Day *day, uint32_t totalXp, uint32_t dayXp, int language){
-    char path[200], buf[2048]; FILE *f;
-    if(!build_ics(day,totalXp,dayXp,language,buf,sizeof(buf))) return 0;
+    /* Far-heap buffer (lps_buffers_init), not the 4 KB DOS stack. */
+    char *buf=lps_buf->ics; char path[200]; FILE *f;
+    if(!build_ics(day,totalXp,dayXp,language,buf,sizeof(lps_buf->ics))) return 0;
     sprintf(path,"%s\\%04u-%02u-%02u_LPS-Companion.ics", export_dir,
         (unsigned)day->date.year,(unsigned)day->date.month,(unsigned)day->date.day);
     f=fopen(path,"wb"); if(!f) return 0;
@@ -72,7 +73,9 @@ int write_ics_file(const char *export_dir, const Day *day, uint32_t totalXp, uin
 }
 
 int write_weight_csv(const char *weights_dir, const Day *day){
-    char path[200], date[16], expected[16], actual[16], line[64], buf[8192];
+    /* The 8 KB year buffer used to sit on the 4 KB DOS stack and overran it
+     * into BSS. It now lives in the far-heap buffers (lps_buffers_init). */
+    char *buf=lps_buf->csv; char path[200], date[16], expected[16], actual[16], line[64];
     FILE *f; size_t used=0; long sz;
     if(!valid_date(day->date)) return 0;
     sprintf(path,"%s\\%04u.csv", weights_dir, (unsigned)day->date.year);
@@ -84,7 +87,7 @@ int write_weight_csv(const char *weights_dir, const Day *day){
     f=fopen(path,"rb");
     if(f){
         if(fseek(f,0,SEEK_END)!=0){ fclose(f); return 0; }
-        sz=ftell(f); if(sz<0 || (size_t)sz>=sizeof(buf)){ fclose(f); return 0; }
+        sz=ftell(f); if(sz<0 || (size_t)sz>=sizeof(lps_buf->csv)){ fclose(f); return 0; }
         rewind(f);
         used=(size_t)fread(buf,1,(size_t)sz,f);
         fclose(f);

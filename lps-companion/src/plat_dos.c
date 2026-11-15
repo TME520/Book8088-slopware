@@ -2,6 +2,7 @@
 #include "lps.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <dos.h>
 
 typedef struct {
@@ -225,26 +226,27 @@ static int probe_storage(void){
 }
 
 Platform *plat_dos_create(void){
-    static DosPlat d;
-    memset(&d,0,sizeof(d));
-    d.iface.user=&d;
-    d.iface.clear=dos_clear;
-    d.iface.text=dos_text;
-    d.iface.alert=dos_alert;
-    d.iface.large_text=dos_large;
-    d.iface.present=dos_present;
-    d.iface.set_palette=dos_set_palette;
-    d.iface.battery_low=dos_battery;
-    d.iface.load=dos_load;
-    d.iface.save=dos_save;
-    d.iface.export_ics=dos_export_ics;
-    d.iface.export_weight_csv=dos_export_csv;
-    d.palette=PAL_GREEN;
-    detect_video(&d);
-    ensure_text_mode(&d);
+    /* Far heap (large model): about 8 KB kept out of DGROUP and the EXE. */
+    DosPlat *dp=(DosPlat*)calloc(1,sizeof(DosPlat));
+    if(!dp) return 0;
+    dp->iface.user=dp;
+    dp->iface.clear=dos_clear;
+    dp->iface.text=dos_text;
+    dp->iface.alert=dos_alert;
+    dp->iface.large_text=dos_large;
+    dp->iface.present=dos_present;
+    dp->iface.set_palette=dos_set_palette;
+    dp->iface.battery_low=dos_battery;
+    dp->iface.load=dos_load;
+    dp->iface.save=dos_save;
+    dp->iface.export_ics=dos_export_ics;
+    dp->iface.export_weight_csv=dos_export_csv;
+    dp->palette=PAL_GREEN;
+    detect_video(dp);
+    ensure_text_mode(dp);
     /* Storage probe AFTER video so a slow/failing disk never blanks with no banner */
-    d.mounted=probe_storage();
-    return &d.iface;
+    dp->mounted=probe_storage();
+    return &dp->iface;
 }
 
 int plat_dos_get_key(void){

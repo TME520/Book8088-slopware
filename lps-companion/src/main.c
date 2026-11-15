@@ -1,5 +1,6 @@
 /* LPSCOMP.EXE entry (DOS) / host interactive. */
 #include "lps.h"
+#include "rosary.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,8 +22,22 @@ static void usage(void){
     puts("  Env LPSDIR overrides default.");
 }
 
+/* ROSARY.DAT sits next to LPSCOMP.EXE. On DOS 3+, argv[0] is the full path
+ * of the program (from the environment block), e.g. C:\LPSCOMP\LPSCOMP.EXE. */
+static void set_rosary_path(const char *exe){
+    char path[160]; size_t n=0, cut=0, i;
+    if(exe){
+        n=strlen(exe);
+        for(i=0;i<n;i++) if(exe[i]=='\\'||exe[i]=='/'||exe[i]==':') cut=i+1;
+    }
+    if(cut+sizeof(ROSARY_DAT_NAME)>sizeof(path)) cut=0;
+    if(cut) memcpy(path,exe,cut);
+    memcpy(path+cut,ROSARY_DAT_NAME,sizeof(ROSARY_DAT_NAME));
+    rosary_set_path(path);
+}
+
 int main(int argc, char **argv){
-    Platform *hw; App *app; static unsigned char store[8192];
+    Platform *hw; App *app;
     const char *dir=0; char *env;
 #ifdef LPS_DOS
     /* First visible proof of life via BIOS teletype (before dirs / mode). */
@@ -39,24 +54,26 @@ int main(int argc, char **argv){
     else dir="./LPS";
 #endif
     lps_set_data_dir(dir);
+    set_rosary_path(argc>0?argv[0]:0);
     /* Do not hard-fail if mkdir fails — UI still starts (read-only / blocked). */
     lps_ensure_dirs();
 
-    if(app_bytes()>sizeof(store)){
+    /* LPS-DOS-115-CHG03b: the App, the screen buffers and the large work
+     * buffers come from the far heap, outside DGROUP. */
+    app=(App*)calloc(1,app_bytes());
 #ifdef LPS_DOS
-        plat_dos_bios_puts("App too large\r\n");
+    hw=app&&lps_buffers_init()?plat_dos_create():0;
 #else
-        puts("App too large");
+    hw=app&&lps_buffers_init()?plat_host_create(0):0;
+#endif
+    if(!hw){
+#ifdef LPS_DOS
+        plat_dos_bios_puts("Not enough memory / Memoire insuffisante\r\n");
+#else
+        puts("Not enough memory");
 #endif
         return 1;
     }
-    app=(App*)store;
-
-#ifdef LPS_DOS
-    hw=plat_dos_create();
-#else
-    hw=plat_host_create(0);
-#endif
     app_init(app,hw);
     app_start(app);
 

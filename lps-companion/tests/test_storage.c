@@ -1,10 +1,13 @@
-/* Host unit tests: encode/decode, ICS, CSV, A/B SAVE round-trip. */
+/* Host unit tests: encode/decode, ICS, CSV, A/B SAVE round-trip, ROSARY.DAT. */
+#define _POSIX_C_SOURCE 200112L
 #include "../src/lps.h"
+#include "../src/rosary.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 Platform *plat_host_create(int capture);
 const char *plat_host_row(Platform *p, int row);
@@ -73,12 +76,74 @@ static void check_iso_weeks(void){
     assert(days==36525);
 }
 
+/* LPS-DOS-115-CHG03b: ROSARY.DAT (built by tools/mkrosary in this directory). */
+static long read_file(const char *path, unsigned char *buf, size_t cap){
+    FILE *f=fopen(path,"rb"); size_t n; if(!f) return -1;
+    n=fread(buf,1,cap,f); fclose(f); return (long)n;
+}
+static void write_file(const char *path, const unsigned char *buf, size_t n){
+    FILE *f=fopen(path,"wb"); assert(f); assert(fwrite(buf,1,n,f)==n); assert(fclose(f)==0);
+}
+static int load_variant(const char *path){ rosary_unload(); rosary_set_path(path); return rosary_load(); }
+static void check_rosary_dat(const char *tmpdir){
+    static unsigned char dat[0x10000], bad[0x10000];
+    char path[256]; long n; unsigned id; int lang;
+    n=read_file(ROSARY_DAT_NAME,dat,sizeof(dat));
+    if(n<0){ fprintf(stderr,"missing ROSARY.DAT (run `make rosary` in lps-companion)\n"); assert(0); }
+    assert(memcmp(dat,ROSARY_DAT_MAGIC,8)==0 && dat[8]==ROSARY_DAT_VERSION && dat[10]==(ROSARY_DAT_STRINGS&0xFF));
+    /* Every text in the file is the single source text, EN and FR. */
+    assert(load_variant(ROSARY_DAT_NAME)==ROSARY_OK && rosary_loaded());
+    for(id=0;id<ROS_T_COUNT;id++) for(lang=0;lang<2;lang++){
+        const char *want=rosary_source_text(id,lang); const char *got;
+        assert(want && *want);
+        if(id<ROS_T_PRAYER_COUNT) continue; /* prayers checked through rosary_text below */
+        if(id<ROS_T_SCRIPTURE){ got=mystery_name(lang,(int)((id-ROS_T_MYSTERY)/5),(id-ROS_T_MYSTERY)%5); assert(strcmp(got,want)==0); }
+    }
+    assert(strcmp(rosary_text(LANG_EN,ROS_FULL,0,0,1),rosary_source_text(ROS_T_CREED,LANG_EN))==0);
+    assert(strcmp(rosary_text(LANG_FR,ROS_DECADE,2,3,3),rosary_source_text(ROS_T_HAIL,LANG_FR))==0);
+    assert(strcmp(rosary_text(LANG_FR,ROS_CONTEMP,1,0,10),rosary_source_text(ROS_T_SILENCE,LANG_FR))==0);
+    assert(strcmp(rosary_text(LANG_EN,ROS_GUIDED,3,0,8),rosary_source_text(ROS_T_SCRIPTURE+15,LANG_EN))==0);
+    assert(strcmp(rosary_text(LANG_EN,ROS_GUIDED,3,0,9),rosary_source_text(ROS_T_MEDITATION+15,LANG_EN))==0);
+    /* Not next to the EXE: falls back to the current directory's copy. */
+    sprintf(path,"%s/ROSARY.DAT",tmpdir); remove(path);
+    assert(load_variant(path)==ROSARY_OK);
+    /* Damaged copies: each one is rejected and nothing stays loaded. */
+    {
+        struct { size_t at; unsigned char x; long len; } cases[]={
+            {0,'X',0},            /* magic */
+            {8,2,0},              /* version */
+            {10,1,0},             /* string count */
+            {12,1,0},             /* payload size */
+            {16,1,0},             /* CRC field */
+            {ROSARY_DAT_HEADER+3,0x55,0},  /* offset table */
+            {ROSARY_DAT_HEADER+ROSARY_DAT_STRINGS*2+5,'#',0}, /* text byte */
+            {0,0,-7},             /* truncated */
+            {0,0,9},              /* trailing junk */
+            {0,0,-(long)0x7fff}   /* header only */
+        };
+        unsigned i;
+        for(i=0;i<sizeof(cases)/sizeof(cases[0]);i++){
+            long len=n; memcpy(bad,dat,(size_t)n);
+            if(cases[i].len<0) len=n+cases[i].len<ROSARY_DAT_HEADER?ROSARY_DAT_HEADER:n+cases[i].len;
+            else if(cases[i].len>0){ memset(bad+n,'J',(size_t)cases[i].len); len=n+cases[i].len; }
+            else bad[cases[i].at]^=cases[i].x;
+            write_file(path,bad,(size_t)len);
+            if(load_variant(path)!=ROSARY_CORRUPT){ fprintf(stderr,"damaged case %u accepted\n",i); assert(0); }
+            assert(!rosary_loaded());
+            assert(rosary_text(LANG_EN,ROS_FULL,0,0,1)[0]==0); /* empty, no crash */
+        }
+        remove(path);
+    }
+    rosary_unload(); rosary_set_path(ROSARY_DAT_NAME);
+}
+
 int main(void){
     const char *tmpdir="/tmp/lps-msdos-test";
     State s, out; Blob b; int32_t g=0; Date calendar; Day day;
     char icsbuf[2048]; char export_dir[200], weights_dir[200];
     uint8_t payload[BLOB_CAPACITY]; size_t psz=0; uint32_t gen=0; int active=0;
     Platform *hw; App *app; static unsigned char store[8192];
+    assert(lps_buffers_init() && lps_buffers_init()); /* idempotent */
     rm_tree(tmpdir); mkdir(tmpdir,0755);
     lps_set_data_dir(tmpdir); lps_ensure_dirs();
 
@@ -210,7 +275,35 @@ int main(void){
         check_iso_weeks();
     }
 
-    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, fixture decode (%u captures)\n", 0);
+    check_rosary_dat("/tmp");
+    {   /* The app: Rosary opens with ROSARY.DAT, and says why when it cannot. */
+        static unsigned char store2[8192]; App *ra=(App*)store2; Platform *rh;
+        rm_tree(tmpdir); mkdir(tmpdir,0755); lps_set_data_dir(tmpdir); lps_ensure_dirs();
+        rh=plat_host_create(0); app_init(ra,rh); app_start(ra);
+        rosary_set_path(ROSARY_DAT_NAME);
+        app_key(ra,'5'); assert(app_screen(ra)==SCR_ROSARY_MODE && rosary_loaded());
+        app_key(ra,KEY_ENTER); app_key(ra,KEY_ENTER); /* decade mode, today's set */
+        app_key(ra,KEY_ENTER); app_key(ra,KEY_RIGHT); /* first decade, mystery step */
+        assert(app_screen(ra)==SCR_ROSARY_PRAYER);
+        app_key(ra,KEY_ESCAPE); assert(app_screen(ra)==SCR_HOME && !rosary_loaded()); /* freed */
+        {   /* Missing: a directory where neither path nor fallback exists. */
+            char cwd[512]; assert(getcwd(cwd,sizeof(cwd)));
+            assert(chdir(tmpdir)==0);
+            rosary_set_path("/tmp/lps-msdos-test/none/ROSARY.DAT");
+            app_key(ra,'5');
+            assert(app_screen(ra)==SCR_HOME && !rosary_loaded());
+            assert(strstr(plat_host_row(rh,23),"ROSARY.DAT not found: copy it next to LPSCOMP.EXE"));
+            {   unsigned char junk[32]; memset(junk,'z',sizeof(junk));
+                write_file("ROSARY.DAT",junk,sizeof(junk)); app_key(ra,'5');
+                assert(app_screen(ra)==SCR_HOME && strstr(plat_host_row(rh,23),"ROSARY.DAT is damaged: copy it again"));
+                remove("ROSARY.DAT"); }
+            assert(chdir(cwd)==0);
+            rosary_set_path(ROSARY_DAT_NAME);
+            app_key(ra,'5'); assert(app_screen(ra)==SCR_ROSARY_MODE); app_key(ra,KEY_ESCAPE);
+        }
+    }
+
+    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

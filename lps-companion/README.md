@@ -9,7 +9,7 @@ Companion). Data lives under `C:\LPS\` by default and uses the **same**
 `SAVE_A.BIN` / `SAVE_B.BIN`, `EXPORT\*.ics` and `WEIGHTS\*.csv` formats as the
 PicoCalc firmware and LPS Console.
 
-Ready-to-run binaries are at the **repository root** (the directory above this one): [`../LPSCOMP.EXE`](../LPSCOMP.EXE) and [`../HELLO.EXE`](../HELLO.EXE). Copy those onto the Book 8088. `make dos` and `make hello` rebuild into this directory only; those local copies are gitignored. After a source change, copy the new files up (`cp LPSCOMP.EXE HELLO.EXE ..`) so the root copies stay current. CI rebuilds and fails if the root files differ.
+Ready-to-run files are at the **repository root** (the directory above this one): [`../LPSCOMP.EXE`](../LPSCOMP.EXE), [`../ROSARY.DAT`](../ROSARY.DAT) and [`../HELLO.EXE`](../HELLO.EXE). Copy **both `LPSCOMP.EXE` and `ROSARY.DAT` into the same directory** on the Book 8088; `ROSARY.DAT` holds the rosary prayer texts. Without it everything works except the Rosary, which then shows *ROSARY.DAT not found: copy it next to LPSCOMP.EXE*. `make dos`, `make rosary` and `make hello` rebuild into this directory only; those local copies are gitignored. After a source change, copy the new files up (`cp LPSCOMP.EXE ROSARY.DAT HELLO.EXE ..`) so the root copies stay current. CI rebuilds and fails if the root files differ.
 
 The screen is the full **80×25** text mode (no 43/50-line modes). Home is two panes: the menu on the left, and a day summary (date, weight, note, reminders, kanban counts) on the right. All 16 activities sit on one page in two columns. Kanban shows TODO, DOING and DONE side by side. Rosary and the notepad use 80-character lines; the timer stays centered. Keys, English and French wording, palettes, and the SAVE/ICS/CSV bytes are unchanged. On the 8088 the video driver rewrites only the cells that changed.
 
@@ -23,7 +23,7 @@ As in PicoCalc v1.12, XP and keepsakes no longer appear on any screen (LPS-DOS-1
 
 - MS-DOS 3.3+ / FreeDOS / MS-DOS 7.x (FAT12/16)
 - Intel 8088 or compatible (EXE built with Open Watcom `-0`)
-- ~60 KB free disk for `LPSCOMP.EXE`; data folder grows with history
+- ~75 KB free disk for `LPSCOMP.EXE` (~65 KB) and `ROSARY.DAT` (~10 KB); data folder grows with history
 - Colour text (CGA/EGA/VGA) for palettes; mono still readable
 - Open Watcom C/C++ (v2) to build; gcc to run the host tests
 
@@ -69,13 +69,14 @@ On Windows, use the official installer and point `WATCOM` at that directory
 From this directory:
 
 ```sh
-make dos      # LPSCOMP.EXE  (-0 -bt=dos -ms, 8086/8088, soft FP, 4 KB stack)
+make dos      # LPSCOMP.EXE  (-0 -bt=dos -ml, 8086/8088, soft FP, 4 KB stack)
+make rosary   # ROSARY.DAT   prayer texts, built by tools/mkrosary (host gcc)
 make hello    # HELLO.EXE    BIOS smoke test
-make test     # host gcc tests (no WATCOM required)
+make test     # host gcc tests (no WATCOM required; builds ROSARY.DAT first)
 make clean
 ```
 
-`make` (no target) builds both EXEs and runs the host tests. `make dos` and
+`make` (no target) builds both EXEs and `ROSARY.DAT`, and runs the host tests. `make dos` and
 `make hello` prepend `$WATCOM/binl64` (or `binl`) to `PATH` for that command:
 `wcl` looks up `wcc` and `wlink` on `PATH`, not beside the `wcl` binary.
 `make captures` regenerates text dumps under `captures/` with the host UI driver.
@@ -83,22 +84,49 @@ make clean
 The same DOS link line, without Make:
 
 ```sh
-wcl -0 -bt=dos -ms -ox -fpc -k4096 -dLPS_DOS -i=src -fe=LPSCOMP.EXE \
+wcl -0 -bt=dos -ml -zt256 -ox -fpc -k4096 -dLPS_DOS -i=src -fe=LPSCOMP.EXE \
   src/state.c src/ics.c src/save.c src/paths.c src/rosary.c \
   src/app.c src/plat_dos.c src/main.c
 ```
 
 ### Host tests (gcc, no DOS)
 
-Run from this directory so the test finds `tests/fixtures/v12_payload.bin`:
+Run from this directory so the test finds `tests/fixtures/v12_payload.bin` and
+`ROSARY.DAT`:
 
 ```sh
 gcc -std=c89 -Wall -Wextra -Wno-unused-parameter -O2 -Isrc -DLPS_HOST \
+  -o tools/mkrosary tools/mkrosary.c src/rosary_text.c src/state.c
+./tools/mkrosary ROSARY.DAT
+gcc -std=c89 -Wall -Wextra -Wno-unused-parameter -O2 -Isrc -DLPS_HOST \
   -o tests/test_storage \
   tests/test_storage.c src/state.c src/ics.c src/save.c src/paths.c \
-  src/rosary.c src/app.c src/plat_host.c
+  src/rosary.c src/rosary_text.c src/app.c src/plat_host.c
 ./tests/test_storage
 ```
+
+### Memory layout (LPS-DOS-115-CHG03b)
+
+The EXE uses Open Watcom's **large model** (`-ml`): far data pointers and one
+code segment per module. The 64 KB DGROUP (near data + 4 KB stack) used to be
+almost full (63,088 bytes); it is now about 14 KB, which leaves room for the
+JSON save, more activities and the EGA Meal Planner.
+
+- The prayer texts are not in the EXE. `tools/mkrosary` builds `ROSARY.DAT`
+  from `src/rosary_text.c`, the single source of the texts, and LPSCOMP loads
+  it into the far heap when the Rosary opens and frees it on leaving.
+  `LPSCOMP` looks for it next to itself (the path in `argv[0]`), then in the
+  current directory. A missing or damaged file shows a message on Home; it
+  never crashes.
+- The big work buffers (two `State` copies, the encoded save, both SAVE
+  records, the ICS and CSV export buffers) are one far-heap block allocated
+  at start-up (`lps_buffers_init`), as are the `App` and the screen shadow.
+  The CSV buffer used to be an 8 KB local on the 4 KB stack.
+- `ROSARY.DAT` layout (little-endian): `LPSROSRY` magic, u16 version 1,
+  u16 string count (138: 69 texts × EN/FR), u32 payload size, u32 CRC-32 of the
+  payload, then a u16 offset table and the NUL-terminated ASCII strings.
+
+Check the segment sizes with `wcl ... -fm=LPSCOMP.MAP` and look at `DGROUP`.
 
 ## Book 8088 / real hardware notes
 
@@ -109,7 +137,8 @@ blinking cursor. Root cause: the DOS default **stack was only 2 KB**, while
 
 Fixes kept in this tree:
 
-- `Blob` / `State` scratch moved to **static BSS** (`g_blob`, `g_scratch`)
+- `Blob` / `State` scratch moved to **static BSS** (`g_blob`, `g_scratch`);
+  since LPS-DOS-115-CHG03b they live in the far heap (see *Memory layout*)
 - Linker stack raised off the 2 KB default. It was **8 KB** (`-k8192`) in that
   first fix; after the SAVE buffers below moved to BSS, the link uses **4 KB**
   (`-k4096`), which is what `make dos` passes
@@ -150,7 +179,7 @@ Other screens (activities, kanban, rosary, timer) are in `captures/`.
 
 ## Install on a real machine / DOSBox
 
-1. Copy the repository-root `LPSCOMP.EXE` (and `HELLO.EXE` for the smoke test) to a floppy or the hard disk.
+1. Copy the repository-root `LPSCOMP.EXE` **and `ROSARY.DAT`** into the same directory on a floppy or the hard disk (and `HELLO.EXE` for the smoke test).
 2. Create `C:\LPS` (or pass the path as argv: `LPSCOMP D:\DATA`).
 3. Optional: `SET LPSDIR=C:\LPS`
 4. Run `LPSCOMP` or `LPSCOMP C:\LPS`.
@@ -159,7 +188,7 @@ Other screens (activities, kanban, rosary, timer) are in `captures/`.
 DOSBox-X or DOSBox Staging. `dosbox.conf` mounts the current directory as `C:` and sets an 8086 CPU with EGA, so the EXE has to sit in this directory. Copy the root binaries down (they are gitignored here) or use a local `make dos`, then start DOSBox:
 
 ```sh
-cp ../LPSCOMP.EXE ../HELLO.EXE .
+cp ../LPSCOMP.EXE ../ROSARY.DAT ../HELLO.EXE .
 dosbox-x -conf dosbox.conf
 ```
 
@@ -207,11 +236,13 @@ CSV stay byte-compatible with the firmware.
 | `src/save.c` | A/B SAVE read/write |
 | `src/ics.c` | ICS + weights CSV |
 | `src/app.c` | Full UI state machine |
-| `src/rosary.c` | Rosary texts and step engine |
+| `src/rosary.c` | Rosary step engine; loads `ROSARY.DAT` |
+| `src/rosary_text.c` | Rosary texts (single source, not linked into the EXE) |
+| `tools/mkrosary.c` | Writes `ROSARY.DAT` from `src/rosary_text.c` |
 | `src/plat_dos.c` | BIOS video/keyboard/timer |
 | `src/plat_host.c` | Linux host for tests |
 | `src/hello.c` | `HELLO.EXE` BIOS smoke test |
-| `tests/test_storage.c` | Host encode/decode, ICS, CSV, A/B, v1.2 fixture |
+| `tests/test_storage.c` | Host encode/decode, ICS, CSV, A/B, `ROSARY.DAT`, v1.2 fixture |
 | `tests/fixtures/v12_payload.bin` | Synthetic Companion v1.2 payload |
 
 ## Captures
@@ -228,7 +259,7 @@ Port complet de [LPS Companion v1.11](https://github.com/TME520/LPS-Companion-Pi
 vers MS-DOS 16 bits (8088, 640 Ko), clavier uniquement, mode texte 80×25.
 Memes formats `SAVE_A/B.BIN`, ICS et CSV que le firmware PicoCalc et LPS Console.
 
-Les executables prets a lancer sont a la **racine du depot** : [`../LPSCOMP.EXE`](../LPSCOMP.EXE) et [`../HELLO.EXE`](../HELLO.EXE). Copiez-les sur le Book 8088. `make dos` / `make hello` reconstruisent seulement dans ce dossier (copies non versionnees). Apres une modification des sources, recopiez-les a la racine (`cp LPSCOMP.EXE HELLO.EXE ..`). La CI reconstruit et echoue si les fichiers a la racine different.
+Les fichiers prets a lancer sont a la **racine du depot** : [`../LPSCOMP.EXE`](../LPSCOMP.EXE), [`../ROSARY.DAT`](../ROSARY.DAT) et [`../HELLO.EXE`](../HELLO.EXE). Copiez **`LPSCOMP.EXE` et `ROSARY.DAT` dans le meme dossier** sur le Book 8088 ; `ROSARY.DAT` contient les textes du rosaire. Sans lui, tout fonctionne sauf le rosaire, qui affiche *ROSARY.DAT introuvable : copiez-le a cote de LPSCOMP.EXE*. `make dos` / `make rosary` / `make hello` reconstruisent seulement dans ce dossier (copies non versionnees). Apres une modification des sources, recopiez-les a la racine (`cp LPSCOMP.EXE ROSARY.DAT HELLO.EXE ..`). La CI reconstruit et echoue si les fichiers a la racine different.
 
 L'ecran utilise tout le mode texte **80×25**. L'accueil a deux volets : le menu a gauche, le resume du jour a droite (date, poids, note, rappels, kanban). Les 16 activites tiennent sur une page en deux colonnes. Le kanban montre A FAIRE, EN COURS et FINI cote a cote. Le rosaire et le bloc notes utilisent des lignes de 80 caracteres ; le minuteur reste centre. Les touches, les textes, les palettes et les octets SAVE/ICS/CSV ne changent pas. Sur 8088, seules les cellules modifiees sont reecrites.
 
@@ -251,21 +282,24 @@ Open Watcom V2, variable `WATCOM` pointant sur la racine du compilateur
 (voir la section **Build** ci-dessus). Puis, dans ce dossier :
 
 ```sh
-make dos      # LPSCOMP.EXE (-0 -bt=dos -ms)
+make dos      # LPSCOMP.EXE (-0 -bt=dos -ml)
+make rosary   # ROSARY.DAT (textes du rosaire)
 make hello    # HELLO.EXE
 make test     # tests gcc, sans Watcom
 ```
 
 ## Utilisation
 
-Copier `LPSCOMP.EXE` et `HELLO.EXE` depuis la racine du depot, creer `C:\LPS`, lancer `LPSCOMP` (ou `LPSCOMP chemin`).
+Copier `LPSCOMP.EXE`, `ROSARY.DAT` (dans le meme dossier) et `HELLO.EXE` depuis la racine du depot, creer `C:\LPS`, lancer `LPSCOMP` (ou `LPSCOMP chemin`).
 **Q** quitte depuis l'accueil. Les touches reprennent celles du Companion.
 
-DOSBox-X / DOSBox Staging (`cputype=8086`, `machine=ega`) : copier les EXE de la racine ici, puis `dosbox-x -conf dosbox.conf`.
+DOSBox-X / DOSBox Staging (`cputype=8086`, `machine=ega`) : copier les EXE et `ROSARY.DAT` de la racine ici, puis `dosbox-x -conf dosbox.conf`.
 
 ## Empreinte
 
-`LPSCOMP.EXE` fait environ **57–60 Ko** (mode small, 8086, pile 4 Ko). `HELLO.EXE` ~3 Ko.
+`LPSCOMP.EXE` fait environ **65 Ko** (modele large, 8086, pile 4 Ko) et `ROSARY.DAT` environ **10 Ko**. `HELLO.EXE` ~3 Ko.
+
+Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) passe d'environ 63 Ko a environ 14 Ko : les textes du rosaire sont dans `ROSARY.DAT`, charge en memoire lointaine a l'ouverture du rosaire, et les gros tampons (copies de `State`, sauvegarde, exports ICS/CSV) sont alloues en memoire lointaine au demarrage. Un `ROSARY.DAT` absent ou abime affiche un message, sans plantage.
 
 ## Ecarts connus
 

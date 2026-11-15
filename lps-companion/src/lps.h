@@ -130,7 +130,21 @@ uint32_t crc32(const uint8_t *p, size_t n);
 void encode_state(const State *s, Blob *b);
 int decode_state(const uint8_t *bytes, size_t size, State *out);
 void state_init(State *s);
-extern State lps_decode_scratch;
+/* Large working buffers (LPS-DOS-115-CHG03b). One block allocated at start-up
+ * from the far heap (large model), so they sit outside DGROUP and add no
+ * zero-filled bytes to LPSCOMP.EXE. lps_buffers_init() is idempotent. */
+typedef struct {
+    State decode;                 /* decode_state scratch, SAVE validation */
+    State scratch;                /* app: edit candidate before commit */
+    Blob blob;                    /* app: encoded SAVE payload */
+    uint8_t rec_a[RECORD_SIZE];   /* SAVE_A.BIN record / write buffer */
+    uint8_t rec_b[RECORD_SIZE];   /* SAVE_B.BIN record */
+    char ics[2048];               /* one ICS export */
+    char csv[8192];               /* one WEIGHTS\YYYY.csv (was on the stack) */
+} LpsBuffers;
+extern LpsBuffers *lps_buf;
+int lps_buffers_init(void); /* 0 = out of memory */
+#define lps_decode_scratch (lps_buf->decode)
 uint32_t day_index(Date d);
 unsigned weekday(Date d); /* 0=Sunday */
 unsigned iso_week(Date d); /* ISO 8601, 1..53 */
