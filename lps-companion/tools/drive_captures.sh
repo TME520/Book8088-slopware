@@ -1,10 +1,12 @@
 #!/bin/sh
-# Drive host binary through main screens; plat_host with capture writes captures/*.txt
-# For now use a small C driver.
+# Drive the host build through the main screens; plat_host with capture writes
+# captures/*.txt (UTF-8). Run through `make captures`, which first makes the
+# CP437 copies of the sources in build/cp437 (LPS-DOS-115-CHG03).
 set -e
 cd "$(dirname "$0")/.."
-gcc -std=c89 -Wall -Isrc -DLPS_HOST -o tools/capture_drive tools/capture_drive.c \
-  src/state.c src/ics.c src/save.c src/paths.c src/rosary.c src/app.c src/plat_host.c
+G=build/cp437
+gcc -std=c89 -Wall -I$G -DLPS_HOST -o tools/capture_drive $G/capture_drive.c \
+  $G/state.c $G/ics.c $G/save.c $G/paths.c $G/rosary.c $G/app.c $G/cp437.c $G/plat_host.c
 mkdir -p captures
 rm -rf /tmp/lps-msdos-cap
 mkdir -p /tmp/lps-msdos-cap

@@ -42,7 +42,7 @@ static const char *tr(const App *a, const char *en, const char *fr){
     return a->state.language==LANG_FR?fr:en;
 }
 static void say(App *a, const char *text){ sprintf(a->message, "%s", text); }
-static void read_only(App *a){ say(a, tr(a,"Archived day: read-only","Jour archive : lecture seule")); }
+static void read_only(App *a){ say(a, tr(a,"Archived day: read-only","Jour archivé : lecture seule")); }
 static unsigned timer_seconds(const App *a){ return (unsigned)((a->timerRemaining+999)/1000); }
 /* LPS-DOS-115-CHG02b (PicoCalc LPS-112-CHG01/CHG02): 5, 30 or 60 minutes,
  * started directly with keys 1-3. Timing still comes from the BIOS tick. */
@@ -100,7 +100,7 @@ static void cell_slice(const char *text, unsigned first, unsigned count, char *o
 /* Apply edit in RAM only — disk writes go through flush_save (slow on 8088 HDD). */
 static int commit(App *a, const State *candidate){
     if(a->daysBack){ read_only(a); return 0; }
-    if(a->blocked){ say(a, tr(a,"Unreadable save: writes blocked","Sauvegarde illisible : ecriture bloquee")); return 0; }
+    if(a->blocked){ say(a, tr(a,"Unreadable save: writes blocked","Sauvegarde illisible : écriture bloquée")); return 0; }
     a->state=*candidate;
     a->dirty=1;
     return 1;
@@ -109,18 +109,18 @@ static int commit(App *a, const State *candidate){
 /* Persist dirty state: one A/B slot, with visible status. */
 static int flush_save(App *a){
     if(!a->dirty) return 1;
-    if(a->blocked){ say(a, tr(a,"Unreadable save: writes blocked","Sauvegarde illisible : ecriture bloquee")); return 0; }
+    if(a->blocked){ say(a, tr(a,"Unreadable save: writes blocked","Sauvegarde illisible : écriture bloquée")); return 0; }
     if(a->missingStorage){ say(a, tr(a,"No storage","Pas de stockage")); return 0; }
     say(a, tr(a,"Saving...","Sauvegarde..."));
     app_render(a);
     encode_state(&a->state, &g_blob);
     if(!a->hw->save(a->hw, g_blob.bytes, g_blob.size)){
-        say(a, tr(a,"Save failed: restart device","Echec sauvegarde : redemarrer"));
+        say(a, tr(a,"Save failed: restart device","Échec sauvegarde : redémarrer"));
         app_render(a);
         return 0;
     }
     a->dirty=0;
-    say(a, tr(a,"Saved","Enregistre"));
+    say(a, tr(a,"Saved","Enregistré"));
     return 1;
 }
 
@@ -137,7 +137,7 @@ static unsigned task_position(const App *a, int status, unsigned index){
 }
 static const char *task_status_name(const App *a, int status){
     static const char *en[]={"TODO","DOING","DONE"};
-    static const char *fr[]={"A FAIRE","EN COURS","FINI"};
+    static const char *fr[]={"À FAIRE","EN COURS","FINI"};
     return a->state.language==LANG_FR?fr[status]:en[status];
 }
 static unsigned review_rows(const App *a){
@@ -146,12 +146,12 @@ static unsigned review_rows(const App *a){
 }
 static void review_line(const App *a, unsigned index, char *out, size_t size){
     unsigned activities=count_flags(a->state.today.flags); unsigned i; int status;
-    if(index==0){ sprintf(out, tr(a,"ACTIVITIES (%u)","ACTIVITES (%u)"), activities); return; }
+    if(index==0){ sprintf(out, tr(a,"ACTIVITIES (%u)","ACTIVITÉS (%u)"), activities); return; }
     --index;
     for(i=0;i<ACTIVITY_COUNT;i++) if(a->state.today.flags&(1u<<i)){
         if(index--==0){ sprintf(out,"  %s", tr(a,ACTIVITIES_EN[i],ACTIVITIES_FR[i])); return; }
     }
-    if(!activities){ if(index--==0){ sprintf(out,"  %s", tr(a,"None selected","Aucune selectionnee")); return; } }
+    if(!activities){ if(index--==0){ sprintf(out,"  %s", tr(a,"None selected","Aucune sélectionnée")); return; } }
     for(status=TASK_TODO; status<=TASK_DOING; status++){
         unsigned n=tasks_in(a,status);
         if(index--==0){ sprintf(out,"%s (%u)", task_status_name(a,status), n); return; }
@@ -188,9 +188,9 @@ static void go(App *a, int s){
     if(is_rosary_screen(s)){
         int r=rosary_load();
         if(r!=ROSARY_OK){
-            if(r==ROSARY_MISSING) say(a,tr(a,"ROSARY.DAT not found: copy it next to LPSCOMP.EXE","ROSARY.DAT introuvable : copiez-le a cote de LPSCOMP.EXE"));
-            else if(r==ROSARY_NO_MEMORY) say(a,tr(a,"Not enough memory for the rosary","Memoire insuffisante pour le rosaire"));
-            else say(a,tr(a,"ROSARY.DAT is damaged: copy it again","ROSARY.DAT endommage : recopiez-le"));
+            if(r==ROSARY_MISSING) say(a,tr(a,"ROSARY.DAT not found: copy it next to LPSCOMP.EXE","ROSARY.DAT introuvable : copiez-le à côté de LPSCOMP.EXE"));
+            else if(r==ROSARY_NO_MEMORY) say(a,tr(a,"Not enough memory for the rosary","Mémoire insuffisante pour le rosaire"));
+            else say(a,tr(a,"ROSARY.DAT is damaged: copy it again","ROSARY.DAT endommagé : recopiez-le"));
             return;
         }
     }else rosary_unload();
@@ -259,11 +259,11 @@ static void move_task_to(App *a, int target){
     unsigned n=tasks_in(a,a->kanbanColumn), index=n?task_at(a,a->kanbanColumn,a->selection):TASK_CAPACITY;
     Task moved; unsigned i;
     if(index>=a->state.taskCount) return;
-    if(a->state.tasks[index].status==target){ say(a,tr(a,"Task is already in this column","Tache deja dans cette colonne")); return; }
+    if(a->state.tasks[index].status==target){ say(a,tr(a,"Task is already in this column","Tâche déjà dans cette colonne")); return; }
     g_scratch=a->state; moved=g_scratch.tasks[index]; moved.status=(uint8_t)target;
     for(i=index;i+1<g_scratch.taskCount;i++) g_scratch.tasks[i]=g_scratch.tasks[i+1];
     g_scratch.tasks[g_scratch.taskCount-1]=moved;
-    if(commit(a,&g_scratch)){ a->kanbanColumn=target; a->selection=tasks_in(a,target)-1; say(a,tr(a,"Task moved","Tache deplacee")); }
+    if(commit(a,&g_scratch)){ a->kanbanColumn=target; a->selection=tasks_in(a,target)-1; say(a,tr(a,"Task moved","Tâche déplacée")); }
 }
 static void reorder_task(App *a, int downward){
     unsigned n=tasks_in(a,a->kanbanColumn); unsigned indices[TASK_CAPACITY]; unsigned i; unsigned destination; Task moved;
@@ -321,7 +321,7 @@ void app_start(App *app){
     r=app->hw->load(app->hw,g_blob.bytes,sizeof(g_blob.bytes),&n);
     if(r==LOAD_NO_STORAGE){ app->blocked=1; app->missingStorage=1; say(app,"[!] Missing SD card!"); }
     else if(r==LOAD_ERROR || (r==LOAD_OK && !decode_state(g_blob.bytes,n,&app->state))){
-        app->blocked=1; say(app, tr(app,"Read error: save protected","Erreur lecture : sauvegarde protegee"));
+        app->blocked=1; say(app, tr(app,"Read error: save protected","Erreur lecture : sauvegarde protégée"));
     }
     if(!app->blocked){ prune_reminders(app); if(app->dirty) flush_save(app); if(active_reminders(app)) app->screen=SCR_REMINDER_POPUP; }
     app_render(app);
@@ -371,7 +371,7 @@ void app_key(App *a, int k){
         unsigned menuCount=a->daysBack?2u:10u;
         if(k==KEY_LEFT){
             if(a->daysBack<a->state.count){ a->daysBack++; a->selection=0; a->page=0; }
-            else say(a, a->state.count?tr(a,"Oldest saved day","Plus ancien jour conserve"):tr(a,"No archived days","Aucun jour archive"));
+            else say(a, a->state.count?tr(a,"Oldest saved day","Plus ancien jour conservé"):tr(a,"No archived days","Aucun jour archivé"));
         }
         if(k==KEY_RIGHT){ a->daysBack=0; a->selection=0; a->page=0; }
         if(k==KEY_UP) a->selection=(a->selection+menuCount-1)%menuCount;
@@ -419,8 +419,8 @@ void app_key(App *a, int k){
         else if(k==KEY_ENTER){
             Date from; unsigned duration=0; unsigned i;
             for(i=0;a->reminderDuration[i];i++){ char c=a->reminderDuration[i]; if(c<'0'||c>'9'){ duration=366; break; } duration=duration*10u+(unsigned)(c-'0'); }
-            if(!parse_date(a->reminderDate,&from)||duration<1||duration>365||!a->reminderText[0]) say(a,tr(a,"Check date, 1-365 days and text","Verifiez date, 1-365 jours et texte"));
-            else if(day_index(from)+duration<=day_index(a->state.today.date)) say(a,tr(a,"Reminder already expired","Rappel deja expire"));
+            if(!parse_date(a->reminderDate,&from)||duration<1||duration>365||!a->reminderText[0]) say(a,tr(a,"Check date, 1-365 days and text","Vérifiez date, 1-365 jours et texte"));
+            else if(day_index(from)+duration<=day_index(a->state.today.date)) say(a,tr(a,"Reminder already expired","Rappel déjà expiré"));
             else {
                 unsigned index=a->editingReminder<REMINDER_CAPACITY?a->editingReminder:a->state.reminderCount;
                 g_scratch=a->state;
@@ -481,7 +481,7 @@ void app_key(App *a, int k){
         }else if(k==KEY_UP && n) a->selection=(a->selection+n-1)%n;
         else if(k==KEY_DOWN && n) a->selection=(a->selection+1)%n;
         else if(k=='n'||k=='N'){
-            if(a->state.taskCount>=TASK_CAPACITY) say(a,tr(a,"Kanban is full (24 tasks)","Kanban complet (24 taches)"));
+            if(a->state.taskCount>=TASK_CAPACITY) say(a,tr(a,"Kanban is full (24 tasks)","Kanban complet (24 tâches)"));
             else begin_task_edit(a,TASK_CAPACITY);
         }else if(k==KEY_ENTER && n) begin_task_edit(a,task_at(a,a->kanbanColumn,a->selection));
         else if(k==KEY_DELETE && n){
@@ -496,12 +496,12 @@ void app_key(App *a, int k){
         else if(k==KEY_F5 || k=='+'){ if(n) reorder_task(a,1); }
     }else if(a->screen==SCR_TASK_EDIT){
         if(k==KEY_ENTER){
-            if(!a->taskDraft[0]) say(a,tr(a,"Task name cannot be empty","Le nom ne peut pas etre vide"));
+            if(!a->taskDraft[0]) say(a,tr(a,"Task name cannot be empty","Le nom ne peut pas être vide"));
             else {
                 unsigned destination=a->editedTask;
                 g_scratch=a->state;
                 if(a->editedTask<TASK_CAPACITY) memcpy(g_scratch.tasks[a->editedTask].name,a->taskDraft,TASK_NAME_LENGTH+1);
-                else if(g_scratch.taskCount>=TASK_CAPACITY){ say(a,tr(a,"Kanban is full (24 tasks)","Kanban complet (24 taches)")); app_render(a); return; }
+                else if(g_scratch.taskCount>=TASK_CAPACITY){ say(a,tr(a,"Kanban is full (24 tasks)","Kanban complet (24 tâches)")); app_render(a); return; }
                 else { destination=g_scratch.taskCount; g_scratch.tasks[g_scratch.taskCount].status=(uint8_t)a->kanbanColumn; memcpy(g_scratch.tasks[g_scratch.taskCount].name,a->taskDraft,TASK_NAME_LENGTH+1); g_scratch.taskCount++; }
                 if(commit(a,&g_scratch)){ a->editedTask=destination; a->selection=task_position(a,a->kanbanColumn,a->editedTask); a->screen=SCR_KANBAN; a->message[0]=0; }
             }
@@ -520,7 +520,7 @@ void app_key(App *a, int k){
             if(a->selection==0) go(a,SCR_LANGUAGE);
             else if(a->selection==1) go(a,SCR_COLORS);
             else { g_scratch=a->state; g_scratch.language=(uint8_t)a->pendingLanguage;
-                if(commit(a,&g_scratch)){ flush_save(a); go(a,SCR_HOME); say(a,tr(a,"Configuration saved","Configuration enregistree")); }}
+                if(commit(a,&g_scratch)){ flush_save(a); go(a,SCR_HOME); say(a,tr(a,"Configuration saved","Configuration enregistrée")); }}
         }
     }else if(a->screen==SCR_LANGUAGE){
         if(k==KEY_UP||k==KEY_DOWN) a->selection=1-a->selection;
@@ -532,7 +532,7 @@ void app_key(App *a, int k){
         if(k>='1'&&k<='5') a->selection=(unsigned)(k-'1');
         a->pendingPalette=(int)a->selection;
         if(k==KEY_ENTER){ g_scratch=a->state; g_scratch.palette=(uint8_t)a->pendingPalette;
-            if(commit(a,&g_scratch)){ flush_save(a); go(a,SCR_HOME); say(a,tr(a,"Color saved","Couleur enregistree")); }}
+            if(commit(a,&g_scratch)){ flush_save(a); go(a,SCR_HOME); say(a,tr(a,"Color saved","Couleur enregistrée")); }}
     }else if(a->screen==SCR_ROSARY_MODE){
         if(k==KEY_UP) a->selection=(a->selection+3)%4;
         if(k==KEY_DOWN) a->selection=(a->selection+1)%4;
@@ -577,9 +577,9 @@ void app_key(App *a, int k){
                 g_scratch.next=(uint8_t)((g_scratch.next+1)%HISTORY_LENGTH);
                 if(g_scratch.count<HISTORY_LENGTH) g_scratch.count++;
                 tomorrow=a->state.today.date;
-                if(!next_date(&tomorrow)){ say(a,tr(a,"Calendar ends on 2099-12-31","Le calendrier s'arrete au 2099-12-31")); app_render(a); return; }
-                if(!a->hw->export_weight_csv(a->hw,&a->state.today)){ say(a,tr(a,"Weight CSV export failed; day remains open","Export CSV poids echoue ; journee reste ouverte")); app_render(a); return; }
-                if(!a->hw->export_ics(a->hw,&a->state.today,a->state.xp+gain,gain,a->state.language)){ say(a,tr(a,"ICS export failed; day remains open","Export ICS echoue ; journee reste ouverte")); app_render(a); return; }
+                if(!next_date(&tomorrow)){ say(a,tr(a,"Calendar ends on 2099-12-31","Le calendrier s'arrête au 2099-12-31")); app_render(a); return; }
+                if(!a->hw->export_weight_csv(a->hw,&a->state.today)){ say(a,tr(a,"Weight CSV export failed; day remains open","Export CSV poids échoué ; journée reste ouverte")); app_render(a); return; }
+                if(!a->hw->export_ics(a->hw,&a->state.today,a->state.xp+gain,gain,a->state.language)){ say(a,tr(a,"ICS export failed; day remains open","Export ICS échoué ; journée reste ouverte")); app_render(a); return; }
                 g_scratch.xp+=gain; memset(&g_scratch.today,0,sizeof(Day)); g_scratch.today.number=a->state.today.number+1; g_scratch.today.date=tomorrow; g_scratch.today.expected=-1; g_scratch.today.actual=-1;
                 /* LPS-DOS-115-CHG01: XP is still banked in the save for compatibility, never shown. */
                 if(commit(a,&g_scratch) && flush_save(a)) go(a,SCR_REWARD);
@@ -610,7 +610,7 @@ void app_render(App *a){
     /* LPS-DOS-115-CHG01: row 1 of every screen shows the long date and ISO
      * week of the viewed day (blank for an undated day). No XP anywhere. */
     if(valid_date(day->date)){ long_date_text(day->date,a->state.language,b,sizeof(b)); center_line(a,1,b,0); }
-    if(a->daysBack) center_line(a,2,tr(a,"ARCHIVED DAY - READ ONLY","JOUR ARCHIVE - LECTURE SEULE"),0);
+    if(a->daysBack) center_line(a,2,tr(a,"ARCHIVED DAY - READ ONLY","JOUR ARCHIVÉ - LECTURE SEULE"),0);
 
     if(a->screen==SCR_HOME){
         const char *menu[10];
@@ -618,20 +618,20 @@ void app_render(App *a){
         char wexp[16], wact[16];
         int gutter;
         menu[0]="0  Date";
-        menu[1]=tr(a,"1  Activities","1  Activites");
+        menu[1]=tr(a,"1  Activities","1  Activités");
         menu[2]=tr(a,"2  Weight tracker","2  Suivi du poids");
         menu[3]="3  Kanban";
-        menu[4]=tr(a,"4  Christian Rosary","4  Rosaire chretien");
-        menu[5]=tr(a,"5  Daily review","5  Revue journaliere");
+        menu[4]=tr(a,"4  Christian Rosary","4  Rosaire chrétien");
+        menu[5]=tr(a,"5  Daily review","5  Revue journalière");
         menu[6]="6  Config";
         menu[7]=tr(a,"7  Reminders","7  Rappels");
         menu[8]=tr(a,"8  Timer","8  Minuteur");
         menu[9]=tr(a,"9  Close the day","9  Terminer le jour");
-        field(a,4,1,37, a->daysBack?tr(a,"CLOSED DAY","JOUR TERMINE"):tr(a,"TODAY","AUJOURD'HUI"), 0);
-        sprintf(b,tr(a,"%u/%u activities","%u/%u activites"), count_flags(day->flags), ACTIVITY_COUNT);
+        field(a,4,1,37, a->daysBack?tr(a,"CLOSED DAY","JOUR TERMINÉ"):tr(a,"TODAY","AUJOURD'HUI"), 0);
+        sprintf(b,tr(a,"%u/%u activities","%u/%u activités"), count_flags(day->flags), ACTIVITY_COUNT);
         field(a,5,1,37,b,0);
         for(i=0;i<total;i++) field(a,7+(int)i,1,37, menu[first+i], i==a->selection);
-        field(a,18,1,37,tr(a,"<- Previous day   -> Current day","<- Jour precedent   -> Jour actuel"),0);
+        field(a,18,1,37,tr(a,"<- Previous day   -> Current day","<- Jour précédent   -> Jour actuel"),0);
         /* Right pane, tightened after the notepad left (LPS-DOS-115-CHG02):
          * blocks start on the menu's rows 4, 7, 11 and 16. */
         for(gutter=3; gutter<=18; gutter++) a->hw->text(a->hw, gutter, 39, "|", 0);
@@ -659,7 +659,7 @@ void app_render(App *a){
         center_line(a,3,tr(a,"TIMER","MINUTEUR"),0);
         sprintf(b,"%02u:%02u",seconds/60,seconds%60);
         a->hw->large_text(a->hw,b,seconds<60);
-        if(a->screen==SCR_TIMER_COMPLETE) center_line(a,16,tr(a,"TIMER FINISHED!","MINUTEUR TERMINE !"),0);
+        if(a->screen==SCR_TIMER_COMPLETE) center_line(a,16,tr(a,"TIMER FINISHED!","MINUTEUR TERMINÉ !"),0);
         else if(a->timerPaused) center_line(a,16,tr(a,"PAUSED","EN PAUSE"),0);
         center_line(a,22, a->screen==SCR_TIMER_COMPLETE?tr(a,"1-3: Restart  Enter: Menu  Esc: Back","1-3: Relancer  Enter: Menu  Esc: Retour"):
             (a->timerPaused?tr(a,"Enter: Resume   Esc: Cancel","Enter: Reprendre   Esc: Annuler"):tr(a,"Enter: Pause   Esc: Cancel","Enter: Pause   Esc: Annuler")),0);
@@ -677,38 +677,38 @@ void app_render(App *a){
             sprintf(b,"%s  %u %s",from,(unsigned)a->state.reminders[i].duration,tr(a,"days","jours"));
             line(a,6+(int)i*3,b,i==a->selection); line(a,7+(int)i*3,a->state.reminders[i].text,0);
         }
-        line(a,16,tr(a,"N New  Enter Edit  Del Delete","N Nouveau Entree Modifier Suppr Effacer"),0);
+        line(a,16,tr(a,"N New  Enter Edit  Del Delete","N Nouveau Entrée Modifier Suppr Effacer"),0);
     }else if(a->screen==SCR_REMINDER_EDIT){
         center_line(a,3,tr(a,"EDIT REMINDER","MODIFIER LE RAPPEL"),0);
-        sprintf(b,tr(a,"From: %s","Debut : %s"),a->reminderDate); line(a,6,b,a->reminderField==0);
+        sprintf(b,tr(a,"From: %s","Début : %s"),a->reminderDate); line(a,6,b,a->reminderField==0);
         sprintf(b,tr(a,"Days: %s","Jours : %s"),a->reminderDuration); line(a,8,b,a->reminderField==1);
         line(a,10,tr(a,"Text:","Texte :"),0); line(a,11,a->reminderText,a->reminderField==2);
-        line(a,15,tr(a,"Up/Down fields  Enter save","Haut/Bas champs  Entree valider"),0);
+        line(a,15,tr(a,"Up/Down fields  Enter save","Haut/Bas champs  Entrée valider"),0);
     }else if(a->screen==SCR_DATE){
         center_line(a,3,"DATE",0); line(a,6,a->dateDraft,1);
         line(a,9,tr(a,"Calendar: 2000-01-01 to 2099-12-31","Calendrier : 2000-01-01 au 2099-12-31"),0);
-        line(a,12,tr(a,"Enter: save / Esc: cancel","Entree : valider / Echap : annuler"),0);
-        line(a,14,tr(a,"Next day is suggested after closing.","Jour suivant propose apres cloture."),0);
+        line(a,12,tr(a,"Enter: save / Esc: cancel","Entrée : valider / Échap : annuler"),0);
+        line(a,14,tr(a,"Next day is suggested after closing.","Jour suivant proposé après clôture."),0);
     }else if(a->screen==SCR_ACTIVITIES){
-        center_line(a,3,tr(a,"ACTIVITIES","ACTIVITES"),0);
+        center_line(a,3,tr(a,"ACTIVITIES","ACTIVITÉS"),0);
         for(i=0;i<ACTIVITY_COUNT;i++){
             int col=(i<ACT_PER_COL)?1:41;
             int row=5+(int)(i%ACT_PER_COL);
             sprintf(b,"%2u  %-24s [%c]", i+1, tr(a,ACTIVITIES_EN[i],ACTIVITIES_FR[i]), day->flags&(1u<<i)?'x':' ');
             field(a,row,col,37,b, i==a->selection);
         }
-        line(a,22, a->daysBack?tr(a,"<- -> columns   Esc: day menu","<- -> colonnes   Echap : menu du jour"):tr(a,"Enter: toggle  1-9: keys  <- -> columns","Entree: cocher  1-9: racc.  <- -> colonnes"),0);
+        line(a,22, a->daysBack?tr(a,"<- -> columns   Esc: day menu","<- -> colonnes   Échap : menu du jour"):tr(a,"Enter: toggle  1-9: keys  <- -> columns","Entrée: cocher  1-9: racc.  <- -> colonnes"),0);
     }else if(a->screen==SCR_WEIGHT){
         int32_t expg=0,actg=0; int valid;
         center_line(a,3,tr(a,"WEIGHT TRACKER (kg)","SUIVI DU POIDS (kg)"),0);
         sprintf(b,tr(a,"Expected : %s","Attendu  : %s"),a->weights[0]); line(a,6,b,a->field==0);
         sprintf(b,tr(a,"Actual   : %s","Effectif : %s"),a->weights[1]); line(a,9,b,a->field==1);
         valid=parse_weight(a->weights[0],&expg)&&parse_weight(a->weights[1],&actg)&&expg>=0&&actg>=0;
-        if(valid){ int32_t d=actg-expg, absv=d<0?-d:d; sprintf(b,tr(a,"Difference: %c%ld.%03ld kg","Ecart : %c%ld.%03ld kg"), d<0?'-':'+', (long)(absv/1000),(long)(absv%1000)); }
-        else sprintf(b,"%s",tr(a,"Difference: --","Ecart : --"));
+        if(valid){ int32_t d=actg-expg, absv=d<0?-d:d; sprintf(b,tr(a,"Difference: %c%ld.%03ld kg","Écart : %c%ld.%03ld kg"), d<0?'-':'+', (long)(absv/1000),(long)(absv%1000)); }
+        else sprintf(b,"%s",tr(a,"Difference: --","Écart : --"));
         line(a,12,b,0);
-        line(a,14,tr(a,"Blank = not recorded","Vide = non renseigne"),0);
-        line(a,15, a->daysBack?tr(a,"Enter / Esc: day menu","Entree / Echap : menu du jour"):tr(a,"Up/Down: field - Enter: save","Haut/Bas : champ - Entree : valider"),0);
+        line(a,14,tr(a,"Blank = not recorded","Vide = non renseigné"),0);
+        line(a,15, a->daysBack?tr(a,"Enter / Esc: day menu","Entrée / Échap : menu du jour"):tr(a,"Up/Down: field - Enter: save","Haut/Bas : champ - Entrée : valider"),0);
     }else if(a->screen==SCR_KANBAN){
         /* Three equal 26-column bands, one blank column between them (26+1+26+1+26). */
         int col, starts[3];
@@ -728,8 +728,8 @@ void app_render(App *a){
             field(a,5,starts[col],26,hdr,active);
             if(!n){
                 if(active && tasks_in(a,TASK_TODO)+tasks_in(a,TASK_DOING)+tasks_in(a,TASK_DONE)==0)
-                    line(a,7,tr(a,"No tasks. Press N to create one.","Aucune tache. Appuyez sur N."),0);
-                else if(active) field(a,7,starts[col],26,tr(a,"No tasks. Press N to create one.","Aucune tache. Appuyez sur N."),0);
+                    line(a,7,tr(a,"No tasks. Press N to create one.","Aucune tâche. Appuyez sur N."),0);
+                else if(active) field(a,7,starts[col],26,tr(a,"No tasks. Press N to create one.","Aucune tâche. Appuyez sur N."),0);
             }else{
                 unsigned visible=12, first, end, position;
                 unsigned sel=active?a->selection:0;
@@ -744,34 +744,34 @@ void app_render(App *a){
                 }
             }
         }
-        line(a,20,tr(a,"N New  Enter Edit  Del Delete","N Nouveau Entree Modifier Suppr Effacer"),0);
-        line(a,21,tr(a,"F1 TODO  F2 DOING  F3 DONE","F1 A FAIRE F2 EN COURS F3 FINI"),0);
+        line(a,20,tr(a,"N New  Enter Edit  Del Delete","N Nouveau Entrée Modifier Suppr Effacer"),0);
+        line(a,21,tr(a,"F1 TODO  F2 DOING  F3 DONE","F1 À FAIRE F2 EN COURS F3 FINI"),0);
         line(a,22,tr(a,"F4 Up F5 Down  <- -> Columns","F4 Monter F5 Descendre <- -> Colonnes"),0);
     }else if(a->screen==SCR_TASK_EDIT){
-        center_line(a,3, a->editedTask<TASK_CAPACITY?tr(a,"EDIT TASK","MODIFIER LA TACHE"):tr(a,"NEW TASK","NOUVELLE TACHE"),0);
+        center_line(a,3, a->editedTask<TASK_CAPACITY?tr(a,"EDIT TASK","MODIFIER LA TÂCHE"):tr(a,"NEW TASK","NOUVELLE TÂCHE"),0);
         line(a,6,a->taskDraft,1);
-        sprintf(b,tr(a,"%u/32 characters","%u/32 caracteres"),(unsigned)strlen(a->taskDraft)); line(a,9,b,0);
-        line(a,13,tr(a,"Enter: save task","Entree : enregistrer la tache"),0);
-        line(a,15,tr(a,"Backspace: erase  Esc: cancel","Retour: effacer  Echap: annuler"),0);
+        sprintf(b,tr(a,"%u/32 characters","%u/32 caractères"),(unsigned)strlen(a->taskDraft)); line(a,9,b,0);
+        line(a,13,tr(a,"Enter: save task","Entrée : enregistrer la tâche"),0);
+        line(a,15,tr(a,"Backspace: erase  Esc: cancel","Retour: effacer  Échap: annuler"),0);
     }else if(a->screen==SCR_DAILY_REVIEW){
         char weight[20]; unsigned total=review_rows(a);
-        sprintf(b,"%s  %s", tr(a,"DAILY REVIEW","REVUE JOURNALIERE"), date); center_line(a,3,b,0);
+        sprintf(b,"%s  %s", tr(a,"DAILY REVIEW","REVUE JOURNALIÈRE"), date); center_line(a,3,b,0);
         weight_text(a->state.today.actual,weight,sizeof(weight));
         sprintf(b,tr(a,"Actual weight: %s kg","Poids effectif : %s kg"), weight); line(a,4,b,0);
         for(i=0;i<REVIEW_PAGE && a->reviewOffset+i<total;i++){ review_line(a,a->reviewOffset+i,b,sizeof(b)); line(a,6+(int)i,b,0); }
-        sprintf(b,tr(a,"Up/Down scroll  %u-%u/%u  Esc back","Haut/Bas defiler  %u-%u/%u  Echap retour"),
+        sprintf(b,tr(a,"Up/Down scroll  %u-%u/%u  Esc back","Haut/Bas défiler  %u-%u/%u  Échap retour"),
             a->reviewOffset+1, (a->reviewOffset+REVIEW_PAGE<total?a->reviewOffset+REVIEW_PAGE:total), total); line(a,22,b,0);
     }else if(a->screen==SCR_CONFIG){
         center_line(a,3,tr(a,"CONFIGURATION","CONFIGURATION"),0);
-        sprintf(b,"%s: %s", tr(a,"1  Language","1  Langue"), a->pendingLanguage==LANG_EN?"English":"Francais"); line(a,6,b,a->selection==0);
+        sprintf(b,"%s: %s", tr(a,"1  Language","1  Langue"), a->pendingLanguage==LANG_EN?"English":"Français"); line(a,6,b,a->selection==0);
         sprintf(b,"%s: PAL%u", tr(a,"2  Colors","2  Couleurs"), (unsigned)a->state.palette+1); line(a,7,b,a->selection==1);
         line(a,8,tr(a,"3  Save","3  Enregistrer"),a->selection==2);
         line(a,11,tr(a,"Language: select, then Save.","Langue : choisir, puis enregistrer."),0);
-        line(a,12,tr(a,"Esc: discard changes","Echap : annuler les modifications"),0);
+        line(a,12,tr(a,"Esc: discard changes","Échap : annuler les modifications"),0);
     }else if(a->screen==SCR_LANGUAGE){
         center_line(a,3,tr(a,"LANGUAGE","LANGUE"),0);
-        line(a,6,"1  English",a->selection==0); line(a,7,"2  Francais",a->selection==1);
-        line(a,10,tr(a,"Enter: select / Esc: back","Entree : choisir / Echap : retour"),0);
+        line(a,6,"1  English",a->selection==0); line(a,7,"2  Français",a->selection==1);
+        line(a,10,tr(a,"Enter: select / Esc: back","Entrée : choisir / Échap : retour"),0);
         line(a,11,tr(a,"Then Save in Configuration.","Puis enregistrer dans Configuration."),0);
     }else if(a->screen==SCR_COLORS){
         center_line(a,3,tr(a,"COLORS","COULEURS"),0);
@@ -780,23 +780,23 @@ void app_render(App *a){
         line(a,8,tr(a,"3  PAL3  blue","3  PAL3  bleu"),a->selection==2);
         line(a,9,"4  PAL4  Orange",a->selection==3);
         line(a,10,tr(a,"5  PAL5  Pink","5  PAL5  Rose"),a->selection==4);
-        line(a,13,tr(a,"Enter: save color","Entree : enregistrer couleur"),0);
+        line(a,13,tr(a,"Enter: save color","Entrée : enregistrer couleur"),0);
     }else if(a->screen==SCR_ROSARY_MODE){
         center_line(a,3,tr(a,"CHOOSE ROSARY MODE","CHOISIR LE MODE DU ROSAIRE"),0);
         line(a,6,tr(a,"1  One decade             3-5 min","1  Une dizaine            3-5 min"),a->selection==0);
         line(a,8,tr(a,"2  Full Rosary          15-20 min","2  Rosaire complet      15-20 min"),a->selection==1);
-        line(a,10,tr(a,"3  Scripture + guidance 20-30 min","3  Ecriture + meditation 20-30 min"),a->selection==2);
+        line(a,10,tr(a,"3  Scripture + guidance 20-30 min","3  Écriture + méditation 20-30 min"),a->selection==2);
         line(a,12,tr(a,"4  Slow contemplation   30-40 min","4  Contemplation lente  30-40 min"),a->selection==3);
-        line(a,15,tr(a,"Choose before every new session.","Choix demande a chaque nouvelle seance."),0);
+        line(a,15,tr(a,"Choose before every new session.","Choix demandé à chaque nouvelle séance."),0);
     }else if(a->screen==SCR_ROSARY_SET){
-        center_line(a,3,tr(a,"CHOOSE THE MYSTERIES","CHOISIR LES MYSTERES"),0);
+        center_line(a,3,tr(a,"CHOOSE THE MYSTERIES","CHOISIR LES MYSTÈRES"),0);
         sprintf(b,tr(a,"1  Today: %s","1  Aujourd'hui : %s"), mystery_set_name(a->state.language,suggested_mysteries(a))); line(a,6,b,a->selection==0);
         for(i=0;i<4;i++){ sprintf(b,"%u  %s",i+2, mystery_set_name(a->state.language,(int)i)); line(a,7+(int)i,b,a->selection==i+1); }
-        line(a,14,tr(a,"Today's cycle is selected by date.","Cycle du jour propose automatiquement."),0);
+        line(a,14,tr(a,"Today's cycle is selected by date.","Cycle du jour proposé automatiquement."),0);
     }else if(a->screen==SCR_ROSARY_DECADE){
-        sprintf(b,tr(a,"ONE DECADE - %s MYSTERIES","UNE DIZAINE - MYSTERES %s"), mystery_set_name(a->state.language,a->rosarySet)); center_line(a,3,b,0);
+        sprintf(b,tr(a,"ONE DECADE - %s MYSTERIES","UNE DIZAINE - MYSTÈRES %s"), mystery_set_name(a->state.language,a->rosarySet)); center_line(a,3,b,0);
         for(i=0;i<5;i++){ sprintf(b,"%u  %s",i+1, mystery_name(a->state.language,a->rosarySet,i)); line(a,6+(int)i,b,a->selection==i); }
-        line(a,14,tr(a,"Choose the mystery to pray.","Choisissez le mystere a prier."),0);
+        line(a,14,tr(a,"Choose the mystery to pray.","Choisissez le mystère à prier."),0);
     }else if(a->screen==SCR_ROSARY_PRAYER){
         int part=rosary_part(a->rosaryMode,a->rosaryDecade,a->rosaryStep);
         unsigned decade=rosary_view_decade(a->rosaryMode,a->rosaryDecade,a->rosaryStep);
@@ -808,7 +808,7 @@ void app_render(App *a){
         sprintf(b,"%s  %u/%u", rosary_part_name(a->state.language,a->rosaryMode,a->rosaryDecade,a->rosaryStep), a->rosaryStep+1, rosary_steps(a->rosaryMode));
         center_line(a,3,b,1);
         if(part==RP_MYSTERY||part==RP_SCRIPTURE||part==RP_MEDITATION||part==RP_SILENCE){
-            sprintf(b,tr(a,"Mystery %u/%u - %s","Mystere %u/%u - %s"), a->rosaryMode==ROS_DECADE?1u:decade+1, a->rosaryMode==ROS_DECADE?1u:5u, mystery_set_name(a->state.language,a->rosarySet));
+            sprintf(b,tr(a,"Mystery %u/%u - %s","Mystère %u/%u - %s"), a->rosaryMode==ROS_DECADE?1u:decade+1, a->rosaryMode==ROS_DECADE?1u:5u, mystery_set_name(a->state.language,a->rosarySet));
             line(a,4,b,0);
         }else if(part==RP_HAIL){
             char beads[12];
@@ -823,22 +823,22 @@ void app_render(App *a){
             cell_slice(text, a->rosaryPage*page_chars+i*(unsigned)COLUMNS, (unsigned)COLUMNS, slice, sizeof(slice));
             line(a,6+(int)i,slice,0);
         }
-        if(pages>1){ sprintf(b,tr(a,"Page %u/%u  Enter: continue","Page %u/%u  Entree : continuer"), a->rosaryPage+1, pages); line(a,22,b,0); }
-        else line(a,22,tr(a,"Enter: next prayer   <- previous","Entree : suite       <- precedent"),0);
-        line(a,23,tr(a,"Esc: leave session","Echap : quitter la seance"),0);
+        if(pages>1){ sprintf(b,tr(a,"Page %u/%u  Enter: continue","Page %u/%u  Entrée : continuer"), a->rosaryPage+1, pages); line(a,22,b,0); }
+        else line(a,22,tr(a,"Enter: next prayer   <- previous","Entrée : suite       <- précédent"),0);
+        line(a,23,tr(a,"Esc: leave session","Échap : quitter la séance"),0);
     }else if(a->screen==SCR_ROSARY_COMPLETE){
-        center_line(a,3,tr(a,"ROSARY COMPLETED","ROSAIRE TERMINE"),1);
-        line(a,6,tr(a,"The prayer session is complete.","La seance de priere est terminee."),0);
+        center_line(a,3,tr(a,"ROSARY COMPLETED","ROSAIRE TERMINÉ"),1);
+        line(a,6,tr(a,"The prayer session is complete.","La séance de prière est terminée."),0);
         line(a,9,tr(a,"Remain for a moment in God's peace.","Demeurez un instant dans la paix de Dieu."),0);
-        line(a,13,tr(a,"Enter: return to LPS Companion","Entree : retour a LPS Companion"),0);
+        line(a,13,tr(a,"Enter: return to LPS Companion","Entrée : retour à LPS Companion"),0);
     }else if(a->screen==SCR_FINISH){
         center_line(a,3,tr(a,"CLOSE THE DAY?","TERMINER LE JOUR ?"),0);
-        sprintf(b,tr(a,"Activities: %u","Activites : %u"), count_flags(a->state.today.flags)); line(a,6,b,0);
-        line(a,13,tr(a,"Enter: save and advance","Entree : enregistrer et avancer"),0);
-        line(a,15,tr(a,"An empty day has no penalty.","Une journee vide ne coute rien."),0);
+        sprintf(b,tr(a,"Activities: %u","Activités : %u"), count_flags(a->state.today.flags)); line(a,6,b,0);
+        line(a,13,tr(a,"Enter: save and advance","Entrée : enregistrer et avancer"),0);
+        line(a,15,tr(a,"An empty day has no penalty.","Une journée vide ne coûte rien."),0);
     }else{
-        center_line(a,3,tr(a,"DAY SAVED","JOUR ENREGISTRE"),0);
-        line(a,15,tr(a,"Enter: start the new day","Entree : commencer le nouveau jour"),0);
+        center_line(a,3,tr(a,"DAY SAVED","JOUR ENREGISTRÉ"),0);
+        line(a,15,tr(a,"Enter: start the new day","Entrée : commencer le nouveau jour"),0);
     }
 
     statusRow = (a->screen==SCR_TIMER_RUNNING||a->screen==SCR_TIMER_COMPLETE)?21:23;
@@ -847,7 +847,7 @@ void app_render(App *a){
     if(a->hw->battery_low && a->hw->battery_low(a->hw))
         a->hw->alert(a->hw,22,0,tr(a,"[!] Low battery!","[!] Batterie faible !"));
     if(a->screen!=SCR_TIMER_RUNNING && a->screen!=SCR_TIMER_COMPLETE)
-        center_line(a,24,tr(a,"Up/Down  Enter:OK  Esc:Back","Haut/Bas  Entree:OK  Echap:Retour"),1);
+        center_line(a,24,tr(a,"Up/Down  Enter:OK  Esc:Back","Haut/Bas  Entrée:OK  Échap:Retour"),1);
     a->hw->present(a->hw);
 }
 

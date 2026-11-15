@@ -10,7 +10,7 @@ Ready-to-run LPS Companion binaries are at the repository root. Copy them straig
 - [`ROSARY.DAT`](ROSARY.DAT) — the rosary prayer texts; keep it **in the same directory as `LPSCOMP.EXE`**
 - [`HELLO.EXE`](HELLO.EXE) — BIOS smoke test
 
-Copy both `LPSCOMP.EXE` and `ROSARY.DAT`. Without `ROSARY.DAT` everything works except the Rosary, which then says the file is missing.
+Copy both `LPSCOMP.EXE` and `ROSARY.DAT`. Without `ROSARY.DAT` everything works except the Rosary, which then says the file is missing. Always update the two together: since LPS-DOS-115-CHG03 (French accents) an older `ROSARY.DAT` is refused as damaged.
 
 Sources and rebuild instructions are in [`lps-companion/`](lps-companion/). A local `make dos rosary` writes new copies there; those copies stay untracked. The root files above are the ones to download.
 

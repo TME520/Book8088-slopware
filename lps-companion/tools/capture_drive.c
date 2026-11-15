@@ -1,4 +1,4 @@
-#include "../src/lps.h"
+#include "lps.h"
 #include <stdio.h>
 #include <string.h>
 

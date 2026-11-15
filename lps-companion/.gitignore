@@ -19,3 +19,7 @@ LPS/
 # Built by `make rosary`; the copy to ship is ../ROSARY.DAT
 ROSARY.DAT
 tools/mkrosary
+
+# CP437 copies of the sources (tools/cp437, LPS-DOS-115-CHG03)
+build/
+tools/cp437

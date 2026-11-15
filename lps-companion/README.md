@@ -17,7 +17,9 @@ As in PicoCalc v1.12, XP and keepsakes no longer appear on any screen (LPS-DOS-1
 
 As in PicoCalc v1.12, the notepad is gone (LPS-DOS-115-CHG02) and the Home menu is renumbered **0 Date, 1 Activities, 2 Weight tracker, 3 Kanban, 4 Christian Rosary, 5 Daily review, 6 Config, 7 Reminders, 8 Timer, 9 Close the day**; an archived day offers **1 Activities, 2 Weight tracker**.
 
-The **Timer / Minuteur** offers **5, 30 or 60 minutes** (LPS-DOS-115-CHG02b, as PicoCalc v1.12 CHG01/CHG02). Keys **1**, **2** and **3** start a duration directly, without Enter. On the completion screen they start a new countdown at once and Enter returns to the duration menu; while a countdown runs they are ignored, and Enter pauses or resumes. Timing still comes from the BIOS tick (about 55 ms). A note already saved by an older version is kept in the save and still exported to the ICS (`\NNote: ...`) when its day is closed; it is no longer shown or editable.
+The **Timer / Minuteur** offers **5, 30 or 60 minutes** (LPS-DOS-115-CHG02b, as PicoCalc v1.12 CHG01/CHG02). Keys **1**, **2** and **3** start a duration directly, without Enter. On the completion screen they start a new countdown at once and Enter returns to the duration menu; while a countdown runs they are ignored, and Enter pauses or resumes. Timing still comes from the BIOS tick (about 55 ms).
+
+French is shown with its accents (LPS-DOS-115-CHG03): **Activités, Journée, Rosaire chrétien, Revue journalière, Février, Août, Décembre…**, with the PicoCalc's wording, in the PC's own code page 437 font. CP437 has é è ê ë à â ä ç î ï ô û ù ü and É, but no other accented capitals, so À, È, Ê, Ô and Â show without their accent (À FAIRE → A FAIRE, NOTRE PÈRE → NOTRE PERE, TÂCHE → TACHE). Files stay UTF-8 like the PicoCalc's: a French ICS now writes `Activités:` and accented activity names exactly as the PicoCalc does (earlier DOS builds wrote `Activites:`). See *Text encoding* below. A note already saved by an older version is kept in the save and still exported to the ICS (`\NNote: ...`) when its day is closed; it is no longer shown or editable.
 
 ![Home screen](captures/01-home-en.png)
 
@@ -40,7 +42,7 @@ The **Timer / Minuteur** offers **5, 30 or 60 minutes** (LPS-DOS-115-CHG02b, as 
 | Notepad | Removed, as in v1.12 (legacy notes kept in SAVE and ICS) |
 | Weight expected/measured | Yes |
 | Kanban 24 tasks TODO/DOING/DONE | Yes |
-| Christian Rosary (4 modes, FR/EN) | Yes (accents ASCII-folded for CP437) |
+| Christian Rosary (4 modes, FR/EN) | Yes (French accents in CP437) |
 | Daily review | Yes |
 | Config language EN/FR + 5 palettes | Yes (text attributes) |
 | 3 reminders | Yes |
@@ -85,29 +87,46 @@ make clean
 `wcl` looks up `wcc` and `wlink` on `PATH`, not beside the `wcl` binary.
 `make captures` regenerates text dumps under `captures/` with the host UI driver.
 
-The same DOS link line, without Make:
+Every build first converts the sources to CP437 (see *Text encoding*), so use
+Make rather than calling `wcl` or `gcc` on `src/` directly. The steps Make runs:
 
 ```sh
-wcl -0 -bt=dos -ml -zt256 -ox -fpc -k4096 -dLPS_DOS -i=src -fe=LPSCOMP.EXE \
-  src/state.c src/ics.c src/save.c src/paths.c src/rosary.c \
-  src/app.c src/plat_dos.c src/main.c
+gcc -std=c89 -Wall -Wextra -O2 -Isrc -DLPS_HOST -o tools/cp437 tools/cp437.c src/cp437.c
+mkdir -p build/cp437
+for f in src/*.c src/*.h tests/test_storage.c tools/mkrosary.c; do
+  ./tools/cp437 "$f" build/cp437/$(basename "$f"); done
+G=build/cp437
+wcl -0 -bt=dos -ml -zt256 -ox -fpc -k4096 -dLPS_DOS -i=$G -fe=LPSCOMP.EXE \
+  $G/state.c $G/ics.c $G/save.c $G/paths.c $G/rosary.c $G/app.c $G/cp437.c \
+  $G/plat_dos.c $G/main.c
 ```
 
 ### Host tests (gcc, no DOS)
 
-Run from this directory so the test finds `tests/fixtures/v12_payload.bin` and
-`ROSARY.DAT`:
+`make test` builds `tools/mkrosary` and `ROSARY.DAT`, then
+`tests/test_storage` from the CP437 copies, and runs it from this directory so
+it finds `tests/fixtures/v12_payload.bin` and `ROSARY.DAT`.
 
-```sh
-gcc -std=c89 -Wall -Wextra -Wno-unused-parameter -O2 -Isrc -DLPS_HOST \
-  -o tools/mkrosary tools/mkrosary.c src/rosary_text.c src/state.c
-./tools/mkrosary ROSARY.DAT
-gcc -std=c89 -Wall -Wextra -Wno-unused-parameter -O2 -Isrc -DLPS_HOST \
-  -o tests/test_storage \
-  tests/test_storage.c src/state.c src/ics.c src/save.c src/paths.c \
-  src/rosary.c src/rosary_text.c src/app.c src/plat_host.c
-./tests/test_storage
-```
+### Text encoding (LPS-DOS-115-CHG03)
+
+- **Sources are UTF-8**, like the PicoCalc's, so French strings read and diff
+  the same as there (`"Activités"`, `"Rosaire chrétien"`).
+- **The screen is CP437.** `tools/cp437` copies each source file into
+  `build/cp437/` and rewrites every non-ASCII character *inside a string or
+  character literal* as a three-digit octal escape of its CP437 byte
+  (`é` → `\202`). Comments and code are copied unchanged, line for line, so
+  compiler messages keep their line numbers. DOS, the host tests and
+  `mkrosary` all compile these copies and see the same bytes.
+- Characters CP437 lacks are folded by a fixed table (À Â → A, È Ê → E,
+  Ô → O, œ → oe, curly quotes and dashes → ASCII). Any other character stops
+  the build with its file and line, so nothing is lost silently.
+- **Files are UTF-8**, byte for byte like the PicoCalc: `ics.c` turns CP437
+  bytes back into UTF-8 (`cp437_to_utf8`, same table as the tool). User text
+  (notes, tasks, reminders) is printable ASCII only, as on the PicoCalc, so
+  the saves and the weights CSV do not change.
+- This was chosen over hand-written `\x82` escapes: those are hard to read,
+  easy to get wrong (`"\x82e"` is one byte, not two) and cannot be compared
+  with the PicoCalc's sources.
 
 ### Memory layout (LPS-DOS-115-CHG03b)
 
@@ -126,9 +145,13 @@ JSON save, more activities and the EGA Meal Planner.
   records, the ICS and CSV export buffers) are one far-heap block allocated
   at start-up (`lps_buffers_init`), as are the `App` and the screen shadow.
   The CSV buffer used to be an 8 KB local on the 4 KB stack.
-- `ROSARY.DAT` layout (little-endian): `LPSROSRY` magic, u16 version 1,
+- `ROSARY.DAT` layout (little-endian): `LPSROSRY` magic, u16 version 2,
   u16 string count (138: 69 texts × EN/FR), u32 payload size, u32 CRC-32 of the
-  payload, then a u16 offset table and the NUL-terminated ASCII strings.
+  payload, then a u16 offset table and the NUL-terminated strings: printable
+  ASCII plus the CP437 accented letters 0x80–0xA5. Version 2 (LPS-DOS-115-CHG03)
+  holds the accented French texts; a version 1 file from an earlier build is
+  refused with *ROSARY.DAT is damaged: copy it again*, so copy both files
+  together.
 
 Check the segment sizes with `wcl ... -fm=LPSCOMP.MAP` and look at `DGROUP`.
 
@@ -263,10 +286,12 @@ CSV stay byte-compatible with the firmware.
 | `src/rosary.c` | Rosary step engine; loads `ROSARY.DAT` |
 | `src/rosary_text.c` | Rosary texts (single source, not linked into the EXE) |
 | `tools/mkrosary.c` | Writes `ROSARY.DAT` from `src/rosary_text.c` |
+| `src/cp437.c` | CP437 ↔ Unicode table; CP437 → UTF-8 for the ICS |
+| `tools/cp437.c` | Build step: UTF-8 string literals → CP437 copies in `build/cp437/` |
 | `src/plat_dos.c` | BIOS video/keyboard/timer |
 | `src/plat_host.c` | Linux host for tests |
 | `src/hello.c` | `HELLO.EXE` BIOS smoke test |
-| `tests/test_storage.c` | Host encode/decode, ICS, CSV, A/B, `ROSARY.DAT`, v1.2 fixture |
+| `tests/test_storage.c` | Host encode/decode, ICS, CSV, A/B, `ROSARY.DAT`, v1.2 fixture, French CP437 screens |
 | `tests/fixtures/v12_payload.bin` | Synthetic Companion v1.2 payload |
 
 ## Captures
@@ -292,6 +317,8 @@ L'ecran utilise tout le mode texte **80×25**. L'accueil a deux volets : le menu
 Comme sur la PicoCalc v1.12, l'XP et les souvenirs n'apparaissent plus sur aucun ecran (LPS-DOS-115-CHG01). La ligne sous la barre de titre affiche la date longue et la semaine ISO du jour affiche, par exemple **Dimanche 8 Novembre 2026 (semaine 45)** ; elle reste vide pour un jour sans date. L'XP reste enregistree dans `SAVE_A`/`SAVE_B` pour la compatibilite, et la description ICS garde une ligne `XP:` vide, comme sur la PicoCalc.
 
 Comme sur la PicoCalc v1.12, le bloc notes disparait (LPS-DOS-115-CHG02) et le menu d'accueil est renumerote : **0 Date, 1 Activites, 2 Suivi du poids, 3 Kanban, 4 Rosaire chretien, 5 Revue journaliere, 6 Config, 7 Rappels, 8 Minuteur, 9 Terminer le jour**. Un jour archive propose **1 Activites, 2 Suivi du poids**.
+
+Le français s'affiche avec ses accents (LPS-DOS-115-CHG03) : **Activités, Journée, Rosaire chrétien, Revue journalière, Février, Août, Décembre…**, avec le texte exact de la PicoCalc, dans la police du PC (page de code 437). La CP437 a é è ê ë à â ä ç î ï ô û ù ü et É, mais pas les autres capitales accentuées : À, È, Ê, Ô et Â s'affichent sans accent (À FAIRE → A FAIRE, NOTRE PÈRE → NOTRE PERE, TÂCHE → TACHE). Les sources restent en UTF-8 comme celles de la PicoCalc ; `tools/cp437` convertit les chaînes en CP437 à la compilation (voir *Text encoding*). Les fichiers restent en UTF-8 : un ICS en français écrit désormais `Activités:` et les noms d'activités accentués, octet pour octet comme la PicoCalc (les versions DOS précédentes écrivaient `Activites:`). `ROSARY.DAT` passe en version 2 : un ancien fichier est refusé avec *ROSARY.DAT endommagé : recopiez-le* ; copiez toujours `LPSCOMP.EXE` et `ROSARY.DAT` ensemble.
 
 Le **Minuteur** propose **5, 30 ou 60 minutes** (LPS-DOS-115-CHG02b, comme les CHG01/CHG02 de la PicoCalc v1.12). Les touches **1**, **2** et **3** lancent directement une duree, sans Entree. Sur l'ecran de fin, elles relancent aussitot un compte a rebours et Entree revient au choix de la duree ; pendant un compte a rebours, elles sont ignorees et Entree met en pause ou reprend. Le temps vient toujours du tic BIOS (environ 55 ms). Une note deja enregistree par une ancienne version reste dans la sauvegarde et part toujours dans l'ICS (`\NNote: ...`) a la cloture du jour ; elle n'est plus affichee ni modifiable.
 
@@ -333,7 +360,7 @@ Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) p
 
 ## Ecarts connus
 
-- Accents francais ASCII-ises pour le code page 437 (le sens des chaines est
-  conserve ; le Companion PicoCalc garde Latin-1/UTF-8).
+- Capitales À, È, Ê, Ô et Â affichées sans accent : la page de code 437 ne les
+  a pas (LPS-DOS-115-CHG03).
 - Pas d'avertissement batterie (pas de materiel equivalent).
 - Config n'a pas d'entree « import SD » : le disque DOS **est** le stockage.

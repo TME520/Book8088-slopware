@@ -5,8 +5,8 @@
 #include <string.h>
 
 const char *ACTIVITIES_FR[ACTIVITY_COUNT] = {
-    "Marche","Regime","Bible","Messe","Travail","Projet","Sieste","Gurumed",
-    "Maladie","Conge","Weekend","Sortie","Jeu","Docteur","Lecture","Shopping"
+    "Marche","Régime","Bible","Messe","Travail","Projet","Sieste","Gurumed",
+    "Maladie","Congé","Weekend","Sortie","Jeu","Docteur","Lecture","Shopping"
 };
 const char *ACTIVITIES_EN[ACTIVITY_COUNT] = {
     "Walk","Diet","Bible","Mass","Work","Project","Nap","Gurumed",
@@ -102,7 +102,7 @@ void long_date_text(Date d, int language, char *out, size_t n){
     static const char *en_days[7]={"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"};
     static const char *fr_days[7]={"Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"};
     static const char *en_months[12]={"January","February","March","April","May","June","July","August","September","October","November","December"};
-    static const char *fr_months[12]={"Janvier","Fevrier","Mars","Avril","Mai","Juin","Juillet","Aout","Septembre","Octobre","Novembre","Decembre"};
+    static const char *fr_months[12]={"Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"};
     int fr=language==LANG_FR; unsigned w=weekday(d);
     (void)n; /* longest: "Wednesday 30 September 2099 (week 40)" = 38 chars */
     sprintf(out, fr?"%s %u %s %u (semaine %u)":"%s %u %s %u (week %u)",

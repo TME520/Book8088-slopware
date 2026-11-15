@@ -68,7 +68,7 @@ int main(int argc, char **argv){
 #endif
     if(!hw){
 #ifdef LPS_DOS
-        plat_dos_bios_puts("Not enough memory / Memoire insuffisante\r\n");
+        plat_dos_bios_puts("Not enough memory / Mémoire insuffisante\r\n");
 #else
         puts("Not enough memory");
 #endif

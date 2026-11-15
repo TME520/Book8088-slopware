@@ -42,10 +42,10 @@ static int load_from(const char *path){
     fclose(f);
     area=(unsigned)size-table;
     /* Every string must start inside the area and the area must end with NUL;
-     * only printable ASCII is allowed, as in the saves. */
+     * only printable ASCII and CP437 letters are allowed (no raw UTF-8). */
     if(crc32(p,(size_t)size)!=crc || p[size-1]!=0){ free(p); return ROSARY_CORRUPT; }
     for(i=0;i<ROSARY_DAT_STRINGS;i++) if(get16(p+2u*i)>=area){ free(p); return ROSARY_CORRUPT; }
-    for(i=table;i<(unsigned)size;i++) if(p[i] && (p[i]<32 || p[i]>126)){ free(p); return ROSARY_CORRUPT; }
+    for(i=table;i<(unsigned)size;i++) if(p[i] && !cp437_text_byte(p[i])){ free(p); return ROSARY_CORRUPT; }
     g_rosary=p; g_rosary_strings=table;
     return ROSARY_OK;
 }
@@ -151,17 +151,17 @@ const char *rosary_part_name(int lang, int mode, unsigned rosaryDecade, unsigned
     RosaryView v=rosary_view(mode,rosaryDecade,step);
     switch(v.part){
     case RP_SIGN: case RP_END_SIGN: return tr(lang,"SIGN OF THE CROSS","SIGNE DE CROIX");
-    case RP_CREED: return tr(lang,"APOSTLES' CREED","SYMBOLE DES APOTRES");
-    case RP_OPEN_OF: case RP_OUR_FATHER: return tr(lang,"OUR FATHER","NOTRE PERE");
+    case RP_CREED: return tr(lang,"APOSTLES' CREED","SYMBOLE DES APÔTRES");
+    case RP_OPEN_OF: case RP_OUR_FATHER: return tr(lang,"OUR FATHER","NOTRE PÈRE");
     case RP_OPEN_HAIL: case RP_HAIL: return tr(lang,"HAIL MARY","JE VOUS SALUE MARIE");
-    case RP_GLORY: return tr(lang,"GLORY BE","GLOIRE AU PERE");
-    case RP_MYSTERY: return tr(lang,"MYSTERY","MYSTERE");
-    case RP_SCRIPTURE: return tr(lang,"SCRIPTURE","ECRITURE");
-    case RP_MEDITATION: return tr(lang,"MEDITATION","MEDITATION");
+    case RP_GLORY: return tr(lang,"GLORY BE","GLOIRE AU PÈRE");
+    case RP_MYSTERY: return tr(lang,"MYSTERY","MYSTÈRE");
+    case RP_SCRIPTURE: return tr(lang,"SCRIPTURE","ÉCRITURE");
+    case RP_MEDITATION: return tr(lang,"MÉDITATION","MÉDITATION");
     case RP_SILENCE: return tr(lang,"CONTEMPLATIVE SILENCE","SILENCE CONTEMPLATIF");
-    case RP_FATIMA: return tr(lang,"FATIMA PRAYER","PRIERE DE FATIMA");
-    case RP_HHQ: return tr(lang,"HAIL, HOLY QUEEN","SALUT, O REINE");
-    case RP_CLOSING: return tr(lang,"CLOSING PRAYER","PRIERE FINALE");
+    case RP_FATIMA: return tr(lang,"FATIMA PRAYER","PRIÈRE DE FATIMA");
+    case RP_HHQ: return tr(lang,"HAIL, HOLY QUEEN","SALUT, Ô REINE");
+    case RP_CLOSING: return tr(lang,"CLOSING PRAYER","PRIÈRE FINALE");
     default: return "";
     }
 }

@@ -127,6 +127,10 @@ uint32_t points(const Day *d);
 int parse_weight(const char *s, int32_t *grams);
 void weight_text(int32_t grams, char *out, size_t n);
 uint32_t crc32(const uint8_t *p, size_t n);
+/* cp437.c (LPS-DOS-115-CHG03): screen text is CP437, files are UTF-8. */
+size_t cp437_to_utf8(unsigned char c, char *out); /* out: up to 3 bytes */
+int unicode_to_cp437(unsigned long cp);            /* -1 if CP437 lacks it */
+int cp437_text_byte(unsigned char c);              /* printable ASCII or CP437 letter */
 void encode_state(const State *s, Blob *b);
 int decode_state(const uint8_t *bytes, size_t size, State *out);
 void state_init(State *s);

@@ -42,9 +42,12 @@
  *  12  u32      payload size in bytes
  *  16  u32      CRC-32 of the payload (same CRC as the SAVE files)
  *  20  payload: count x u16 offsets into the string area, then the
- *      NUL-terminated strings (printable ASCII). */
+ *      NUL-terminated strings: printable ASCII plus the CP437 accented
+ *      letters 0x80-0xA5 (cp437_text_byte).
+ * Version 2 (LPS-DOS-115-CHG03): French texts carry CP437 accents. A version 1
+ * file (ASCII-folded) is refused and reported as damaged. */
 #define ROSARY_DAT_MAGIC "LPSROSRY"
-#define ROSARY_DAT_VERSION 1
+#define ROSARY_DAT_VERSION 2
 #define ROSARY_DAT_HEADER 20
 #define ROSARY_DAT_MAX_PAYLOAD 0xFF00u /* one far-heap block */
 enum RosaryLoad { ROSARY_OK = 0, ROSARY_MISSING = 1, ROSARY_CORRUPT = 2, ROSARY_NO_MEMORY = 3 };

@@ -2,12 +2,17 @@
 #include <stdio.h>
 #include <string.h>
 
+/* LPS-DOS-115-CHG03: program text is CP437 (screen), but the ICS file stays
+ * UTF-8 like the PicoCalc's, so bytes 0x80-0xFF are written back as UTF-8.
+ * User text (notes) is printable ASCII only - the saves refuse anything else -
+ * so it passes through unchanged, as on the PicoCalc. */
 int ics_escape_append(char *dst, size_t cap, size_t *used, const char *text){
     size_t u=*used;
     while(*text){
         char c=*text++;
         if(c=='\\'||c==';'||c==','){ if(u+2>=cap) return 0; dst[u++]='\\'; dst[u++]=c; }
         else if(c=='\n'){ if(u+2>=cap) return 0; dst[u++]='\\'; dst[u++]='n'; }
+        else if((unsigned char)c>=0x80){ char b[3]; size_t k,n=cp437_to_utf8((unsigned char)c,b); if(u+n>=cap) return 0; for(k=0;k<n;k++) dst[u++]=b[k]; }
         else { if(u+1>=cap) return 0; dst[u++]=c; }
     }
     dst[u]=0; *used=u; return 1;
@@ -24,7 +29,7 @@ int build_ics(const Day *day, uint32_t totalXp, uint32_t dayXp, int language, ch
     u+=sprintf(out+u,"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//LPS Companion//EN\r\nCALSCALE:GREGORIAN\r\nBEGIN:VEVENT\r\n");
     u+=sprintf(out+u,"UID:lps-companion-%s@picocalc\r\nDTSTART;VALUE=DATE:%s\r\nDTEND;VALUE=DATE:%s\r\n",ymd,ymd,nxt);
     u+=sprintf(out+u,"SUMMARY:LPS Companion\r\nDESCRIPTION:");
-    if(!ics_escape_append(out,cap,&u, en?"Activities: ":"Activites: ")) return 0;
+    if(!ics_escape_append(out,cap,&u, en?"Activities: ":"Activités: ")) return 0;
     first=1;
     for(i=0;i<ACTIVITY_COUNT;i++) if(day->flags&(1u<<i)){
         if(!first){ if(u+2>=cap) return 0; out[u++]=','; out[u++]=' '; out[u]=0; }

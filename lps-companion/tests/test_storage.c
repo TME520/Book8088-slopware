@@ -1,7 +1,7 @@
 /* Host unit tests: encode/decode, ICS, CSV, A/B SAVE round-trip, ROSARY.DAT. */
 #define _POSIX_C_SOURCE 200112L
-#include "../src/lps.h"
-#include "../src/rosary.h"
+#include "lps.h"
+#include "rosary.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -134,6 +134,18 @@ static void check_rosary_dat(const char *tmpdir){
         }
         remove(path);
     }
+    {   /* LPS-DOS-115-CHG03: a stale version 1 file (ASCII-folded) is refused even
+         * with a valid CRC, and so is raw UTF-8 that missed the CP437 step. */
+        unsigned long at=ROSARY_DAT_HEADER+ROSARY_DAT_STRINGS*2+5; uint32_t crc;
+        memcpy(bad,dat,(size_t)n); bad[8]=1; bad[9]=0; write_file(path,bad,(size_t)n);
+        assert(load_variant(path)==ROSARY_CORRUPT && !rosary_loaded());
+        memcpy(bad,dat,(size_t)n); bad[at]=0xC3; bad[at+1]=0xA9;
+        crc=crc32(bad+ROSARY_DAT_HEADER,(size_t)n-ROSARY_DAT_HEADER);
+        bad[16]=(unsigned char)crc; bad[17]=(unsigned char)(crc>>8); bad[18]=(unsigned char)(crc>>16); bad[19]=(unsigned char)(crc>>24);
+        write_file(path,bad,(size_t)n);
+        assert(load_variant(path)==ROSARY_CORRUPT && !rosary_loaded());
+        remove(path);
+    }
     rosary_unload(); rosary_set_path(ROSARY_DAT_NAME);
 }
 
@@ -223,7 +235,91 @@ static void check_timer(const char *tmpdir){
     /* French wording */
     app_key(a,'6'); app_key(a,'1'); app_key(a,'2'); app_key(a,'3');
     app_key(a,'8'); app_key(a,'1'); assert(app_state(a)->language==LANG_FR && any_row(hw,"MINUTEUR") && any_row(hw,"Enter: Pause   Esc: Annuler"));
-    t+=300000ul; app_tick(a,t); assert(any_row(hw,"MINUTEUR TERMINE !") && any_row(hw,"1-3: Relancer  Enter: Menu  Esc: Retour"));
+    t+=300000ul; app_tick(a,t); assert(any_row(hw,"MINUTEUR TERMINÉ !") && any_row(hw,"1-3: Relancer  Enter: Menu  Esc: Retour"));
+}
+
+/* LPS-DOS-115-CHG03: French on screen is CP437 with accents, files stay UTF-8.
+ * This file is UTF-8 and goes through tools/cp437 like the program, so "é"
+ * below is the CP437 byte 0x82 at run time. Byte checks spell the bytes out. */
+static const char *const FOLDED_FR[]={
+    "Activites","activites","ACTIVITES","Journee","journee","Entree","Echap","Rosaire chretien",
+    "Revue journaliere","TERMINE","Fevrier","Aout","Decembre","Tache","tache",
+    "enregistre","ENREGISTRE","Francais","Mystere","mystere","seance","priere",
+    "Ecart","precedent","deja","etre","Debut","Verifiez","Memoire","endommage","caracteres",
+    "Regime","Conge","Pere","Esprit Saint courage","Jesus","Ecriture","meditation",0
+};
+/* Capitals CP437 lacks (A/E/O grave or circumflex) fold by design: TÂCHE shows
+ * as TACHE, MYSTÈRES as MYSTERES, NOTRE PÈRE as NOTRE PERE, À FAIRE as A FAIRE. */
+static int is_letter(char c){ return (c>='A'&&c<='Z')||(c>='a'&&c<='z')||(unsigned char)c>=0x80; }
+static int has_word(const char *row, const char *word){ /* whole words: "enregistrer" is fine */
+    const char *p=row; size_t n=strlen(word);
+    while((p=strstr(p,word))!=NULL){
+        if((p==row || !is_letter(p[-1])) && !is_letter(p[n])) return 1;
+        p++;
+    }
+    return 0;
+}
+static void french_screen_ok(Platform *hw, const char *where){
+    int r; unsigned i; const unsigned char *p;
+    for(r=0;r<ROWS;r++){
+        for(p=(const unsigned char*)plat_host_row(hw,r);*p;p++)
+            if(!cp437_text_byte(*p)){ fprintf(stderr,"%s row %d: byte 0x%02X is not CP437 text\n",where,r,*p); assert(0); }
+        for(i=0;FOLDED_FR[i];i++) if(has_word(plat_host_row(hw,r),FOLDED_FR[i])){
+            fprintf(stderr,"%s row %d: folded \"%s\" in \"%s\"\n",where,r,FOLDED_FR[i],plat_host_row(hw,r)); assert(0); }
+    }
+}
+static void check_french_cp437(const char *tmpdir){
+    static unsigned char store5[8192]; App *a=(App*)store5; Platform *hw; char t[64]; unsigned i;
+    {   /* Month and day names: CP437 bytes. */
+        Date d={2026,2,14}; long_date_text(d,LANG_FR,t,sizeof(t)); assert(strcmp(t,"Samedi 14 F\202vrier 2026 (semaine 7)")==0);
+        d.month=8; d.day=15; long_date_text(d,LANG_FR,t,sizeof(t)); assert(strcmp(t,"Samedi 15 Ao\226t 2026 (semaine 33)")==0);
+        d.month=12; d.day=25; long_date_text(d,LANG_FR,t,sizeof(t)); assert(strcmp(t,"Vendredi 25 D\202cembre 2026 (semaine 52)")==0);
+        assert(strcmp(ACTIVITIES_FR[1],"R\202gime")==0 && strcmp(ACTIVITIES_FR[9],"Cong\202")==0);
+        assert(strcmp("Activités","Activit\202s")==0 && strcmp("Échap","\220chap")==0 && strcmp("À FAIRE","A FAIRE")==0);
+    }
+    {   /* ICS: same bytes as the PicoCalc's exportIcs, UTF-8 (main.cpp, v1.12). */
+        static const char want[]=
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//LPS Companion//EN\r\nCALSCALE:GREGORIAN\r\nBEGIN:VEVENT\r\n"
+            "UID:lps-companion-20260917@picocalc\r\nDTSTART;VALUE=DATE:20260917\r\nDTEND;VALUE=DATE:20260918\r\n"
+            "SUMMARY:LPS Companion\r\nDESCRIPTION:Activit\303\251s: Marche, R\303\251gime, Cong\303\251\\NXP:"
+            "\\NPoids attendu: 110.500 kg\\NPoids effectif: 111.250 kg\\NNote: Legacy\\, ascii\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        static char got[2048]; static Day d; char dir[256], path[300]; FILE *f; size_t n;
+        memset(&d,0,sizeof(d)); d.date.year=2026; d.date.month=9; d.date.day=17; d.number=3;
+        d.flags=(uint16_t)((1u<<0)|(1u<<1)|(1u<<9)); d.expected=110500; d.actual=111250; strcpy(d.note,"Legacy, ascii");
+        assert(build_ics(&d,0,0,LANG_FR,got,sizeof(got)) && strcmp(got,want)==0);
+        rm_tree(tmpdir); mkdir(tmpdir,0755); sprintf(dir,"%s",tmpdir);
+        assert(write_ics_file(dir,&d,0,0,LANG_FR));
+        sprintf(path,"%s\\20260917.ICS",tmpdir);
+        f=fopen(path,"rb"); assert(f); n=fread(got,1,sizeof(got),f); fclose(f);
+        assert(n==strlen(want) && memcmp(got,want,n)==0);
+        for(i=0;i<n;i++) assert((unsigned char)got[i]!=0x82); /* no CP437 byte in the file */
+    }
+    /* Every French screen: CP437 text only, no folded word. */
+    rm_tree(tmpdir); mkdir(tmpdir,0755); lps_set_data_dir(tmpdir); lps_ensure_dirs();
+    hw=plat_host_create(0); app_init(a,hw); app_start(a); rosary_set_path(ROSARY_DAT_NAME);
+    app_key(a,'6'); app_key(a,'1'); app_key(a,'2'); app_key(a,'3');
+    assert(app_state(a)->language==LANG_FR && app_screen(a)==SCR_HOME);
+    french_screen_ok(hw,"home");
+    assert(any_row(hw,"1  Activit\202s") && any_row(hw,"4  Rosaire chr\202tien") && any_row(hw,"5  Revue journali\212re"));
+    app_key(a,'1'); french_screen_ok(hw,"activities"); assert(any_row(hw,"ACTIVIT\220S"));
+    app_key(a,'1'); app_key(a,'2'); assert(any_row(hw,"R\202gime")); app_key(a,KEY_ESCAPE);
+    app_key(a,'2'); french_screen_ok(hw,"weight"); app_key(a,KEY_ESCAPE);
+    app_key(a,'3'); french_screen_ok(hw,"kanban"); app_key(a,'n'); french_screen_ok(hw,"task edit"); app_key(a,KEY_ESCAPE); app_key(a,KEY_ESCAPE);
+    app_key(a,'5'); french_screen_ok(hw,"daily review"); app_key(a,KEY_ESCAPE);
+    app_key(a,'6'); french_screen_ok(hw,"config"); app_key(a,KEY_ESCAPE);
+    app_key(a,'7'); french_screen_ok(hw,"reminders"); app_key(a,KEY_ESCAPE);
+    app_key(a,'8'); french_screen_ok(hw,"timer"); app_key(a,KEY_ESCAPE);
+    assert(app_screen(a)==SCR_HOME);
+    app_key(a,'4'); assert(app_screen(a)==SCR_ROSARY_MODE); french_screen_ok(hw,"rosary mode");
+    app_key(a,KEY_ENTER); french_screen_ok(hw,"rosary set"); app_key(a,KEY_ENTER); french_screen_ok(hw,"rosary decade");
+    app_key(a,KEY_ENTER);
+    for(i=0;i<6 && !any_row(hw,"Notre P\212re, qui es aux cieux");i++){ french_screen_ok(hw,"rosary prayer"); app_key(a,KEY_RIGHT); }
+    assert(app_screen(a)==SCR_ROSARY_PRAYER && any_row(hw,"Notre P\212re, qui es aux cieux"));
+    french_screen_ok(hw,"rosary prayer");
+    app_key(a,KEY_ESCAPE); assert(app_screen(a)==SCR_HOME);
+    app_key(a,'9');
+    if(app_screen(a)==SCR_FINISH){ french_screen_ok(hw,"close the day"); app_key(a,KEY_ESCAPE); }
+    else french_screen_ok(hw,"close the day refused");
 }
 
 int main(void){
@@ -318,7 +414,7 @@ int main(void){
     app_key(app,KEY_RIGHT);
     app_key(app,'6'); app_key(app,'1'); app_key(app,'2'); app_key(app,'3'); /* Config: French, save */
     assert(app_state(app)->language==LANG_FR && app_screen(app)==SCR_HOME);
-    assert(row_has(hw,1,"Vendredi 18 Septembre 2026 (semaine 38)") && row_has(hw,5,"0/16 activites") && !any_xp(hw));
+    assert(row_has(hw,1,"Vendredi 18 Septembre 2026 (semaine 38)") && row_has(hw,5,"0/16 activités") && !any_xp(hw));
     { /* the exported ICS file on disk carries the empty XP line */
         char path[256], got[2048]; FILE *f; size_t n;
         /* write_ics_file joins with a DOS backslash, so on the host it is part of the name. */
@@ -355,7 +451,7 @@ int main(void){
         long_date_text(d,LANG_FR,t,sizeof(t)); assert(strcmp(t,"Dimanche 8 Novembre 2026 (semaine 45)")==0);
         long_date_text(d,LANG_EN,t,sizeof(t)); assert(strcmp(t,"Sunday 8 November 2026 (week 45)")==0);
         d.year=2026; d.month=2; d.day=14;
-        long_date_text(d,LANG_FR,t,sizeof(t)); assert(strcmp(t,"Samedi 14 Fevrier 2026 (semaine 7)")==0);
+        long_date_text(d,LANG_FR,t,sizeof(t)); assert(strcmp(t,"Samedi 14 Février 2026 (semaine 7)")==0);
         d.year=2021; d.month=1; d.day=3; assert(iso_week(d)==53);
         d.year=2020; d.month=12; d.day=31; assert(iso_week(d)==53);
         d.year=2024; d.month=12; d.day=30; assert(iso_week(d)==1);
@@ -394,8 +490,9 @@ int main(void){
 
     check_menu_and_legacy_note(tmpdir);
     check_timer(tmpdir);
+    check_french_cp437(tmpdir);
 
-    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, fixture decode (%u captures)\n", 0);
+    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

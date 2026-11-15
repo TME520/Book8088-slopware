@@ -1,8 +1,10 @@
 /* mkrosary - writes ROSARY.DAT from src/rosary_text.c (LPS-DOS-115-CHG03b).
+ * Built from the CP437 copy of rosary_text.c made by tools/cp437
+ * (LPS-DOS-115-CHG03), so the file holds CP437 text, version 2.
  * Host tool (gcc). Layout: see rosary.h. Output is byte-for-byte deterministic.
  * Usage: mkrosary [output]   (default ROSARY.DAT) */
-#include "../src/lps.h"
-#include "../src/rosary.h"
+#include "lps.h"
+#include "rosary.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -18,7 +20,7 @@ int main(int argc, char **argv){
     for(i=0;i<ROSARY_DAT_STRINGS;i++){
         const char *s=rosary_source_text(i/2u,(int)(i%2u)); size_t n; const char *c;
         if(!s){ fprintf(stderr,"mkrosary: missing text %u\n",i); return 1; }
-        for(c=s;*c;c++) if((unsigned char)*c<32 || (unsigned char)*c>126){ fprintf(stderr,"mkrosary: text %u has a non-ASCII byte\n",i); return 1; }
+        for(c=s;*c;c++) if(!cp437_text_byte((unsigned char)*c)){ fprintf(stderr,"mkrosary: text %u has a byte that is not printable CP437 text\n",i); return 1; }
         n=strlen(s)+1;
         if(used-table>0xFFFFu || used+n>ROSARY_DAT_MAX_PAYLOAD){ fprintf(stderr,"mkrosary: texts too large\n"); return 1; }
         put16(payload+2u*i,(unsigned)(used-table));

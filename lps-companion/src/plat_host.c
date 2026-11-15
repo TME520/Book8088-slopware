@@ -49,6 +49,12 @@ static void h_large(Platform *p, const char *value, int red){
     col=(COLUMNS-n)/2; memcpy(line+col,mid,(size_t)n);
     h_text(p,12,0,line,red);
 }
+/* Rows hold CP437 like the DOS screen; text files on the host are UTF-8
+ * (LPS-DOS-115-CHG03). */
+static void put_row_utf8(FILE *f, const char *row){
+    char b[3]; size_t n;
+    for(;*row;row++){ n=cp437_to_utf8((unsigned char)*row,b); fwrite(b,1,n,f); }
+}
 static void h_present(Platform *p){
     HostPlat *h=H(p); int r,c,any;
     if(h->capture){
@@ -57,7 +63,7 @@ static void h_present(Platform *p){
         if(f){
             for(r=0;r<ROWS;r++){
                 any=0; for(c=0;c<COLUMNS;c++) if(h->rev[r][c]) any=1;
-                fprintf(f,"%s%s\n", any?"*":" ", h->rows[r]);
+                fputs(any?"*":" ",f); put_row_utf8(f,h->rows[r]); fputc('\n',f);
             }
             fclose(f);
         }
@@ -102,6 +108,6 @@ Platform *plat_host_create(int capture){
 
 void plat_host_dump(Platform *p, FILE *out){
     HostPlat *h=H(p); int r;
-    for(r=0;r<ROWS;r++) fprintf(out,"%s\n", h->rows[r]);
+    for(r=0;r<ROWS;r++){ put_row_utf8(out,h->rows[r]); fputc('\n',out); }
 }
 const char *plat_host_row(Platform *p, int row){ return H(p)->rows[row]; }
