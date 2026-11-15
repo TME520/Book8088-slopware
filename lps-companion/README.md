@@ -27,6 +27,14 @@ As in PicoCalc v1.12, the notepad is gone (LPS-DOS-115-CHG02) and the Home menu 
 - An **archived day** shows the names it was closed with, read-only, as on the PicoCalc: the catalog ticks, then, ticked, any name the catalog no longer has. A day with more than 30 items (only possible in an archive) gets pages, shown as `ACTIVITIES  1/2`; Left/Right move across them.
 - **Closing the day** freezes the ticked names in the history, in catalog order, as the PicoCalc does. The ICS lists the ticked activities in catalog order in the ICS language, and the save is written the PicoCalc's way, so the ICS, the CSV and the save stay byte-compatible.
 
+**Custom activities** (LPS-DOS-115-CHG06, as PicoCalc v1.13 CHG07/07b), from the Activities screen, keyboard only:
+- **E** renames the activity under the cursor, **N** adds one at the end (30 at most: *Limit: 30 activities*), **Del** deletes it after a confirmation (*Delete Walk?*, **Enter** yes, **Esc** no), **F4** / **F5** move it up or down and wrap from the first to the last place and back, as in the Kanban. Today's tick and the cursor follow the moved entry.
+- A name is saved **in the current language only** (`"fr"` or `"en"` of the catalog entry); if the other language has no name, the same name shows in both. Up to 24 characters; spaces at the ends are trimmed; an empty name cancels; a name already in the list (any case) is refused with *That name already exists*.
+- Names are typed in CP437 on screen and saved in UTF-8, so **é, è, ç, à** and the other CP437 letters work, from a French keyboard (`KEYB FR`) as well. The save allows 24 bytes, and an accented letter takes two of them: a longer name gets *Name is too long*. The AZERTY top row still types digits on every other screen.
+- **Past days keep the names they were closed with.** Renaming an activity in French (the name a day stores) or deleting it leaves the old name in history: the archive shows it after the catalog, ticked and read-only. In an archived day, E, N, Del, F4 and F5 say *Archived day: read-only*.
+- Edits are written to the save on Esc back to Home, like the other DOS edits. The save and the ICS stay byte-compatible with the PicoCalc for the same list.
+
+
 ![Activities](captures/02-activities.png)
 
 The **Timer / Minuteur** offers **5, 30 or 60 minutes** (LPS-DOS-115-CHG02b, as PicoCalc v1.12 CHG01/CHG02). Keys **1**, **2** and **3** start a duration directly, without Enter. On the completion screen they start a new countdown at once and Enter returns to the duration menu; while a countdown runs they are ignored, and Enter pauses or resumes. Timing still comes from the BIOS tick (about 55 ms).
@@ -49,7 +57,7 @@ Saves are JSON files, `SAVE_A.JSN` and `SAVE_B.JSN`, exactly as on the PicoCalc 
 
 - MS-DOS 3.3+ / FreeDOS / MS-DOS 7.x (FAT12/16)
 - Intel 8088 or compatible (EXE built with Open Watcom `-0`)
-- ~91 KB free disk for `LPSCOMP.EXE` (~81 KB) and `ROSARY.DAT` (~10 KB); the data folder grows with history (each JSON save is up to about 10 KB)
+- ~97 KB free disk for `LPSCOMP.EXE` (~87 KB) and `ROSARY.DAT` (~10 KB); the data folder grows with history (each JSON save is up to about 10 KB)
 - Colour text (CGA/EGA/VGA) for palettes; mono still readable
 - Open Watcom C/C++ (v2) to build; gcc to run the host tests
 
@@ -59,6 +67,7 @@ Saves are JSON files, `SAVE_A.JSN` and `SAVE_B.JSN`, exactly as on the PicoCalc 
 |---|---|
 | Date entry (2000–2099) | Yes |
 | Activities: 22 defaults, catalog of up to 30 from the save, 3 columns | Yes (LPS-DOS-115-CHG05) |
+| Custom activities: E rename, N new, Del delete, F4/F5 move | Yes (LPS-DOS-115-CHG06) |
 | Notepad | Removed, as in v1.12 (legacy notes kept in SAVE and ICS) |
 | Weight expected/measured | Yes |
 | Kanban 24 tasks TODO/DOING/DONE | Yes |
@@ -170,8 +179,8 @@ g++ -std=c++17 -I$P/src -I$P/tests -o /tmp/pcfix tools/picocalc_fixture.cpp
 
 The EXE uses Open Watcom's **large model** (`-ml`): far data pointers and one
 code segment per module. The 64 KB DGROUP (near data + 4 KB stack) used to be
-almost full (63,088 bytes); it is now about 16 KB (16,880 bytes with
-LPS-DOS-115-CHG05), which leaves room for the EGA Meal Planner.
+almost full (63,088 bytes); it is now about 17 KB (17,504 bytes with
+LPS-DOS-115-CHG06), which leaves room for the EGA Meal Planner.
 
 - The prayer texts are not in the EXE. `tools/mkrosary` builds `ROSARY.DAT`
   from `src/rosary_text.c`, the single source of the texts, and LPSCOMP loads
@@ -252,6 +261,15 @@ the video driver compared the 2,000 cells one by one, and text was copied a
 character at a time. It now compares whole rows (`memcmp`) and copies text in
 blocks, which speeds up every screen (Home redraws in about 100 ms).
 
+Custom activities, same setup (LPS-DOS-115-CHG06), on a new save / on a full
+save with 31 closed days: E opens the editor in about 130 ms (so does Esc back),
+a typed letter shows in about 70 ms, Enter on a rename or a new activity takes
+165 / 220 ms, F4/F5 130 / 178 ms, Del 55 ms and its Enter 110 / 220 ms. Esc
+back to Home then writes the save: 0.6 s / 3.4 s. A move or a delete renumbers
+the history's ticks in place instead of matching every closed day's names
+again (0.7 s with 31 days); when two entries share a stored name, which only a
+PicoCalc-edited list can have, it falls back to the full match.
+
 ### What to try on the Book
 
 1. Copy **`HELLO.EXE`** and **`LPSCOMP.EXE`** from the repository root to the HDD or a floppy.
@@ -314,6 +332,8 @@ Home digits, as in PicoCalc v1.12:
 Activities (LPS-DOS-115-CHG05): **Up/Down** within a column, **Left/Right**
 between columns (both wrap), **Enter** or **Space** ticks, **1–9, 0** tick
 rows 1–10 of the cursor's column (the numbers are shown on that column only).
+LPS-DOS-115-CHG06: **E** rename, **N** new, **Del** delete (Enter confirms,
+Esc cancels), **F4/F5** move up/down.
 
 The PicoCalc README documents the full per-screen binding list; this port follows
 the same map (F1–F5 on Kanban, N/Del on Kanban and Reminders, etc.).
@@ -360,7 +380,7 @@ byte-compatible with the firmware.
 | `src/plat_dos.c` | BIOS video/keyboard/timer |
 | `src/plat_host.c` | Linux host for tests |
 | `src/hello.c` | `HELLO.EXE` BIOS smoke test |
-| `tests/test_storage.c` | Host encode/decode, ICS, CSV, A/B, `ROSARY.DAT`, v1.2 fixture, French CP437 screens, JSON saves, activities |
+| `tests/test_storage.c` | Host encode/decode, ICS, CSV, A/B, `ROSARY.DAT`, v1.2 fixture, French CP437 screens, JSON saves, activities, custom activities |
 | `tests/fixtures/v12_payload.bin` | Synthetic Companion v1.2 payload |
 | `tests/fixtures/picocalc_*.jsn` | JSON saves written by the PicoCalc's own code |
 | `tools/picocalc_fixture.cpp` | Builds the PicoCalc save code on the host: fixtures and checks |
@@ -409,6 +429,14 @@ Les **Activités** (LPS-DOS-115-CHG05, comme les CHG08/08b/08c de la PicoCalc v1
 - Un **jour archivé** affiche les noms avec lesquels il a été clos, en lecture seule, comme sur la PicoCalc : les activités cochées du catalogue, puis, cochés, les noms que le catalogue n'a plus. Un jour de plus de 30 éléments (possible seulement dans les archives) a des pages, affichées `ACTIVITÉS  1/2` ; Gauche/Droite les parcourent.
 - **Terminer le jour** fige les noms cochés dans l'historique, dans l'ordre du catalogue, comme la PicoCalc. L'ICS liste les activités cochées dans l'ordre du catalogue et dans la langue de l'ICS, et la sauvegarde s'écrit comme sur la PicoCalc : ICS, CSV et sauvegarde restent identiques octet pour octet.
 
+**Activités personnalisées** (LPS-DOS-115-CHG06, comme les CHG07/07b de la PicoCalc v1.13), depuis l'écran Activités, au clavier seulement :
+- **E** renomme l'activité sous le curseur, **N** en ajoute une à la fin (30 au plus : *Limite : 30 activités*), **Suppr** la supprime après confirmation (*Supprimer Marche ?*, **Entrée** oui, **Échap** non), **F4** / **F5** la montent ou la descendent et bouclent de la première à la dernière place, comme dans le Kanban. La coche du jour et le curseur suivent l'entrée déplacée.
+- Un nom s'enregistre **dans la langue courante seulement** (`"fr"` ou `"en"` de l'entrée du catalogue) ; si l'autre langue n'a pas de nom, le même nom s'affiche dans les deux. 24 caractères au plus ; les espaces aux bouts sont retirés ; un nom vide annule ; un nom déjà dans la liste (majuscules ou non) est refusé : *Ce nom existe déjà*.
+- Les noms se tapent en CP437 à l'écran et s'enregistrent en UTF-8 : **é, è, ç, à** et les autres lettres CP437 marchent, y compris depuis un clavier français (`KEYB FR`). La sauvegarde permet 24 octets et une lettre accentuée en prend deux : un nom plus long donne *Nom trop long*. Sur tous les autres écrans, la rangée du haut AZERTY tape toujours des chiffres.
+- **Les jours passés gardent les noms avec lesquels ils ont été clos.** Renommer une activité en français (le nom que le jour enregistre) ou la supprimer laisse l'ancien nom dans l'historique : l'archive l'affiche après le catalogue, coché, en lecture seule. Dans un jour archivé, E, N, Suppr, F4 et F5 affichent *Jour archivé : lecture seule*.
+- Les modifications s'écrivent dans la sauvegarde en revenant à l'accueil avec Échap, comme les autres modifications DOS. Sauvegarde et ICS restent identiques octet pour octet à ceux de la PicoCalc pour la même liste.
+
+
 Le **Minuteur** propose **5, 30 ou 60 minutes** (LPS-DOS-115-CHG02b, comme les CHG01/CHG02 de la PicoCalc v1.12). Les touches **1**, **2** et **3** lancent directement une duree, sans Entree. Sur l'ecran de fin, elles relancent aussitot un compte a rebours et Entree revient au choix de la duree ; pendant un compte a rebours, elles sont ignorees et Entree met en pause ou reprend. Le temps vient toujours du tic BIOS (environ 55 ms). Une note deja enregistree par une ancienne version reste dans la sauvegarde et part toujours dans l'ICS (`\NNote: ...`) a la cloture du jour ; elle n'est plus affichee ni modifiable.
 
 ## Book 8088 / materiel reel
@@ -436,6 +464,16 @@ son ecran a 2 colonnes : le pilote video comparait les 2 000 cellules une a une
 et le texte etait copie caractere par caractere. Il compare maintenant des
 lignes entieres (`memcmp`) et copie le texte par blocs, ce qui accelere tous
 les ecrans (l'accueil se redessine en 100 ms environ).
+
+Activites personnalisees, meme mesure (LPS-DOS-115-CHG06), sur une sauvegarde
+neuve / pleine (31 jours clos) : E ouvre l'editeur en 130 ms environ (le
+retour par Echap aussi), une lettre tapee s'affiche en 70 ms environ, Entree sur un
+renommage ou une nouvelle activite prend 165 / 220 ms, F4/F5 130 / 178 ms,
+Suppr 55 ms et son Entree 110 / 220 ms. Echap vers l'accueil ecrit ensuite la
+sauvegarde : 0,6 s / 3,4 s. Un deplacement ou une suppression renumerote les
+coches de l'historique sur place au lieu de recomparer les noms de chaque jour
+clos (0,7 s avec 31 jours) ; si deux entrees ont le meme nom enregistre, ce
+qu'une liste modifiee sur la PicoCalc peut seule avoir, tout est recompare.
 
 ## Donnees
 
@@ -472,15 +510,16 @@ Copier `LPSCOMP.EXE`, `ROSARY.DAT` (dans le meme dossier) et `HELLO.EXE` depuis 
 Activites (LPS-DOS-115-CHG05) : **Haut/Bas** dans une colonne, **Gauche/Droite**
 entre les colonnes (les deux bouclent), **Entree** ou **Espace** coche, **1–9, 0**
 cochent les lignes 1 a 10 de la colonne du curseur (numeros affiches sur cette
-colonne seulement).
+colonne seulement). LPS-DOS-115-CHG06 : **E** renommer, **N** nouvelle,
+**Suppr** supprimer (Entree confirme, Echap annule), **F4/F5** monter/descendre.
 
 DOSBox-X / DOSBox Staging (`cputype=8086`, `machine=ega`) : copier les EXE et `ROSARY.DAT` de la racine ici, puis `dosbox-x -conf dosbox.conf`.
 
 ## Empreinte
 
-`LPSCOMP.EXE` fait environ **81 Ko** (modele large, 8086, pile 4 Ko) et `ROSARY.DAT` environ **10 Ko**. `HELLO.EXE` ~3 Ko.
+`LPSCOMP.EXE` fait environ **87 Ko** (modele large, 8086, pile 4 Ko) et `ROSARY.DAT` environ **10 Ko**. `HELLO.EXE` ~3 Ko.
 
-Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) passe d'environ 63 Ko a environ 14 Ko (16,5 Ko avec LPS-DOS-115-CHG05) : les textes du rosaire sont dans `ROSARY.DAT`, charge en memoire lointaine a l'ouverture du rosaire, et les gros tampons (copies de `State`, sauvegarde, exports ICS/CSV) sont alloues en memoire lointaine au demarrage. Un `ROSARY.DAT` absent ou abime affiche un message, sans plantage.
+Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) passe d'environ 63 Ko a environ 14 Ko (17,1 Ko avec LPS-DOS-115-CHG06) : les textes du rosaire sont dans `ROSARY.DAT`, charge en memoire lointaine a l'ouverture du rosaire, et les gros tampons (copies de `State`, sauvegarde, exports ICS/CSV) sont alloues en memoire lointaine au demarrage. Un `ROSARY.DAT` absent ou abime affiche un message, sans plantage.
 
 ## Ecarts connus
 
@@ -488,7 +527,6 @@ Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) p
   a pas (LPS-DOS-115-CHG03).
 - Pas d'avertissement batterie (pas de materiel equivalent).
 - Config n'a pas d'entree « import SD » : le disque DOS **est** le stockage.
-- Edition du catalogue d'activites (ajout, renommage, ordre), planificateur de
-  repas et masquage de l'accueil de la PicoCalc : pas encore sur DOS, mais leurs
-  donnees sont conservees dans la sauvegarde (LPS-DOS-115-CHG04/CHG05). Le
-  catalogue modifie sur la PicoCalc s'affiche sur DOS.
+- Planificateur de repas et masquage de l'accueil de la PicoCalc : pas encore
+  sur DOS, mais leurs donnees sont conservees dans la sauvegarde
+  (LPS-DOS-115-CHG04).

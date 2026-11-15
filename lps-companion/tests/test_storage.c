@@ -773,8 +773,185 @@ static void check_activities(const char *dir){
     /* An empty catalog says so instead of drawing a grid. */
     state_init(&s); s.activityCount=0; fresh_dir(dir); day_names_clear(); assert(jsave_write(pa,&s,1,&check));
     hw=plat_host_create(0); app_init(app,hw); app_start(app);
-    assert(row_has(hw,5,"0/0 activities")); app_key(app,'1'); assert(row_has(hw,5,"No activities in the list."));
+    assert(row_has(hw,5,"0/0 activities")); app_key(app,'1'); assert(row_has(hw,5,"N: add an activity"));
     app_key(app,'1'); app_key(app,KEY_ENTER); app_key(app,KEY_DOWN); app_key(app,KEY_RIGHT); assert(app_state(app)->today.flags==0);
+}
+
+/* The 8088 fast path (history flags renumbered in place) must equal the
+ * PicoCalc's full rematch for every edit made with unique names. */
+static unsigned long lcg_state=12345ul;
+static unsigned lcg(unsigned n){ lcg_state=lcg_state*1103515245ul+12345ul; return (unsigned)((lcg_state>>16)&0x7fff)%n; }
+/* A name some history day stored that the catalog lacks, if any. */
+static int pick_orphan(const State *s, char *name){
+    unsigned start=lcg(HISTORY_LENGTH), k;
+    for(k=0;k<HISTORY_LENGTH;k++){
+        unsigned slot=1+(start+k)%HISTORY_LENGTH, n=day_orphan_count(s,slot);
+        if(n){ strcpy(name,day_orphan(s,slot,lcg(n))); return 1; }
+    }
+    return 0;
+}
+static unsigned orphan_hits;
+static void check_fast_rematch(const char *fixture){
+    static State base, fast, full; static DayNames names[DAY_SLOTS], saved[DAY_SLOTS];
+    uint32_t g=0, c=0; unsigned round, d, tested=0;
+    assert(jsave_read(fixture,&base,&g,&c)==SAVE_VALID);
+    for(round=0;round<400;round++){
+        unsigned op=lcg(5), n=base.activityCount, a=n?lcg(n):0, b=n?lcg(n):0; int ok=1;
+        char name[ACTIVITY_NAME_LENGTH+1];
+        if(!activity_names_unique(&base)) break;
+        memcpy(saved,lps_day_names,sizeof(saved));
+        fast=base; activity_pin_history(&fast);
+        if(op==0) activity_swap(&fast,a,b);
+        else if(op==1) activity_rotate(&fast,(int)lcg(2));
+        else if(op==2 && n>1) activity_delete(&fast,a);
+        else if(op==3 && n<ACTIVITY_CAPACITY){ /* add, sometimes under an orphan name */
+            if(pick_orphan(&fast,name) && lcg(3)) {} else sprintf(name,"New %u",round);
+            b=fast.activityCount++; memset(&fast.activities[b],0,sizeof(Activity)); fast.activities[b].id=fast.nextActivityId++;
+            strcpy(fast.activities[b].fr,name);
+        }else if(op==4 && n){ /* rename in either language, sometimes to an orphan */
+            if(pick_orphan(&fast,name) && lcg(3)) {} else sprintf(name,"Renamed %u",round);
+            strcpy(lcg(2)?fast.activities[a].fr:fast.activities[a].en,name); b=a;
+        }else ok=0;
+        if(!ok || !activity_names_unique(&fast)) continue;
+        full=fast; memcpy(names,lps_day_names,sizeof(names));
+        if(op>=3) activity_rematch_entry(&fast,b);
+        activity_refresh_today(&fast);
+        memcpy(lps_day_names,names,sizeof(names));
+        activity_refresh(&full);
+        if(op>=3 && activity_index(&full,name)<full.activityCount && full.count){ unsigned h; for(h=0;h<HISTORY_LENGTH;h++) if(FLAG_BIT(full.history[h].flags,b)) orphan_hits++; }
+        assert(fast.today.flags==full.today.flags);
+        for(d=0;d<HISTORY_LENGTH;d++) assert(fast.history[d].flags==full.history[d].flags);
+        base=full; tested++;
+        (void)saved;
+    }
+    assert(tested>100);
+    day_names_clear();
+}
+
+/* LPS-DOS-115-CHG06: user-defined activities, as PicoCalc LPS-113-CHG07/07b. */
+static void type_text(App *app, const char *text){ while(*text) app_key(app,(unsigned char)*text++); }
+static void erase(App *app, unsigned n){ while(n--) app_key(app,KEY_BACKSPACE); }
+static void choose_language(App *app, int fr){ app_key(app,'6'); app_key(app,'1'); app_key(app,fr?'2':'1'); app_key(app,'3'); }
+static void check_custom_activities(const char *dir){
+    static State s, out; static unsigned char store[16384], store2[16384];
+    App *app=(App*)store, *again=(App*)store2; Platform *hw; uint32_t gen=0; int active=-1; unsigned i;
+
+    /* Rename in English only; French keeps its name; empty cancels; trim; duplicates refused. */
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    app_key(app,'1'); app_key(app,'e');
+    assert(app_screen(app)==SCR_ACTIVITY_EDIT && row_has(hw,3,"RENAME ACTIVITY") && row_has(hw,6,"Walk") && row_has(hw,9,"4/24 characters"));
+    erase(app,4); type_text(app,"Stroll"); app_key(app,KEY_ENTER);
+    assert(app_screen(app)==SCR_ACTIVITIES && app_selection(app)==0);
+    assert(!strcmp(app_state(app)->activities[0].en,"Stroll") && !strcmp(app_state(app)->activities[0].fr,"Marche"));
+    assert(cell_is(hw,5,0,"1 [ ] Stroll") && row_has(hw,21,"E: rename  N: new  Del: delete  F4/F5: move"));
+    app_key(app,KEY_ESCAPE); choose_language(app,1);
+    app_key(app,'1'); assert(cell_is(hw,5,0,"1 [ ] Marche") && !any_row(hw,"Stroll") && row_has(hw,21,"E : renommer"));
+    app_key(app,KEY_ESCAPE); choose_language(app,0); app_key(app,'1'); assert(cell_is(hw,5,0,"1 [ ] Stroll"));
+    app_key(app,'e'); erase(app,10); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_ACTIVITIES && !strcmp(app_state(app)->activities[0].en,"Stroll"));
+    app_key(app,KEY_DOWN); app_key(app,'e'); erase(app,8); type_text(app,"  stroll  "); app_key(app,KEY_ENTER);
+    assert(app_screen(app)==SCR_ACTIVITY_EDIT && any_row(hw,"That name already exists") && !strcmp(app_state(app)->activities[1].en,"Diet"));
+    app_key(app,KEY_ESCAPE); assert(app_screen(app)==SCR_ACTIVITIES && app_selection(app)==1);
+    app_key(app,'e'); erase(app,8); type_text(app,"  Solo  "); app_key(app,KEY_ENTER);
+    assert(!strcmp(app_state(app)->activities[1].en,"Solo") && cell_is(hw,6,0,"2 [ ] Solo"));
+    /* Too long: 24 characters at most, and 24 UTF-8 bytes (an accent counts twice). */
+    app_key(app,'e'); erase(app,4); for(i=0;i<30;i++) app_key(app,'a');
+    assert(row_has(hw,9,"24/24 characters")); erase(app,24);
+    for(i=0;i<13;i++) app_key(app,130);
+    app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_ACTIVITY_EDIT && any_row(hw,"Name is too long"));
+    app_key(app,KEY_ESCAPE);
+    /* Create in French only, typing an accent: English shows the same name. */
+    app_key(app,KEY_ESCAPE); choose_language(app,1);
+    app_key(app,'1'); app_key(app,'n'); assert(app_screen(app)==SCR_ACTIVITY_EDIT && row_has(hw,3,"NOUVELLE ACTIVIT\220"));
+    app_key(app,'R'); app_key(app,130); type_text(app,"veil"); assert(row_has(hw,6,"R\202veil")); app_key(app,KEY_ENTER);
+    assert(app_state(app)->activityCount==23 && app_state(app)->activities[22].id==23 && app_selection(app)==22);
+    assert(!strcmp(app_state(app)->activities[22].fr,"R\xc3\xa9veil") && !app_state(app)->activities[22].en[0]);
+    assert(cell_is(hw,11,54,"7 [ ] R\202veil"));
+    app_key(app,130); /* é outside a name is the AZERTY 2: ticks row 2 of the column */
+    assert(app_state(app)->today.flags==(1ul<<17));
+    app_key(app,130); assert(app_state(app)->today.flags==0);
+    app_key(app,KEY_ESCAPE); choose_language(app,0);
+    app_key(app,'1'); assert(cell_is(hw,11,54,"  [ ] R\202veil"));
+    /* The custom list goes through the JSON save. */
+    app_key(app,KEY_ESCAPE); app_flush_save(app);
+    hw=plat_host_create(0); app_init(again,hw); app_start(again);
+    assert(app_state(again)->activityCount==23 && !strcmp(app_state(again)->activities[0].en,"Stroll") && !strcmp(app_state(again)->activities[0].fr,"Marche"));
+    assert(!strcmp(app_state(again)->activities[22].fr,"R\xc3\xa9veil") && app_state(again)->nextActivityId==24);
+
+    /* Today's tick follows a rename and a move; Del asks first. */
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    app_key(app,'1'); app_key(app,KEY_ENTER); assert(app_state(app)->today.flags==1);
+    app_key(app,'e'); erase(app,4); type_text(app,"Stroll"); app_key(app,KEY_ENTER);
+    assert(app_state(app)->today.flags==1 && cell_is(hw,5,0,"1 [x] Stroll"));
+    app_key(app,KEY_F5);
+    assert(!strcmp(app_state(app)->activities[1].en,"Stroll") && app_state(app)->today.flags==2 && app_selection(app)==1 && cell_is(hw,6,0,"2 [x] Stroll"));
+    app_key(app,KEY_F4); assert(!strcmp(app_state(app)->activities[0].en,"Stroll") && app_state(app)->today.flags==1);
+    app_key(app,KEY_DELETE); assert(row_has(hw,21,"Delete Stroll?") && row_has(hw,22,"Enter: yes   Esc: no"));
+    app_key(app,KEY_DOWN); app_key(app,'2'); assert(app_selection(app)==0 && app_state(app)->today.flags==1); /* other keys wait */
+    app_key(app,KEY_ESCAPE); assert(app_screen(app)==SCR_ACTIVITIES && app_state(app)->activityCount==22 && app_state(app)->today.flags==1);
+    app_key(app,KEY_DELETE); app_key(app,KEY_ENTER);
+    assert(app_state(app)->activityCount==21 && app_state(app)->today.flags==0 && !strcmp(app_state(app)->activities[0].en,"Diet"));
+    assert(day_names(0)->count==0 && cell_is(hw,5,0,"1 [ ] Diet"));
+
+    /* F4/F5 wrap; the tick and the cursor follow. */
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    app_key(app,'1'); app_key(app,KEY_ENTER);
+    app_key(app,KEY_F4);
+    assert(!strcmp(app_state(app)->activities[21].en,"Walk") && !strcmp(app_state(app)->activities[0].en,"Diet") && !strcmp(app_state(app)->activities[20].en,"Meditation"));
+    assert(app_state(app)->today.flags==(1ul<<21) && app_selection(app)==21 && cell_is(hw,10,54,"6 [x] Walk") && cell_is(hw,5,0,"  [ ] Diet"));
+    app_key(app,KEY_F5);
+    assert(!strcmp(app_state(app)->activities[0].en,"Walk") && !strcmp(app_state(app)->activities[21].en,"Meditation") && app_state(app)->today.flags==1 && app_selection(app)==0);
+    app_key(app,KEY_LEFT); app_key(app,KEY_UP); assert(app_selection(app)==21);
+    app_key(app,KEY_F5);
+    assert(!strcmp(app_state(app)->activities[0].en,"Meditation") && !strcmp(app_state(app)->activities[1].en,"Walk") && app_state(app)->today.flags==2 && app_selection(app)==0);
+    app_key(app,KEY_F4);
+    assert(!strcmp(app_state(app)->activities[0].en,"Walk") && !strcmp(app_state(app)->activities[21].en,"Meditation") && app_state(app)->today.flags==1 && app_selection(app)==21);
+
+    /* History keeps its frozen names after a French rename and a delete;
+     * the archive lists them read-only after the catalog. */
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    app_key(app,'0'); erase(app,10); type_text(app,"2026-11-09"); app_key(app,KEY_ENTER);
+    app_key(app,'1'); app_key(app,KEY_ENTER); app_key(app,KEY_LEFT); app_key(app,KEY_ENTER); /* Walk, Sport */
+    assert(app_state(app)->today.flags==((1ul<<0)|(1ul<<16)));
+    app_key(app,KEY_ESCAPE); app_key(app,'9'); app_key(app,KEY_ENTER); app_key(app,KEY_ENTER);
+    assert(app_state(app)->count==1 && app_state(app)->today.flags==0);
+    assert(day_names(1)->count==2 && !strcmp(day_names(1)->names[0],"Marche") && !strcmp(day_names(1)->names[1],"Sport"));
+    while(app_screen(app)!=SCR_HOME) app_key(app,KEY_ESCAPE);
+    app_key(app,KEY_LEFT); assert(row_has(hw,5,"2/22 activities"));
+    app_key(app,'1'); assert(cell_is(hw,5,0,"1 [x] Walk"));
+    app_key(app,KEY_ESCAPE); app_key(app,KEY_RIGHT);
+    choose_language(app,1);
+    app_key(app,'1'); app_key(app,'e'); erase(app,10); type_text(app,"Promenade"); app_key(app,KEY_ENTER);
+    assert(!strcmp(app_state(app)->activities[0].fr,"Promenade") && !strcmp(app_state(app)->activities[0].en,"Walk"));
+    app_key(app,KEY_LEFT); app_key(app,KEY_DELETE); assert(row_has(hw,21,"Supprimer Sport ?")); app_key(app,KEY_ENTER);
+    assert(app_state(app)->activityCount==21 && app_selection(app)==16);
+    app_key(app,KEY_ESCAPE); app_key(app,KEY_LEFT); assert(row_has(hw,5,"2/21 activit\202s"));
+    app_key(app,'1');
+    assert(cell_is(hw,5,0,"1 [ ] Promenade") && cell_is(hw,10,54,"  [x] Marche") && cell_is(hw,11,54,"  [x] Sport"));
+    app_key(app,'e'); app_key(app,'n'); app_key(app,KEY_DELETE); app_key(app,KEY_F4); app_key(app,KEY_F5); app_key(app,KEY_ENTER);
+    assert(app_screen(app)==SCR_ACTIVITIES && any_row(hw,"lecture seule") && app_state(app)->activityCount==21 && day_names(1)->count==2);
+    assert(!strcmp(app_state(app)->activities[0].fr,"Promenade"));
+    app_key(app,KEY_ESCAPE); app_key(app,KEY_RIGHT); app_flush_save(app);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && out.activityCount==21 && day_orphan_count(&out,1)==2 && out.history[0].flags==0);
+
+    /* Limits: 30 entries, then delete them all; ids go on from the highest. */
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app); app_key(app,'1');
+    for(i=0;i<8;i++){ char name[8]; sprintf(name,"Extra%u",i); app_key(app,'n'); type_text(app,name); app_key(app,KEY_ENTER); }
+    assert(app_state(app)->activityCount==30 && app_state(app)->activities[29].id==30 && cell_is(hw,14,54,"0 [ ] Extra7"));
+    app_key(app,'n'); assert(app_screen(app)==SCR_ACTIVITIES && any_row(hw,"Limit: 30 activities"));
+    while(app_state(app)->activityCount){ app_key(app,KEY_DELETE); app_key(app,KEY_ENTER); }
+    assert(row_has(hw,5,"N: add an activity") && app_selection(app)==0);
+    app_key(app,KEY_ESCAPE); assert(row_has(hw,5,"0/0 activities"));
+    app_key(app,'1'); app_key(app,'n'); type_text(app,"Solo"); app_key(app,KEY_ENTER);
+    assert(app_state(app)->activityCount==1 && app_state(app)->activities[0].id==31 && cell_is(hw,5,0,"1 [ ] Solo"));
+
+    /* A history day without stored names (BIN migration in this session) is
+     * pinned to its names before the list moves, as a reload would do. */
+    state_init(&s); day_names_clear(); s.count=1; s.next=1; s.history[0].flags=1;
+    activity_pin_history(&s);
+    assert(day_names(1)->count==1 && !strcmp(day_names(1)->names[0],"Marche"));
+    activity_rotate(&s,1); activity_refresh(&s); assert(s.history[0].flags==(1ul<<21));
+    assert(activity_names_equal("M\xc3\xa9nage","m\xc3\x89NAGE") && !activity_names_equal("Sport","Sports"));
+    day_names_clear();
 }
 
 int main(void){
@@ -944,8 +1121,12 @@ int main(void){
     check_wrap(tmpdir);
     check_json_saves(tmpdir);
     check_activities(tmpdir);
+    check_custom_activities(tmpdir);
+    check_fast_rematch("tests/fixtures/picocalc_full.jsn");
+    check_fast_rematch("tests/fixtures/picocalc_custom.jsn");
+    assert(orphan_hits>0); /* some edit took a name history had stored */
 
-    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback, unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), fixture decode (%u captures)\n", 0);
+    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback, unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

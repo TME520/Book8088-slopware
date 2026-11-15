@@ -80,7 +80,8 @@ enum Screen {
     SCR_HOME, SCR_REMINDER_POPUP, SCR_REMINDERS, SCR_REMINDER_EDIT,
     SCR_DATE, SCR_ACTIVITIES, SCR_WEIGHT, SCR_KANBAN, SCR_TASK_EDIT,
     SCR_DAILY_REVIEW, SCR_FINISH, SCR_REWARD, SCR_CONFIG, SCR_LANGUAGE, SCR_COLORS,
-    SCR_ROSARY_MODE, SCR_ROSARY_SET, SCR_ROSARY_DECADE, SCR_ROSARY_PRAYER, SCR_ROSARY_COMPLETE
+    SCR_ROSARY_MODE, SCR_ROSARY_SET, SCR_ROSARY_DECADE, SCR_ROSARY_PRAYER, SCR_ROSARY_COMPLETE,
+    SCR_ACTIVITY_EDIT /* LPS-DOS-115-CHG06 */
 };
 
 typedef struct { uint16_t year; uint8_t month, day; } Date;
@@ -178,6 +179,22 @@ void day_names_freeze(const State *s, unsigned slot, uint32_t flags); /* ticked 
 void day_names_resolve(State *s); /* each day's flags from its stored names */
 unsigned day_orphan_count(const State *s, unsigned slot);              /* stored names the catalog lacks */
 const char *day_orphan(const State *s, unsigned slot, unsigned index);
+/* Catalog edits (LPS-DOS-115-CHG06): today's ticks follow the entries;
+ * call activity_pin_history before and activity_refresh after. */
+void activity_pin_history(State *s);
+void activity_refresh(State *s);
+/* Faster equivalent of activity_refresh, valid when activity_names_unique
+ * held before and after the edit: moves and deletes renumber history flags
+ * themselves; activity_rematch_entry handles a new or renamed entry. */
+int activity_names_unique(const State *s);
+void activity_rematch_entry(State *s, unsigned id);
+void activity_refresh_today(State *s);
+void activity_swap(State *s, unsigned a, unsigned b);
+void activity_rotate(State *s, int firstToEnd);
+void activity_delete(State *s, unsigned id);
+int activity_names_equal(const char *a, const char *b); /* UTF-8, case-insensitive like the PicoCalc */
+int activity_duplicate(const State *s, const char *name, unsigned except, int language);
+int activity_valid_name(const char *name); /* 1..24 UTF-8 bytes, no control characters */
 /* Large working buffers (LPS-DOS-115-CHG03b). One block allocated at start-up
  * from the far heap (large model), so they sit outside DGROUP and add no
  * zero-filled bytes to LPSCOMP.EXE. lps_buffers_init() is idempotent. */

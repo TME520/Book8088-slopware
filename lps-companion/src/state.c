@@ -101,6 +101,126 @@ const char *day_orphan(const State *s, unsigned slot, unsigned index){
     return "";
 }
 
+/* ---- Catalog edits (LPS-DOS-115-CHG06, PicoCalc LPS-113-CHG07/07b) ----
+ * The caller checks the day is editable. Each edit keeps today's ticks on the
+ * same activities, then activity_refresh freezes today under the new names
+ * and rematches every day from its own frozen names, as the PicoCalc's
+ * refreshActivityFlags does: a renamed or deleted name stays in history. */
+void activity_pin_history(State *s){
+    /* A history day without stored names (a .BIN migration in this session)
+     * gets them now, so its flags never follow a reorder. A reload would do
+     * the same: the save always holds names. */
+    unsigned i;
+    for(i=0;i<HISTORY_LENGTH;i++)
+        if(!day_names(1+i)->count && s->history[i].flags) day_names_freeze(s,1+i,s->history[i].flags);
+}
+void activity_refresh(State *s){
+    day_names_freeze(s,0,s->today.flags);
+    day_names_resolve(s);
+}
+/* Fast path for 8088 speed: a move or a delete renumbers the catalog the same
+ * way for every day, so history flags are remapped in place (see
+ * activity_swap/rotate/delete) instead of matching 31 x 30 names again
+ * (~0.6 s at 4.77 MHz). This equals a full rematch only while no two entries
+ * share a stored name; the caller checks activity_names_unique. */
+int activity_names_unique(const State *s){
+    const char *name[ACTIVITY_CAPACITY]; char first[ACTIVITY_CAPACITY]; unsigned i, j, n=s->activityCount;
+    for(i=0;i<n;i++){ name[i]=activity_stored_name(&s->activities[i]); first[i]=name[i][0]; }
+    for(i=0;i<n;i++) for(j=i+1;j<n;j++)
+        if(first[i]==first[j] && strcmp(name[i],name[j])==0) return 0; /* first byte: cheap filter */
+    return 1;
+}
+void activity_refresh_today(State *s){
+    day_names_freeze(s,0,s->today.flags);
+    resolve_day(s,&s->today,day_names(0));
+}
+/* After entry id was added or got a new stored name: each history day ticks
+ * it when it stored that name (names unique, so no other entry matches). */
+void activity_rematch_entry(State *s, unsigned id){
+    unsigned d, i; const char *name;
+    if(id>=s->activityCount) return;
+    name=activity_stored_name(&s->activities[id]);
+    for(d=0;d<HISTORY_LENGTH;d++){
+        const DayNames *dn=day_names(1+d);
+        if(!dn->count) continue;
+        s->history[d].flags&=~FLAG_MASK(id);
+        for(i=0;i<dn->count;i++) if(strcmp(dn->names[i],name)==0){ s->history[d].flags|=FLAG_MASK(id); break; }
+    }
+}
+static uint32_t swap_bits(uint32_t f, unsigned a, unsigned b){
+    int hadA=FLAG_BIT(f,a)!=0, hadB=FLAG_BIT(f,b)!=0;
+    f&=~(FLAG_MASK(a)|FLAG_MASK(b));
+    if(hadA) f|=FLAG_MASK(b);
+    if(hadB) f|=FLAG_MASK(a);
+    return f;
+}
+static uint32_t rotate_bits(uint32_t f, unsigned n, int firstToEnd){
+    uint32_t r=0; unsigned i;
+    for(i=0;i<n;i++) if(FLAG_BIT(f,i)) r|=FLAG_MASK(firstToEnd ? (i?i-1:n-1) : (i+1<n?i+1:0));
+    return r;
+}
+static uint32_t delete_bit(uint32_t f, unsigned n, unsigned id){
+    uint32_t r=0; unsigned i;
+    for(i=0;i<n;i++) if(i!=id && FLAG_BIT(f,i)) r|=FLAG_MASK(i<id?i:i-1);
+    return r;
+}
+/* Today and every history day with stored names get the same renumbering. */
+#define EACH_DAY_FLAGS(s, expr) do{ unsigned d_; uint32_t f; \
+    f=(s)->today.flags; (s)->today.flags=(expr); \
+    for(d_=0;d_<HISTORY_LENGTH;d_++) if(day_names(1+d_)->count){ f=(s)->history[d_].flags; (s)->history[d_].flags=(expr); } \
+    }while(0)
+void activity_swap(State *s, unsigned a, unsigned b){
+    Activity keep;
+    if(a>=s->activityCount||b>=s->activityCount||a==b) return;
+    keep=s->activities[a]; s->activities[a]=s->activities[b]; s->activities[b]=keep;
+    EACH_DAY_FLAGS(s, swap_bits(f,a,b));
+}
+void activity_rotate(State *s, int firstToEnd){
+    unsigned n=s->activityCount, i; Activity keep;
+    if(n<2) return;
+    if(firstToEnd){
+        keep=s->activities[0];
+        for(i=0;i+1<n;i++) s->activities[i]=s->activities[i+1];
+        s->activities[n-1]=keep;
+    }else{
+        keep=s->activities[n-1];
+        for(i=n-1;i>0;i--) s->activities[i]=s->activities[i-1];
+        s->activities[0]=keep;
+    }
+    EACH_DAY_FLAGS(s, rotate_bits(f,n,firstToEnd));
+}
+void activity_delete(State *s, unsigned id){
+    unsigned i, n=s->activityCount;
+    if(id>=n) return;
+    for(i=id;i+1<n;i++) s->activities[i]=s->activities[i+1];
+    memset(&s->activities[--s->activityCount],0,sizeof(Activity));
+    EACH_DAY_FLAGS(s, delete_bit(f,n,id));
+}
+/* As the PicoCalc's namesEqualIgnoreCase: ASCII letters, and the UTF-8
+ * Latin-1 letters U+00C0-U+00DE (except U+00D7) against their lower case. */
+static char fold_ascii(unsigned char c){ return (char)(c>='A'&&c<='Z'?c+32:c); }
+static char fold_c3(unsigned char c){ return (char)(c>=0x80&&c<=0x9e&&c!=0x97?c+0x20:c); }
+int activity_names_equal(const char *a, const char *b){
+    while(*a && *b){
+        unsigned char ca=(unsigned char)*a++, cb=(unsigned char)*b++;
+        if(ca==0xc3 && cb==0xc3 && *a && *b){ if(fold_c3((unsigned char)*a++)!=fold_c3((unsigned char)*b++)) return 0; }
+        else if(fold_ascii(ca)!=fold_ascii(cb)) return 0;
+    }
+    return !*a && !*b;
+}
+int activity_duplicate(const State *s, const char *name, unsigned except, int language){
+    unsigned i;
+    for(i=0;i<s->activityCount;i++)
+        if(i!=except && activity_names_equal(activity_display_name(&s->activities[i],language),name)) return 1;
+    return 0;
+}
+int activity_valid_name(const char *name){
+    const unsigned char *p=(const unsigned char*)name;
+    if(!*p || strlen(name)>ACTIVITY_NAME_LENGTH) return 0;
+    for(;*p;p++) if(*p<32||*p==127) return 0;
+    return 1;
+}
+
 int leap(uint16_t year){ return year%4==0 && (year%100!=0 || year%400==0); }
 unsigned days_in_month(uint16_t year, uint8_t month){
     static const uint8_t normal[12]={31,28,31,30,31,30,31,31,30,31,30,31};

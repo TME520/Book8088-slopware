@@ -39,6 +39,12 @@ struct App {
      * language or the catalog changes (labelLanguage -1 = stale). */
     int labelLanguage;
     char label[ACTIVITY_CAPACITY][ACTIVITY_NAME_LENGTH+1];
+    /* LPS-DOS-115-CHG06: the name being typed (CP437, up to 24 characters),
+     * the entry it renames (ACTIVITY_CAPACITY = a new one), and the pending
+     * Del confirmation on the Activities screen. */
+    unsigned editingActivity;
+    char activityDraft[ACTIVITY_NAME_LENGTH+1];
+    int confirmingDelete;
 };
 
 static const char *tr(const App *a, const char *en, const char *fr){
@@ -168,6 +174,109 @@ static const char *grid_label(App *a, unsigned i, char *tmp){
     utf8_to_cp437(n,strlen(n),tmp);
     return tmp;
 }
+/* ---- Catalog edits (LPS-DOS-115-CHG06, PicoCalc LPS-113-CHG07/07b) ----
+ * E renames the entry under the cursor in the current language only, N adds
+ * one at the end (30 at most), Del deletes it after Enter confirms, F4/F5 move
+ * it up or down and wrap. Edits change RAM and set the dirty flag; the save is
+ * written on Esc back to Home, as for every other DOS edit. */
+static int catalog_editable(App *a){
+    if(a->daysBack){ read_only(a); return 0; }
+    if(a->blocked){ say(a, tr(a,"Unreadable save: writes blocked","Sauvegarde illisible : écriture bloquée")); return 0; }
+    return 1;
+}
+/* unique: activity_names_unique before the edit. With unique names before
+ * and after, only today and the changed entry are matched again (~0.1 s at
+ * 8088 speed instead of ~0.7 s with 31 closed days); otherwise everything is
+ * matched again, exactly as the PicoCalc's refreshActivityFlags. entry: the
+ * new or renamed entry, or ACTIVITY_CAPACITY after a move or a delete. */
+static void catalog_changed(App *a, int unique, unsigned entry){
+    /* A move or a delete cannot make two names equal: no second check. */
+    if(unique && (entry>=ACTIVITY_CAPACITY || activity_names_unique(&a->state))){
+        if(entry<ACTIVITY_CAPACITY) activity_rematch_entry(&a->state,entry);
+        activity_refresh_today(&a->state);
+    }else activity_refresh(&a->state);
+    a->labelLanguage=-1;
+    a->dirty=1;
+}
+static void begin_activity_edit(App *a, unsigned index){
+    a->editingActivity=index; memset(a->activityDraft,0,sizeof(a->activityDraft));
+    if(index<a->state.activityCount){
+        char shown[ACTIVITY_NAME_LENGTH*3+1];
+        const char *n=activity_display_name(&a->state.activities[index],a->state.language);
+        utf8_to_cp437(n,strlen(n),shown);
+        { size_t n=strlen(shown); memcpy(a->activityDraft,shown,n<ACTIVITY_NAME_LENGTH?n:ACTIVITY_NAME_LENGTH); }
+    }
+    a->screen=SCR_ACTIVITY_EDIT; a->message[0]=0;
+}
+static void trim_spaces(char *text){
+    char *start=text; size_t n;
+    while(*start==' ') start++;
+    n=strlen(start); while(n && start[n-1]==' ') n--;
+    start[n]=0; if(start!=text) memmove(text,start,n+1);
+}
+static void save_activity_edit(App *a){
+    char utf8[ACTIVITY_NAME_LENGTH*3+1]; unsigned destination=a->editingActivity; size_t n=0; const char *p;
+    trim_spaces(a->activityDraft);
+    if(!a->activityDraft[0]){ a->screen=SCR_ACTIVITIES; memset(a->activityDraft,0,sizeof(a->activityDraft)); return; } /* empty = cancel */
+    for(p=a->activityDraft;*p;p++) n+=cp437_to_utf8((unsigned char)*p,utf8+n);
+    utf8[n]=0;
+    if(destination<a->state.activityCount){
+        /* Unchanged text keeps the exact name, even with characters CP437 lacks. */
+        char shown[ACTIVITY_NAME_LENGTH*3+1];
+        const char *old=activity_display_name(&a->state.activities[destination],a->state.language);
+        utf8_to_cp437(old,strlen(old),shown);
+        if(strcmp(shown,a->activityDraft)==0) strcpy(utf8,old);
+    }
+    if(!activity_valid_name(utf8)) say(a,tr(a,"Name is too long","Nom trop long"));
+    else if(activity_duplicate(&a->state,utf8,destination,a->state.language)) say(a,tr(a,"That name already exists","Ce nom existe déjà"));
+    else if(catalog_editable(a)){
+        Activity *e; int unique=activity_names_unique(&a->state);
+        activity_pin_history(&a->state);
+        if(destination>=ACTIVITY_CAPACITY){
+            if(a->state.activityCount>=ACTIVITY_CAPACITY){ say(a,tr(a,"Limit: 30 activities","Limite : 30 activités")); return; }
+            destination=a->state.activityCount++;
+            memset(&a->state.activities[destination],0,sizeof(Activity));
+            a->state.activities[destination].id=a->state.nextActivityId++;
+        }
+        e=&a->state.activities[destination];
+        strcpy(a->state.language==LANG_FR?e->fr:e->en,utf8);
+        catalog_changed(a,unique,destination);
+        a->editingActivity=destination; a->selection=destination;
+        a->screen=SCR_ACTIVITIES; memset(a->activityDraft,0,sizeof(a->activityDraft)); a->message[0]=0;
+    }
+}
+/* Activities keys E, N, Del, F4, F5 (the caller has ruled out a pending Del). */
+static void activity_edit_key(App *a, int k){
+    unsigned count=a->state.activityCount, id=a->selection;
+    if(a->daysBack){ read_only(a); return; }
+    if(k=='n'||k=='N'){
+        if(count>=ACTIVITY_CAPACITY) say(a,tr(a,"Limit: 30 activities","Limite : 30 activités"));
+        else begin_activity_edit(a,ACTIVITY_CAPACITY);
+    }else if(id>=count) return;
+    else if(k=='e'||k=='E') begin_activity_edit(a,id);
+    else if(k==KEY_DELETE) a->confirmingDelete=1;
+    else if(count>=2 && catalog_editable(a)){ /* F4 up, F5 down, wrapping like the Kanban */
+        unsigned other; int unique=activity_names_unique(&a->state);
+        activity_pin_history(&a->state);
+        if(k==KEY_F4 && id==0){ activity_rotate(&a->state,1); other=count-1; }
+        else if(k==KEY_F5 && id+1==count){ activity_rotate(&a->state,0); other=0; }
+        else { other=k==KEY_F4?id-1:id+1; activity_swap(&a->state,id,other); }
+        catalog_changed(a,unique,ACTIVITY_CAPACITY);
+        a->selection=other;
+    }
+}
+static void confirm_activity_delete(App *a){
+    unsigned id=a->selection, n; int unique;
+    if(id>=a->state.activityCount || !catalog_editable(a)) return;
+    unique=activity_names_unique(&a->state);
+    activity_pin_history(&a->state);
+    activity_delete(&a->state,id);
+    catalog_changed(a,unique,ACTIVITY_CAPACITY);
+    a->confirmingDelete=0;
+    n=a->state.activityCount;
+    if(a->selection>=n) a->selection=n?n-1:0;
+}
+
 /* Home count, as on the PicoCalc: an archived day counts the names it stored. */
 static unsigned marked_activities(const App *a, const Day *day){
     if(a->daysBack && day_names(viewed_slot(a))->count) return day_names(viewed_slot(a))->count;
@@ -244,7 +353,7 @@ static void go(App *a, int s){
             return;
         }
     }else rosary_unload();
-    a->screen=s; a->selection=0; a->message[0]=0;
+    a->screen=s; a->selection=0; a->message[0]=0; a->confirmingDelete=0;
     if(s==SCR_DAILY_REVIEW) a->reviewOffset=0;
     if(s==SCR_LANGUAGE) a->selection=(unsigned)a->pendingLanguage;
     if(s==SCR_COLORS) a->selection=(unsigned)a->pendingPalette;
@@ -358,6 +467,7 @@ void app_init(App *app, Platform *hw){
     app->kanbanColumn=TASK_TODO;
     app->dirty=0;
     app->labelLanguage=-1;
+    app->editingActivity=ACTIVITY_CAPACITY;
 }
 const State *app_state(const App *app){ return &app->state; }
 enum Screen app_screen(const App *app){ return (enum Screen)app->screen; }
@@ -397,7 +507,26 @@ void app_tick(App *app, lps_tick_t ms){
 
 /* --- key handler continues in app_key.c style: keep in this file --- */
 
+/* The AZERTY top row without Shift gives é, è, ç and à. They type digits
+ * everywhere except in the activity name, where they are letters
+ * (LPS-DOS-115-CHG06; plat_dos used to turn them into digits). */
+static int accent_digit(int key){
+    switch(key){
+    case 130: return '2'; /* é */
+    case 138: return '7'; /* è */
+    case 135: return '9'; /* ç */
+    case 133: return '0'; /* à */
+    default: return key;
+    }
+}
 void app_key(App *a, int k){
+    if(a->screen!=SCR_ACTIVITY_EDIT) k=accent_digit(k);
+    if(k==KEY_ESCAPE && a->screen==SCR_ACTIVITIES && a->confirmingDelete){
+        a->confirmingDelete=0; a->message[0]=0; app_render(a); return;
+    }
+    if(k==KEY_ESCAPE && a->screen==SCR_ACTIVITY_EDIT){
+        a->screen=SCR_ACTIVITIES; memset(a->activityDraft,0,sizeof(a->activityDraft)); a->message[0]=0; app_render(a); return;
+    }
     if(k==KEY_ESCAPE){
         int target=SCR_HOME;
         int from=a->screen;
@@ -506,7 +635,9 @@ void app_key(App *a, int k){
          * current page); Enter or Space ticks the cursor's entry. */
         unsigned n=grid_items(a), rows=grid_rows(n), col, row, len, cols;
         int dk=azerty_digit(k);
-        if(n==0){ if(k==KEY_ENTER||(dk>='0'&&dk<='9')) say(a,tr(a,"No activities in the list","Aucune activité dans la liste")); }
+        if(a->confirmingDelete){ if(k==KEY_ENTER) confirm_activity_delete(a); } /* Esc is handled above; other keys wait */
+        else if(k=='e'||k=='E'||k=='n'||k=='N'||k==KEY_DELETE||k==KEY_F4||k==KEY_F5) activity_edit_key(a,k);
+        else if(n==0){ if(k==KEY_ENTER||(dk>='0'&&dk<='9')) say(a,tr(a,"No activities in the list","Aucune activité dans la liste")); }
         else {
             if(a->selection>=n) a->selection=0;
             col=a->selection/rows; row=a->selection%rows;
@@ -531,6 +662,13 @@ void app_key(App *a, int k){
                     if(commit(a,&g_scratch)) a->selection=id;
                 }
             }
+        }
+    }else if(a->screen==SCR_ACTIVITY_EDIT){
+        size_t len=strlen(a->activityDraft);
+        if(k==KEY_ENTER) save_activity_edit(a);
+        else if(k==KEY_BACKSPACE||k==127){ if(len) a->activityDraft[len-1]=0; }
+        else if(k>=32 && k<=255 && cp437_text_byte((unsigned char)k) && len<ACTIVITY_NAME_LENGTH){
+            a->activityDraft[len]=(char)k; a->activityDraft[len+1]=0;
         }
     }else if(a->screen==SCR_WEIGHT){
         if(a->daysBack){ if(k==KEY_ENTER) go(a,SCR_HOME); else read_only(a); }
@@ -769,7 +907,7 @@ void app_render(App *a){
             sprintf(b,tr(a,"ACTIVITIES  %u/%u","ACTIVITÉS  %u/%u"),first/GRID_COLUMNS+1,(cols+GRID_COLUMNS-1)/GRID_COLUMNS);
             center_line(a,3,b,0);
         }else center_line(a,3,tr(a,"ACTIVITIES","ACTIVITÉS"),0);
-        if(!n) line(a,GRID_TOP,tr(a,"No activities in the list.","Aucune activité dans la liste."),0);
+        if(!n) line(a,GRID_TOP,tr(a,"N: add an activity","N : ajouter une activité"),0);
         /* Cells are built by hand: sprintf is slow on the 8088. */
         for(c=0;c<GRID_COLUMNS;c++){
             unsigned gc=first+c, len=grid_column_length(n,rows,gc);
@@ -789,8 +927,21 @@ void app_render(App *a){
             const char *name=grid_label(a,sel,tmp);
             if(strlen(name)>GRID_NAME) line(a,GRID_TOP+(int)rows+1,name,0);
         }
-        line(a,22, a->daysBack?tr(a,"<- -> columns   Esc: day menu","<- -> colonnes   Échap : menu du jour")
-                              :tr(a,"1-9,0: tick in this column  Enter: tick  <- ->: columns","1-9,0 : cocher dans la colonne  Entrée : cocher  <- -> : colonnes"),0);
+        if(a->confirmingDelete && sel<a->state.activityCount){
+            sprintf(b,tr(a,"Delete %s?","Supprimer %s ?"),a->label[sel]); line(a,21,b,0);
+            line(a,22,tr(a,"Enter: yes   Esc: no","Entrée : oui   Échap : non"),0);
+        }else if(a->daysBack) line(a,22,tr(a,"<- -> columns   Esc: day menu","<- -> colonnes   Échap : menu du jour"),0);
+        else {
+            line(a,21,tr(a,"E: rename  N: new  Del: delete  F4/F5: move up/down","E : renommer  N : nouvelle  Suppr : supprimer  F4/F5 : monter/descendre"),0);
+            line(a,22,tr(a,"1-9,0: tick in this column  Enter: tick  <- ->: columns","1-9,0 : cocher dans la colonne  Entrée : cocher  <- -> : colonnes"),0);
+        }
+    }else if(a->screen==SCR_ACTIVITY_EDIT){
+        center_line(a,3, a->editingActivity<ACTIVITY_CAPACITY?tr(a,"RENAME ACTIVITY","RENOMMER L'ACTIVITÉ"):tr(a,"NEW ACTIVITY","NOUVELLE ACTIVITÉ"),0);
+        line(a,6,a->activityDraft,1);
+        sprintf(b,tr(a,"%u/24 characters","%u/24 caractères"),(unsigned)strlen(a->activityDraft)); line(a,9,b,0);
+        line(a,11,tr(a,"Saved in English; the French name, if any, stays.","Enregistré en français ; le nom anglais, s'il existe, reste."),0);
+        line(a,13,tr(a,"Enter: save  (empty cancels)","Entrée : enregistrer  (vide = annuler)"),0);
+        line(a,15,tr(a,"Backspace: erase  Esc: cancel","Retour : effacer  Échap : annuler"),0);
     }else if(a->screen==SCR_WEIGHT){
         int32_t expg=0,actg=0; int valid;
         center_line(a,3,tr(a,"WEIGHT TRACKER (kg)","SUIVI DU POIDS (kg)"),0);

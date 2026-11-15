@@ -338,12 +338,10 @@ int plat_dos_get_key(void){
     if(ascii == 27) return KEY_ESCAPE;
     if(ascii == 8 || ascii == 127) return KEY_BACKSPACE;
     if(ascii == 9) return KEY_TAB;
-    /* AZERTY top-row without Shift (CP437): map to digits for Date/Weight */
-    if(ascii == 130) return '2'; /* e acute */
-    if(ascii == 138) return '7'; /* e grave */
-    if(ascii == 135) return '9'; /* c cedilla */
-    if(ascii == 133) return '0'; /* a grave */
-    if(ascii >= 32 && ascii <= 126) return (int)ascii;
+    /* LPS-DOS-115-CHG06: CP437 letters (é, è, ç, à from the AZERTY top row,
+     * and the others) reach the app as they are; app_key turns é è ç à into
+     * digits except while an activity name is typed. */
+    if(cp437_text_byte((unsigned char)ascii)) return (int)ascii;
     return -1;
 }
 
