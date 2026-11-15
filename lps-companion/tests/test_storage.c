@@ -11,6 +11,7 @@
 
 Platform *plat_host_create(int capture);
 const char *plat_host_row(Platform *p, int row);
+int plat_host_rev(Platform *p, int row, int col);
 
 static void put32(uint8_t *p, uint32_t v){
     p[0]=(uint8_t)v; p[1]=(uint8_t)(v>>8); p[2]=(uint8_t)(v>>16); p[3]=(uint8_t)(v>>24);
@@ -155,7 +156,7 @@ static int any_row(Platform *hw, const char *text){
     int r; for(r=0;r<ROWS;r++) if(strstr(plat_host_row(hw,r),text)) return 1; return 0;
 }
 static void check_menu_and_legacy_note(const char *tmpdir){
-    static unsigned char store3[8192]; App *a=(App*)store3; Platform *hw; State s;
+    static unsigned char store3[16384]; App *a=(App*)store3; Platform *hw; State s;
     uint32_t gen=0; int active=-1; unsigned i; char path[256], got[2048]; FILE *f; size_t n;
     static const char *labels[10]={"0  Date","1  Activities","2  Weight tracker","3  Kanban","4  Christian Rosary",
         "5  Daily review","6  Config","7  Reminders","8  Timer","9  Close the day"};
@@ -187,7 +188,7 @@ static void check_menu_and_legacy_note(const char *tmpdir){
     { /* LPS-DOS-115-CHG02c: 8.3 name per day, so two days of one month give two files. */
         static Day d2; char p2[256], exp_dir[256];
         d2=app_state(a)->history[0]; d2.date.day=18; sprintf(exp_dir,"%s/EXPORT",tmpdir);
-        assert(write_ics_file(exp_dir,&d2,0,0,LANG_EN));
+        assert(write_ics_file(exp_dir,&d2,app_state(a),0,0,LANG_EN));
         sprintf(p2,"%s/EXPORT\\20260918.ICS",tmpdir);
         f=fopen(p2,"rb"); assert(f); fclose(f);
         f=fopen(path,"rb"); assert(f); n=fread(got,1,sizeof(got)-1,f); fclose(f); got[n]=0;
@@ -208,7 +209,7 @@ static void check_menu_and_legacy_note(const char *tmpdir){
 
 /* LPS-DOS-115-CHG02b (PicoCalc LPS-112-CHG01/CHG02): 5/30/60 minutes on keys 1-3. */
 static void check_timer(const char *tmpdir){
-    static unsigned char store4[8192]; App *a=(App*)store4; Platform *hw; lps_tick_t t=1000;
+    static unsigned char store4[16384]; App *a=(App*)store4; Platform *hw; lps_tick_t t=1000;
     rm_tree(tmpdir); mkdir(tmpdir,0755); lps_set_data_dir(tmpdir); lps_ensure_dirs();
     hw=plat_host_create(0); app_init(a,hw); app_start(a); app_tick(a,t);
     app_key(a,'8'); assert(app_screen(a)==SCR_TIMER_SELECT);
@@ -269,7 +270,7 @@ static void french_screen_ok(Platform *hw, const char *where){
     }
 }
 static void check_french_cp437(const char *tmpdir){
-    static unsigned char store5[8192]; App *a=(App*)store5; Platform *hw; char t[64]; unsigned i;
+    static unsigned char store5[16384]; App *a=(App*)store5; Platform *hw; char t[64]; unsigned i;
     {   /* Month and day names: CP437 bytes. */
         Date d={2026,2,14}; long_date_text(d,LANG_FR,t,sizeof(t)); assert(strcmp(t,"Samedi 14 F\202vrier 2026 (semaine 7)")==0);
         d.month=8; d.day=15; long_date_text(d,LANG_FR,t,sizeof(t)); assert(strcmp(t,"Samedi 15 Ao\226t 2026 (semaine 33)")==0);
@@ -283,12 +284,13 @@ static void check_french_cp437(const char *tmpdir){
             "UID:lps-companion-20260917@picocalc\r\nDTSTART;VALUE=DATE:20260917\r\nDTEND;VALUE=DATE:20260918\r\n"
             "SUMMARY:LPS Companion\r\nDESCRIPTION:Activit\303\251s: Marche, R\303\251gime, Cong\303\251\\NXP:"
             "\\NPoids attendu: 110.500 kg\\NPoids effectif: 111.250 kg\\NNote: Legacy\\, ascii\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
-        static char got[2048]; static Day d; char dir[256], path[300]; FILE *f; size_t n;
+        static char got[2048]; static Day d; static State cat; char dir[256], path[300]; FILE *f; size_t n;
+        state_init(&cat);
         memset(&d,0,sizeof(d)); d.date.year=2026; d.date.month=9; d.date.day=17; d.number=3;
-        d.flags=(uint16_t)((1u<<0)|(1u<<1)|(1u<<9)); d.expected=110500; d.actual=111250; strcpy(d.note,"Legacy, ascii");
-        assert(build_ics(&d,0,0,LANG_FR,got,sizeof(got)) && strcmp(got,want)==0);
+        d.flags=(1u<<0)|(1u<<1)|(1u<<9); d.expected=110500; d.actual=111250; strcpy(d.note,"Legacy, ascii");
+        assert(build_ics(&d,&cat,0,0,LANG_FR,got,sizeof(got)) && strcmp(got,want)==0);
         rm_tree(tmpdir); mkdir(tmpdir,0755); sprintf(dir,"%s",tmpdir);
-        assert(write_ics_file(dir,&d,0,0,LANG_FR));
+        assert(write_ics_file(dir,&d,&cat,0,0,LANG_FR));
         sprintf(path,"%s\\20260917.ICS",tmpdir);
         f=fopen(path,"rb"); assert(f); n=fread(got,1,sizeof(got),f); fclose(f);
         assert(n==strlen(want) && memcmp(got,want,n)==0);
@@ -366,7 +368,7 @@ static void check_wrap(const char *tmpdir){
     /* Every rosary text, EN and FR: no line over 80, no word split. */
     for(id=0;id<ROS_T_COUNT;id++) for(lang=0;lang<2;lang++) check_wrapped(rosary_source_text(id,lang),COLUMNS);
     {   /* On screen: the French Hail Mary, rows 6.., joined with single spaces, is the text. */
-        static unsigned char store6[8192]; App *ap=(App*)store6; Platform *hw; char joined[1024]; int r; unsigned i;
+        static unsigned char store6[16384]; App *ap=(App*)store6; Platform *hw; char joined[1024]; int r; unsigned i;
         const char *want;
         rm_tree(tmpdir); mkdir(tmpdir,0755); lps_set_data_dir(tmpdir); lps_ensure_dirs();
         hw=plat_host_create(0); app_init(ap,hw); app_start(ap); rosary_set_path(ROSARY_DAT_NAME);
@@ -428,6 +430,9 @@ static int same_state(const State *a, const State *b){
     if(a->language!=b->language||a->palette!=b->palette||a->xp!=b->xp||a->count!=b->count||!same_day(&a->today,&b->today)) return 0;
     for(i=0;i<a->count;i++) if(!same_day(ring(a,i),ring(b,i))) return 0;
     if(a->taskCount!=b->taskCount||a->reminderCount!=b->reminderCount) return 0;
+    if(a->activityCount!=b->activityCount||a->nextActivityId!=b->nextActivityId) return 0;
+    for(i=0;i<a->activityCount;i++) if(a->activities[i].id!=b->activities[i].id
+        ||strcmp(a->activities[i].fr,b->activities[i].fr)||strcmp(a->activities[i].en,b->activities[i].en)) return 0;
     for(i=0;i<a->taskCount;i++) if(a->tasks[i].status!=b->tasks[i].status||strcmp(a->tasks[i].name,b->tasks[i].name)) return 0;
     for(i=0;i<a->reminderCount;i++){
         const Reminder *x=&a->reminders[i], *y=&b->reminders[i];
@@ -458,7 +463,7 @@ static void sample_state(State *s, unsigned days){
     s->reminderCount=1; s->reminders[0].from=DEFAULT_DATE; s->reminders[0].duration=365; strcpy(s->reminders[0].text,"Fête de Noël");
 }
 static void check_json_saves(const char *dir){
-    static State s, s2, out; static unsigned char store[8192];
+    static State s, s2, out; static unsigned char store[16384];
     char pa[256], pb[256], pba[256], pbb[256], path[256]; uint32_t gen=0, check=0; int active=-1; size_t n, n2;
     App *app=(App*)store; Platform *hw;
     jpath(pa,dir,"SAVE_A.JSN"); jpath(pb,dir,"SAVE_B.JSN"); jpath(pba,dir,"SAVE_A.BIN"); jpath(pbb,dir,"SAVE_B.BIN");
@@ -485,12 +490,17 @@ static void check_json_saves(const char *dir){
     fresh_dir(dir); copy_file("tests/fixtures/picocalc_custom.jsn",pa);
     assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==7 && active==0);
     assert(out.language==LANG_FR && out.palette==PAL_BLUE && out.xp==4321);
-    assert(out.today.number==40 && out.today.flags==(1u<<3)); /* Messe; Sport, Projet perso, Vélo, Chess are kept aside */
+    /* LPS-DOS-115-CHG05: flags follow the PicoCalc catalog (Sport 0, Messe 3,
+     * Projet perso 5, Marche 16, Vélo 22, Chess 23). */
+    assert(out.activityCount==24 && out.nextActivityId==25 && out.activities[0].id==17 && !strcmp(out.activities[22].fr,"V\xc3\xa9lo"));
+    assert(out.today.number==40 && out.today.flags==((1ul<<0)|(1ul<<3)|(1ul<<5)|(1ul<<22)|(1ul<<23)));
     assert(!strcmp(out.today.note,"Noël en famille, gâteau à l'orange") && out.today.expected==82500 && out.today.actual==-1);
     assert(out.count==5 && out.next==5);
-    assert(ring(&out,1)->number==36 && ring(&out,1)->flags==1u && !strcmp(ring(&out,1)->note,"Séance à la piscine, très bien"));
-    assert(ring(&out,2)->flags==((1u<<0)|(1u<<2)|(1u<<5))); /* the frozen "Projet" is the DOS Projet */
-    assert(ring(&out,3)->flags==((1u<<0)|(1u<<9)));
+    assert(ring(&out,1)->number==36 && ring(&out,1)->flags==((1ul<<0)|(1ul<<16)|(1ul<<22)) && !strcmp(ring(&out,1)->note,"Séance à la piscine, très bien"));
+    assert(day_orphan_count(&out,2)==1 && !strcmp(day_orphan(&out,2,0),"Tai-chi") && day_names(2)->count==4);
+    assert(ring(&out,2)->flags==((1ul<<2)|(1ul<<16)|(1ul<<23))); /* the frozen "Projet" is no catalog entry now */
+    assert(day_orphan_count(&out,3)==1 && !strcmp(day_orphan(&out,3,0),"Projet"));
+    assert(ring(&out,3)->flags==((1ul<<0)|(1ul<<9)|(1ul<<16)|(1ul<<21)) && day_orphan_count(&out,4)==0);
     assert(out.taskCount==3 && out.tasks[0].status==TASK_DOING && !strcmp(out.tasks[0].name,"Réparer le vélo"));
     assert(!strcmp(out.tasks[1].name,"Écrire à Hélène") && !strcmp(out.tasks[2].name,"Plan \\ \"B\""));
     assert(out.reminderCount==2 && !strcmp(out.reminders[0].text,"Anniversaire de François") && out.reminders[0].duration==30);
@@ -503,7 +513,8 @@ static void check_json_saves(const char *dir){
     hw=plat_host_create(0); app_init(app,hw); app_start(app);
     if(app_screen(app)==SCR_REMINDER_POPUP) app_key(app,KEY_ENTER);
     assert(app_screen(app)==SCR_HOME);
-    app_key(app,'1'); app_key(app,'1'); app_key(app,KEY_ESCAPE); /* tick Marche on DOS */
+    /* 24 entries: 3 columns of 8; Marche (16th) heads the third column. */
+    app_key(app,'1'); app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); app_key(app,'1'); app_key(app,KEY_ESCAPE); /* tick Marche */
     app_key(app,'9'); assert(app_screen(app)==SCR_FINISH); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD);
     n=slurp(pb,jbuf,sizeof(jbuf)); /* the tick, saved when leaving Activities */
     assert(strstr(jbuf,"\"generation\":8,") && strstr(jbuf,"\"meals\":{\"played\":[3,0,15]},"));
@@ -517,7 +528,7 @@ static void check_json_saves(const char *dir){
     /* Full PicoCalc state (all 22 activities, 31 days, 24 tasks, quotes and backslashes). */
     fresh_dir(dir); copy_file("tests/fixtures/picocalc_full.jsn",pb);
     assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==41 && active==1 && out.count==31 && out.taskCount==24 && out.reminderCount==3);
-    assert(out.today.flags==0xffffu && out.today.number==100 && !strcmp(out.today.note,"Note 100: \"quoted\" back\\slash y"));
+    assert(out.today.flags==0x3ffffful && out.today.number==100 && !strcmp(out.today.note,"Note 100: \"quoted\" back\\slash y"));
     jpath(path,dir,"OUT.JSN");
     assert(jsave_write(path,&out,41,&check));
     n=slurp("tests/fixtures/picocalc_full.jsn",jbuf,sizeof(jbuf)); n2=slurp(path,jbuf2,sizeof(jbuf2));
@@ -629,12 +640,149 @@ static void check_json_saves(const char *dir){
     jsave_reset();
 }
 
+/* LPS-DOS-115-CHG05: the activity catalog, the 3-column Activities screen. */
+static int cell_is(Platform *hw, int row, int col, const char *text){ return !memcmp(plat_host_row(hw,row)+col,text,strlen(text)); }
+static void read_ics(const char *dir, const char *ymd, char *got, size_t cap){
+    char path[300]; FILE *f; size_t n;
+    sprintf(path,"%s/EXPORT\\%s.ICS",dir,ymd);
+    f=fopen(path,"rb"); assert(f); n=fread(got,1,cap-1,f); fclose(f); got[n]=0;
+}
+static void check_activities(const char *dir){
+    static State s, out; static unsigned char store[16384]; static char got[2048];
+    App *app=(App*)store; Platform *hw; uint32_t gen=0, check=0; int active=-1; unsigned i; char pa[256];
+    static const char *const fr[6]={"Sport","Cuisine","M\xc3\xa9nage","Famille","Amis","M\xc3\xa9" "ditation"};
+    static const char *const en[6]={"Sport","Cooking","Chores","Family","Friends","Meditation"};
+    jpath(pa,dir,"SAVE_A.JSN");
+
+    /* Default catalog: the PicoCalc's 22, ids 1-22, UTF-8 names. */
+    state_init(&s);
+    assert(s.activityCount==22 && s.nextActivityId==23);
+    for(i=0;i<22;i++) assert(s.activities[i].id==i+1);
+    assert(!strcmp(s.activities[0].fr,"Marche") && !strcmp(s.activities[1].fr,"R\xc3\xa9gime") && !strcmp(s.activities[9].en,"Day off"));
+    for(i=0;i<6;i++) assert(!strcmp(s.activities[16+i].fr,fr[i]) && !strcmp(s.activities[16+i].en,en[i]));
+
+    /* Fresh start: 22 entries in three columns of 8, 8 and 6. */
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    assert(app_screen(app)==SCR_HOME && row_has(hw,5,"0/22 activities"));
+    app_key(app,'1'); assert(app_screen(app)==SCR_ACTIVITIES && app_selection(app)==0);
+    assert(cell_is(hw,5,0,"1 [ ] Walk") && cell_is(hw,5,27,"  [ ] Illness") && cell_is(hw,5,54,"  [ ] Sport"));
+    assert(cell_is(hw,12,0,"8 [ ] Gurumed") && cell_is(hw,12,27,"  [ ] Shopping") && cell_is(hw,10,54,"  [ ] Meditation"));
+    assert(cell_is(hw,11,54,"      ") && cell_is(hw,13,0,"          ") && plat_host_rev(hw,5,0) && plat_host_rev(hw,5,25) && !plat_host_rev(hw,5,27));
+    assert(row_has(hw,22,"1-9,0: tick in this column"));
+    /* Up/Down wrap in the column; Left/Right wrap over the columns, keeping the row. */
+    app_key(app,KEY_UP); assert(app_selection(app)==7 && plat_host_rev(hw,12,0));
+    app_key(app,KEY_DOWN); assert(app_selection(app)==0);
+    app_key(app,KEY_RIGHT); assert(app_selection(app)==8 && cell_is(hw,5,27,"1 [ ] Illness") && cell_is(hw,5,0,"  [ ] Walk"));
+    app_key(app,KEY_RIGHT); assert(app_selection(app)==16 && cell_is(hw,10,54,"6 [ ] Meditation"));
+    app_key(app,KEY_RIGHT); assert(app_selection(app)==0);
+    app_key(app,KEY_LEFT); assert(app_selection(app)==16);
+    app_key(app,KEY_RIGHT); app_key(app,KEY_UP); assert(app_selection(app)==7);
+    app_key(app,KEY_RIGHT); assert(app_selection(app)==15);
+    app_key(app,KEY_RIGHT); assert(app_selection(app)==21); /* row 8 does not exist there: the last row */
+    /* Keys 1-9, 0 act on the cursor's column; past its end they do nothing. */
+    app_key(app,'7'); app_key(app,'0'); assert(app_state(app)->today.flags==0 && app_selection(app)==21);
+    app_key(app,'6'); assert(app_state(app)->today.flags==(1ul<<21) && cell_is(hw,10,54,"6 [x] Meditation"));
+    app_key(app,KEY_LEFT); assert(app_selection(app)==13);
+    app_key(app,'3'); assert(app_selection(app)==10 && app_state(app)->today.flags==((1ul<<21)|(1ul<<10)));
+    app_key(app,KEY_ENTER); assert(app_state(app)->today.flags==(1ul<<21));
+    app_key(app,' '); assert(app_state(app)->today.flags==((1ul<<21)|(1ul<<10)) && cell_is(hw,7,27,"3 [x] Weekend"));
+    app_key(app,'0'); assert(app_state(app)->today.flags==((1ul<<21)|(1ul<<10))); /* 8 rows: no row 10 */
+    app_key(app,KEY_LEFT); app_key(app,'&'); assert(app_state(app)->today.flags==((1ul<<21)|(1ul<<10)|1ul)); /* AZERTY 1 */
+    app_key(app,'1'); app_key(app,KEY_ESCAPE);
+    assert(app_screen(app)==SCR_HOME && row_has(hw,5,"2/22 activities"));
+    app_key(app,'5'); assert(any_row(hw,"ACTIVITIES (2)") && any_row(hw,"  Weekend") && any_row(hw,"  Meditation")); app_key(app,KEY_ESCAPE);
+    /* Closing the day: the ICS lists the ticks in catalog order, as the PicoCalc. */
+    app_key(app,'9'); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD); app_key(app,KEY_ENTER);
+    read_ics(dir,"20260917",got,sizeof(got));
+    assert(strstr(got,"DESCRIPTION:Activities: Weekend, Meditation\\NXP:\r\n"));
+    assert(day_names(1)->count==2 && !strcmp(day_names(1)->names[0],"Weekend") && !strcmp(day_names(1)->names[1],"M\xc3\xa9" "ditation") && day_names(0)->count==0);
+    app_key(app,KEY_LEFT); assert(row_has(hw,5,"2/22 activities")); app_key(app,KEY_RIGHT);
+    /* French: names with accents on screen (CP437), UTF-8 in the ICS. */
+    app_key(app,'6'); app_key(app,'1'); app_key(app,'2'); app_key(app,'3');
+    app_key(app,'1'); assert(cell_is(hw,5,54,"  [ ] Sport") && cell_is(hw,10,54,"  [ ] M\202ditation") && cell_is(hw,6,27,"  [ ] Cong\202"));
+    app_key(app,KEY_RIGHT); app_key(app,'2'); app_key(app,KEY_RIGHT); app_key(app,'1'); app_key(app,'6'); app_key(app,'3'); app_key(app,KEY_ESCAPE);
+    assert(row_has(hw,5,"4/22 activit\202s"));
+    app_key(app,'9'); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD);
+    read_ics(dir,"20260918",got,sizeof(got));
+    assert(strstr(got,"DESCRIPTION:Activit\xc3\xa9s: Cong\xc3\xa9, Sport, M\xc3\xa9nage, M\xc3\xa9" "ditation\\NXP:\r\n"));
+
+    /* A PicoCalc catalog: renamed, moved, custom and English-only entries
+     * show by their names; an archived day lists its frozen extras, ticked. */
+    fresh_dir(dir); copy_file("tests/fixtures/picocalc_custom.jsn",pa);
+    hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    if(app_screen(app)==SCR_REMINDER_POPUP) app_key(app,KEY_ENTER);
+    assert(row_has(hw,5,"5/24 activit\202s"));
+    app_key(app,'1'); /* 24 entries: 8 rows */
+    assert(cell_is(hw,5,0,"1 [x] Sport") && cell_is(hw,10,0,"6 [x] Projet perso") && cell_is(hw,5,54,"  [ ] Marche"));
+    assert(cell_is(hw,11,54,"  [x] V\202lo") && cell_is(hw,12,54,"  [x] Chess"));
+    app_key(app,KEY_ESCAPE);
+    app_key(app,KEY_LEFT); app_key(app,KEY_LEFT); app_key(app,KEY_LEFT); /* day 37 */
+    assert(row_has(hw,1,"Mercredi 11 Novembre 2026") && row_has(hw,5,"4/24 activit\202s"));
+    app_key(app,'1'); /* 24 + 1 extra: 9 rows */
+    assert(app_screen(app)==SCR_ACTIVITIES && cell_is(hw,7,0,"3 [x] Bible") && cell_is(hw,12,27,"  [x] Marche"));
+    assert(cell_is(hw,10,54,"  [x] Chess") && cell_is(hw,11,54,"  [x] Projet") && cell_is(hw,12,54,"   "));
+    assert(row_has(hw,22,"<- -> colonnes   \220chap : menu du jour"));
+    app_key(app,'3'); assert(row_has(hw,23,"Jour archiv\202 : lecture seule") && day_orphan_count(app_state(app),3)==1);
+    app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); app_key(app,KEY_DOWN); app_key(app,KEY_DOWN);
+    app_key(app,KEY_DOWN); app_key(app,KEY_DOWN); app_key(app,KEY_DOWN); app_key(app,KEY_DOWN);
+    assert(app_selection(app)==24 && plat_host_rev(hw,11,54)); /* the extra can be selected */
+    app_key(app,KEY_ENTER); assert(row_has(hw,23,"Jour archiv\202 : lecture seule"));
+    app_key(app,KEY_ESCAPE); app_key(app,KEY_LEFT); assert(row_has(hw,5,"4/24 activit\202s")); /* day 36, Tai-chi */
+    app_key(app,KEY_RIGHT);
+    /* ICS of a custom catalog: the export language's name, the other one when empty. */
+    app_key(app,'1'); app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); app_key(app,'1'); app_key(app,KEY_ESCAPE);
+    app_key(app,'9'); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD);
+    read_ics(dir,"20261114",got,sizeof(got));
+    assert(strstr(got,"DESCRIPTION:Activit\xc3\xa9s: Sport, Messe, Projet perso, Marche, V\xc3\xa9lo, Chess\\NXP:"));
+
+    /* 30 entries: 10 rows, key 0 is row 10. A long name is cut in its cell and
+     * shown whole under the grid. 30 entries plus 30 extras: two pages. */
+    state_init(&s); s.today.number=2;
+    for(i=22;i<30;i++){ s.activities[i].id=(uint16_t)(i+1); sprintf(s.activities[i].fr,"Nouveau %u",i+1); sprintf(s.activities[i].en,"New %u",i+1); }
+    strcpy(s.activities[29].fr,"Une activite tres longue"); strcpy(s.activities[29].en,"A very long activity nam"); /* 24 bytes, the limit */
+    s.activityCount=30; s.nextActivityId=31;
+    s.history[0].number=1; s.history[0].date.year=2026; s.history[0].date.month=9; s.history[0].date.day=16; s.next=1; s.count=1;
+    fresh_dir(dir); day_names_clear();
+    day_names(1)->count=30;
+    for(i=0;i<30;i++) sprintf(day_names(1)->names[i],"Extra %02u",i+1);
+    assert(jsave_write(pa,&s,1,&check));
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && out.activityCount==30 && out.history[0].flags==0 && day_orphan_count(&out,1)==30);
+    hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    assert(row_has(hw,5,"0/30 activities"));
+    app_key(app,'1');
+    assert(cell_is(hw,14,0,"0 [ ] Day off") && cell_is(hw,14,54,"  [ ] A very long activity") && !strstr(plat_host_row(hw,14),"A very long activity n"));
+    app_key(app,'0'); assert(app_state(app)->today.flags==(1ul<<9) && app_selection(app)==9);
+    app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); assert(app_selection(app)==29);
+    assert(row_has(hw,16,"A very long activity nam") && cell_is(hw,14,54,"0 [ ] A very long activity"));
+    app_key(app,'0'); assert(app_state(app)->today.flags==((1ul<<9)|(1ul<<29)));
+    app_key(app,KEY_ESCAPE); assert(row_has(hw,5,"2/30 activities"));
+    app_key(app,KEY_LEFT); assert(row_has(hw,5,"30/30 activities"));
+    app_key(app,'1'); /* 60 entries: 14 rows, 5 columns, 2 pages */
+    assert(row_has(hw,3,"ACTIVITIES  1/2") && cell_is(hw,5,0,"1 [ ] Walk") && cell_is(hw,18,54,"  [x] Extra 12"));
+    app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT);
+    assert(app_selection(app)==42 && row_has(hw,3,"ACTIVITIES  2/2") && cell_is(hw,5,0,"1 [x] Extra 13") && cell_is(hw,5,27,"  [x] Extra 27"));
+    assert(cell_is(hw,8,27,"  [x] Extra 30") && cell_is(hw,9,27,"   ") && cell_is(hw,5,54,"   "));
+    app_key(app,KEY_DOWN); app_key(app,KEY_DOWN); app_key(app,KEY_DOWN); app_key(app,KEY_DOWN); app_key(app,KEY_DOWN);
+    app_key(app,KEY_RIGHT); assert(app_selection(app)==59); /* row 6 of a 4-row column: its last */
+    app_key(app,KEY_RIGHT); assert(app_selection(app)==3 && row_has(hw,3,"ACTIVITIES  1/2"));
+    app_key(app,KEY_LEFT); assert(app_selection(app)==59);
+    app_key(app,KEY_ESCAPE); app_key(app,KEY_RIGHT);
+    /* The save keeps the 30 entries, the 30 extras and both new ticks. */
+    app_flush_save(app);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && out.activityCount==30 && out.today.flags==((1ul<<9)|(1ul<<29)) && day_orphan_count(&out,1)==30);
+    /* An empty catalog says so instead of drawing a grid. */
+    state_init(&s); s.activityCount=0; fresh_dir(dir); day_names_clear(); assert(jsave_write(pa,&s,1,&check));
+    hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    assert(row_has(hw,5,"0/0 activities")); app_key(app,'1'); assert(row_has(hw,5,"No activities in the list."));
+    app_key(app,'1'); app_key(app,KEY_ENTER); app_key(app,KEY_DOWN); app_key(app,KEY_RIGHT); assert(app_state(app)->today.flags==0);
+}
+
 int main(void){
     const char *tmpdir="/tmp/lps-msdos-test";
     State s, out; Blob b; int32_t g=0; Date calendar; Day day;
     char icsbuf[2048]; char export_dir[200], weights_dir[200];
     uint32_t gen=0; int active=-1;
-    Platform *hw; App *app; static unsigned char store[8192];
+    Platform *hw; App *app; static unsigned char store[16384];
     assert(lps_buffers_init() && lps_buffers_init()); /* idempotent */
     rm_tree(tmpdir); mkdir(tmpdir,0755);
     lps_set_data_dir(tmpdir); lps_ensure_dirs();
@@ -670,7 +818,7 @@ int main(void){
     assert(save_store(tmpdir,&s,&gen,&active) && gen==2 && active==1);
 
     day=s.today;
-    assert(build_ics(&day, 110, 40, LANG_EN, icsbuf, sizeof(icsbuf)));
+    assert(build_ics(&day, &s, 110, 40, LANG_EN, icsbuf, sizeof(icsbuf)));
     assert(strstr(icsbuf,"BEGIN:VCALENDAR"));
     assert(strstr(icsbuf,"UID:lps-companion-20260917@picocalc"));
     assert(strstr(icsbuf,"Activities: "));
@@ -678,7 +826,7 @@ int main(void){
     assert(strstr(icsbuf,"\\NXP:\\NExpected weight: 110.500 kg\\NActual weight: 111.200 kg\\NNote: OK\r\n"));
     assert(!strstr(icsbuf,"XP: +") && !strstr(icsbuf,"total"));
     lps_path_join(export_dir,sizeof(export_dir),tmpdir,"EXPORT");
-    assert(write_ics_file(export_dir,&day,110,40,LANG_EN));
+    assert(write_ics_file(export_dir,&day,&s,110,40,LANG_EN));
     lps_path_join(weights_dir,sizeof(weights_dir),tmpdir,"WEIGHTS");
     assert(write_weight_csv(weights_dir,&day));
     assert(write_weight_csv(weights_dir,&day)); /* idempotent */
@@ -694,7 +842,7 @@ int main(void){
     if(app_screen(app)==SCR_REMINDER_POPUP) app_key(app,KEY_ENTER);
     assert(app_screen(app)==SCR_HOME);
     assert(row_has(hw,1,"Thursday 17 September 2026 (week 38)") && !any_xp(hw));
-    assert(row_has(hw,5,"0/16 activities"));
+    assert(row_has(hw,5,"0/22 activities"));
     app_key(app,'1'); /* activities */
     app_key(app,'1'); app_key(app,'2'); app_key(app,'3');
     assert(points(&app_state(app)->today)==40);
@@ -713,11 +861,11 @@ int main(void){
     assert(app_screen(app)==SCR_HOME && row_has(hw,1,"Friday 18 September 2026 (week 38)") && !any_xp(hw));
     app_key(app,KEY_LEFT); /* archive: previous day */
     assert(row_has(hw,1,"Thursday 17 September 2026 (week 38)") && row_has(hw,2,"ARCHIVED DAY") && !any_xp(hw));
-    assert(row_has(hw,5,"3/16 activities"));
+    assert(row_has(hw,5,"3/22 activities"));
     app_key(app,KEY_RIGHT);
     app_key(app,'6'); app_key(app,'1'); app_key(app,'2'); app_key(app,'3'); /* Config: French, save */
     assert(app_state(app)->language==LANG_FR && app_screen(app)==SCR_HOME);
-    assert(row_has(hw,1,"Vendredi 18 Septembre 2026 (semaine 38)") && row_has(hw,5,"0/16 activités") && !any_xp(hw));
+    assert(row_has(hw,1,"Vendredi 18 Septembre 2026 (semaine 38)") && row_has(hw,5,"0/22 activit\202s") && !any_xp(hw));
     { /* the exported ICS file on disk carries the empty XP line */
         char path[256], got[2048]; FILE *f; size_t n;
         /* write_ics_file joins with a DOS backslash, so on the host it is part of the name. */
@@ -764,7 +912,7 @@ int main(void){
 
     check_rosary_dat("/tmp");
     {   /* The app: Rosary opens with ROSARY.DAT, and says why when it cannot. */
-        static unsigned char store2[8192]; App *ra=(App*)store2; Platform *rh;
+        static unsigned char store2[16384]; App *ra=(App*)store2; Platform *rh;
         rm_tree(tmpdir); mkdir(tmpdir,0755); lps_set_data_dir(tmpdir); lps_ensure_dirs();
         rh=plat_host_create(0); app_init(ra,rh); app_start(ra);
         rosary_set_path(ROSARY_DAT_NAME);
@@ -795,8 +943,9 @@ int main(void){
     check_french_cp437(tmpdir);
     check_wrap(tmpdir);
     check_json_saves(tmpdir);
+    check_activities(tmpdir);
 
-    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback, unknown keys, newer schema), fixture decode (%u captures)\n", 0);
+    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback, unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

@@ -35,6 +35,10 @@ struct App {
     lps_tick_t timerNow, timerLast, timerRemaining;
     int timerPaused;
     int dirty; /* RAM changed; disk SAVE pending */
+    /* Catalog names as shown (CP437, display language), rebuilt when the
+     * language or the catalog changes (labelLanguage -1 = stale). */
+    int labelLanguage;
+    char label[ACTIVITY_CAPACITY][ACTIVITY_NAME_LENGTH+1];
 };
 
 static const char *tr(const App *a, const char *en, const char *fr){
@@ -120,6 +124,56 @@ static int flush_save(App *a){
     return 1;
 }
 
+/* ---- Activities (LPS-DOS-115-CHG05, PicoCalc LPS-113-CHG07/08/08b/08c) ----
+ * The catalog from the save, up to 30 entries, shown on one page in three
+ * columns of up to 10 rows (22 entries: 8, 8, 6), filled column by column.
+ * An archived day adds the names it stored that the catalog lacks (frozen
+ * extras), ticked and read-only; past 3 x GRID_MAX_ROWS the columns go on
+ * to a second page, reached with Left/Right. */
+#define GRID_COLUMNS 3
+#define GRID_MAX_ROWS 14
+#define GRID_TOP 5
+#define GRID_CELL 26  /* 26 + 1 + 26 + 1 + 26 = 80 columns */
+#define GRID_NAME 20  /* "1 [x] " then the name */
+static void refresh_labels(App *a){
+    unsigned i;
+    if(a->labelLanguage==(int)a->state.language) return;
+    for(i=0;i<a->state.activityCount;i++){
+        const char *n=activity_display_name(&a->state.activities[i],a->state.language);
+        utf8_to_cp437(n,strlen(n),a->label[i]);
+    }
+    a->labelLanguage=(int)a->state.language;
+}
+static unsigned viewed_slot(const App *a){
+    return a->daysBack ? 1u+(a->state.next+HISTORY_LENGTH-a->daysBack)%HISTORY_LENGTH : 0u;
+}
+static unsigned grid_items(const App *a){
+    return a->state.activityCount + (a->daysBack ? day_orphan_count(&a->state,viewed_slot(a)) : 0u);
+}
+static unsigned grid_rows(unsigned n){
+    unsigned r=(n+GRID_COLUMNS-1)/GRID_COLUMNS;
+    if(r>GRID_MAX_ROWS) r=GRID_MAX_ROWS;
+    return r?r:1u;
+}
+/* Entries in column col (columns counted over every page). */
+static unsigned grid_column_length(unsigned n, unsigned rows, unsigned col){
+    unsigned first=col*rows;
+    return first>=n ? 0u : (n-first<rows ? n-first : rows);
+}
+/* Label of grid entry i (CP437): a catalog name, or a frozen extra. */
+static const char *grid_label(App *a, unsigned i, char *tmp){
+    const char *n;
+    if(i<a->state.activityCount) return a->label[i];
+    n=day_orphan(&a->state,viewed_slot(a),i-a->state.activityCount);
+    utf8_to_cp437(n,strlen(n),tmp);
+    return tmp;
+}
+/* Home count, as on the PicoCalc: an archived day counts the names it stored. */
+static unsigned marked_activities(const App *a, const Day *day){
+    if(a->daysBack && day_names(viewed_slot(a))->count) return day_names(viewed_slot(a))->count;
+    return count_flags(day->flags);
+}
+
 static unsigned tasks_in(const App *a, int status){
     unsigned n=0,i; for(i=0;i<a->state.taskCount;i++) if(a->state.tasks[i].status==status) n++; return n;
 }
@@ -140,12 +194,12 @@ static unsigned review_rows(const App *a){
     return 3+count_flags(a->state.today.flags)+tasks_in(a,TASK_TODO)+tasks_in(a,TASK_DOING)
         +(count_flags(a->state.today.flags)==0)+(tasks_in(a,TASK_TODO)==0)+(tasks_in(a,TASK_DOING)==0);
 }
-static void review_line(const App *a, unsigned index, char *out, size_t size){
+static void review_line(App *a, unsigned index, char *out, size_t size){
     unsigned activities=count_flags(a->state.today.flags); unsigned i; int status;
     if(index==0){ sprintf(out, tr(a,"ACTIVITIES (%u)","ACTIVITÉS (%u)"), activities); return; }
     --index;
-    for(i=0;i<ACTIVITY_COUNT;i++) if(a->state.today.flags&(1u<<i)){
-        if(index--==0){ sprintf(out,"  %s", tr(a,ACTIVITIES_EN[i],ACTIVITIES_FR[i])); return; }
+    for(i=0;i<a->state.activityCount;i++) if(FLAG_BIT(a->state.today.flags,i)){
+        if(index--==0){ sprintf(out,"  %s", a->label[i]); return; }
     }
     if(!activities){ if(index--==0){ sprintf(out,"  %s", tr(a,"None selected","Aucune sélectionnée")); return; } }
     for(status=TASK_TODO; status<=TASK_DOING; status++){
@@ -303,9 +357,11 @@ void app_init(App *app, Platform *hw){
     app->editedTask=TASK_CAPACITY;
     app->kanbanColumn=TASK_TODO;
     app->dirty=0;
+    app->labelLanguage=-1;
 }
 const State *app_state(const App *app){ return &app->state; }
 enum Screen app_screen(const App *app){ return (enum Screen)app->screen; }
+unsigned app_selection(const App *app){ return app->selection; }
 const Day *app_viewed_day(const App *app){
     if(app->daysBack)
         return &app->state.history[(app->state.next+HISTORY_LENGTH-app->daysBack)%HISTORY_LENGTH];
@@ -315,6 +371,7 @@ const Day *app_viewed_day(const App *app){
 void app_start(App *app){
     enum LoadResult r;
     r=app->hw->load(app->hw,&app->state);
+    app->labelLanguage=-1; /* the catalog came with the save */
     if(r==LOAD_NO_STORAGE){ app->blocked=1; app->missingStorage=1; say(app,"[!] Missing SD card!"); }
     else if(r==LOAD_ERROR){
         app->blocked=1; say(app, tr(app,"Read error: save protected","Erreur lecture : sauvegarde protégée"));
@@ -442,25 +499,37 @@ void app_key(App *a, int k){
             /* other keys ignored — never freeze */
         }
     }else if(a->screen==SCR_ACTIVITIES){
-        /* Two columns of 8, all 16 visible. Left/Right swap columns; 1-9 keep the old page-1 shortcuts on the left column. */
-        unsigned col=a->selection/ACT_PER_COL;
-        unsigned row=a->selection%ACT_PER_COL;
-        if(col>1){ col=0; row=0; a->selection=0; }
-        if(k==KEY_UP) a->selection=col*ACT_PER_COL+(row+ACT_PER_COL-1)%ACT_PER_COL;
-        else if(k==KEY_DOWN) a->selection=col*ACT_PER_COL+(row+1)%ACT_PER_COL;
-        else if(k==KEY_LEFT||k==KEY_RIGHT) a->selection=((col^1u)*ACT_PER_COL)+row;
-        else if(a->daysBack && (k==KEY_ENTER||k==' '||(k>='1'&&k<='9'))) read_only(a);
-        else if(k==KEY_ENTER||k==' '||(k>='1'&&k<='9')){
-            unsigned id;
-            if(k==KEY_ENTER||k==' ') id=a->selection;
-            else {
-                unsigned n=(unsigned)(azerty_digit(k)-'1');
-                id = n<ACT_PER_COL ? col*ACT_PER_COL+n : col*ACT_PER_COL+ACT_PER_COL;
+        /* Up/Down move in the column and wrap; Left/Right go to the next or
+         * previous column (and page) and wrap, keeping the row when it
+         * exists. 1-9 and 0 tick rows 1-10 of the cursor's column, whose rows
+         * carry those labels (PicoCalc LPS-113-CHG08b/08c: keys act on the
+         * current page); Enter or Space ticks the cursor's entry. */
+        unsigned n=grid_items(a), rows=grid_rows(n), col, row, len, cols;
+        int dk=azerty_digit(k);
+        if(n==0){ if(k==KEY_ENTER||(dk>='0'&&dk<='9')) say(a,tr(a,"No activities in the list","Aucune activité dans la liste")); }
+        else {
+            if(a->selection>=n) a->selection=0;
+            col=a->selection/rows; row=a->selection%rows;
+            len=grid_column_length(n,rows,col); cols=(n+rows-1)/rows;
+            if(k==KEY_UP) a->selection=col*rows+(row+len-1)%len;
+            else if(k==KEY_DOWN) a->selection=col*rows+(row+1)%len;
+            else if(k==KEY_LEFT||k==KEY_RIGHT){
+                col=(col+(k==KEY_RIGHT?1u:cols-1u))%cols;
+                len=grid_column_length(n,rows,col);
+                a->selection=col*rows+(row<len?row:len-1);
             }
-            if(id<ACTIVITY_COUNT){
-                g_scratch=a->state;
-                g_scratch.today.flags^=(uint16_t)(1u<<id);
-                if(commit(a,&g_scratch)) a->selection=id;
+            else if(a->daysBack && (k==KEY_ENTER||k==' '||(dk>='0'&&dk<='9'))) read_only(a);
+            else if(k==KEY_ENTER||k==' '||(dk>='0'&&dk<='9')){
+                unsigned id=a->selection;
+                if(k!=KEY_ENTER&&k!=' '){
+                    unsigned r=dk=='0'?9u:(unsigned)(dk-'1');
+                    id=r<len ? col*rows+r : n; /* past the column's end: ignored */
+                }
+                if(id<a->state.activityCount){
+                    g_scratch=a->state;
+                    g_scratch.today.flags^=FLAG_MASK(id);
+                    if(commit(a,&g_scratch)) a->selection=id;
+                }
             }
         }
     }else if(a->screen==SCR_WEIGHT){
@@ -566,7 +635,7 @@ void app_key(App *a, int k){
             if(a->state.today.number==0xfffffffful || a->state.xp>0xfffffffful-gain) say(a,tr(a,"Counter limit reached","Limite du compteur atteinte"));
             else if(!valid_date(a->state.today.date)) say(a,tr(a,"Set Date before closing the day","Renseignez Date avant de terminer le jour"));
             else {
-                Date tomorrow;
+                Date tomorrow; unsigned slot=a->state.next;
                 g_scratch=a->state;
                 g_scratch.history[g_scratch.next]=g_scratch.today;
                 g_scratch.next=(uint8_t)((g_scratch.next+1)%HISTORY_LENGTH);
@@ -574,10 +643,17 @@ void app_key(App *a, int k){
                 tomorrow=a->state.today.date;
                 if(!next_date(&tomorrow)){ say(a,tr(a,"Calendar ends on 2099-12-31","Le calendrier s'arrête au 2099-12-31")); app_render(a); return; }
                 if(!a->hw->export_weight_csv(a->hw,&a->state.today)){ say(a,tr(a,"Weight CSV export failed; day remains open","Export CSV poids échoué ; journée reste ouverte")); app_render(a); return; }
-                if(!a->hw->export_ics(a->hw,&a->state.today,a->state.xp+gain,gain,a->state.language)){ say(a,tr(a,"ICS export failed; day remains open","Export ICS échoué ; journée reste ouverte")); app_render(a); return; }
+                if(!a->hw->export_ics(a->hw,&a->state.today,&a->state,a->state.xp+gain,gain,a->state.language)){ say(a,tr(a,"ICS export failed; day remains open","Export ICS échoué ; journée reste ouverte")); app_render(a); return; }
                 g_scratch.xp+=gain; memset(&g_scratch.today,0,sizeof(Day)); g_scratch.today.number=a->state.today.number+1; g_scratch.today.date=tomorrow; g_scratch.today.expected=-1; g_scratch.today.actual=-1;
                 /* LPS-DOS-115-CHG01: XP is still banked in the save for compatibility, never shown. */
-                if(commit(a,&g_scratch)){ jsave_new_day(); if(flush_save(a)) go(a,SCR_REWARD); }
+                /* LPS-DOS-115-CHG05: the closed day keeps its ticked names, frozen
+                 * in catalog order (PicoCalc freezeDayNames); today starts empty. */
+                if(commit(a,&g_scratch)){
+                    day_names_freeze(&a->state,1u+slot,a->state.history[slot].flags);
+                    day_names(0)->count=0;
+                    jsave_new_day();
+                    if(flush_save(a)) go(a,SCR_REWARD);
+                }
             }
         }
     }else if(a->screen==SCR_REWARD && k==KEY_ENTER) go(a,SCR_HOME);
@@ -586,6 +662,7 @@ void app_key(App *a, int k){
 
 void app_render(App *a){
     char b[128]; const Day *day=app_viewed_day(a); char date[16]; int statusRow; unsigned i;
+    refresh_labels(a);
     a->hw->set_palette(a->hw, displayed_palette(a));
     a->hw->clear(a->hw);
     if(valid_date(day->date)) date_text(day->date,date,sizeof(date));
@@ -623,7 +700,7 @@ void app_render(App *a){
         menu[8]=tr(a,"8  Timer","8  Minuteur");
         menu[9]=tr(a,"9  Close the day","9  Terminer le jour");
         field(a,4,1,37, a->daysBack?tr(a,"CLOSED DAY","JOUR TERMINÉ"):tr(a,"TODAY","AUJOURD'HUI"), 0);
-        sprintf(b,tr(a,"%u/%u activities","%u/%u activités"), count_flags(day->flags), ACTIVITY_COUNT);
+        sprintf(b,tr(a,"%u/%u activities","%u/%u activités"), marked_activities(a,day), (unsigned)a->state.activityCount);
         field(a,5,1,37,b,0);
         for(i=0;i<total;i++) field(a,7+(int)i,1,37, menu[first+i], i==a->selection);
         field(a,18,1,37,tr(a,"<- Previous day   -> Current day","<- Jour précédent   -> Jour actuel"),0);
@@ -685,14 +762,35 @@ void app_render(App *a){
         line(a,12,tr(a,"Enter: save / Esc: cancel","Entrée : valider / Échap : annuler"),0);
         line(a,14,tr(a,"Next day is suggested after closing.","Jour suivant proposé après clôture."),0);
     }else if(a->screen==SCR_ACTIVITIES){
-        center_line(a,3,tr(a,"ACTIVITIES","ACTIVITÉS"),0);
-        for(i=0;i<ACTIVITY_COUNT;i++){
-            int col=(i<ACT_PER_COL)?1:41;
-            int row=5+(int)(i%ACT_PER_COL);
-            sprintf(b,"%2u  %-24s [%c]", i+1, tr(a,ACTIVITIES_EN[i],ACTIVITIES_FR[i]), day->flags&(1u<<i)?'x':' ');
-            field(a,row,col,37,b, i==a->selection);
+        unsigned n=grid_items(a), rows=grid_rows(n), sel=a->selection<n?a->selection:0u;
+        unsigned col=sel/rows, first=col/GRID_COLUMNS*GRID_COLUMNS, cols=n?(n+rows-1)/rows:1u, c, r;
+        char cell[GRID_CELL+1], tmp[ACTIVITY_NAME_LENGTH+1];
+        if(cols>GRID_COLUMNS){
+            sprintf(b,tr(a,"ACTIVITIES  %u/%u","ACTIVITÉS  %u/%u"),first/GRID_COLUMNS+1,(cols+GRID_COLUMNS-1)/GRID_COLUMNS);
+            center_line(a,3,b,0);
+        }else center_line(a,3,tr(a,"ACTIVITIES","ACTIVITÉS"),0);
+        if(!n) line(a,GRID_TOP,tr(a,"No activities in the list.","Aucune activité dans la liste."),0);
+        /* Cells are built by hand: sprintf is slow on the 8088. */
+        for(c=0;c<GRID_COLUMNS;c++){
+            unsigned gc=first+c, len=grid_column_length(n,rows,gc);
+            for(r=0;r<len;r++){
+                unsigned id=gc*rows+r, k; const char *name=grid_label(a,id,tmp);
+                int ticked=id<a->state.activityCount ? (int)FLAG_BIT(day->flags,id) : 1;
+                for(k=0;k<GRID_CELL;k++) cell[k]=' ';
+                cell[GRID_CELL]=0;
+                if(gc==col && r<10) cell[0]=(char)(r==9?'0':'1'+r); /* keys label the cursor's column */
+                cell[2]='['; cell[3]=(char)(ticked?'x':' '); cell[4]=']';
+                for(k=0;name[k]&&k<GRID_NAME;k++) cell[6+k]=name[k];
+                a->hw->text(a->hw, GRID_TOP+(int)r, (int)c*(GRID_CELL+1), cell, id==sel);
+            }
         }
-        line(a,22, a->daysBack?tr(a,"<- -> columns   Esc: day menu","<- -> colonnes   Échap : menu du jour"):tr(a,"Enter: toggle  1-9: keys  <- -> columns","Entrée: cocher  1-9: racc.  <- -> colonnes"),0);
+        /* A name longer than its cell is shown whole under the grid. */
+        if(n){
+            const char *name=grid_label(a,sel,tmp);
+            if(strlen(name)>GRID_NAME) line(a,GRID_TOP+(int)rows+1,name,0);
+        }
+        line(a,22, a->daysBack?tr(a,"<- -> columns   Esc: day menu","<- -> colonnes   Échap : menu du jour")
+                              :tr(a,"1-9,0: tick in this column  Enter: tick  <- ->: columns","1-9,0 : cocher dans la colonne  Entrée : cocher  <- -> : colonnes"),0);
     }else if(a->screen==SCR_WEIGHT){
         int32_t expg=0,actg=0; int valid;
         center_line(a,3,tr(a,"WEIGHT TRACKER (kg)","SUIVI DU POIDS (kg)"),0);

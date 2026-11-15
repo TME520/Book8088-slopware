@@ -4,13 +4,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-const char *ACTIVITIES_FR[ACTIVITY_COUNT] = {
+/* The PicoCalc default list (LPS-113-CHG08): the first 16 are the old fixed
+ * list, in the binary saves' bit order; 17-22 were added in v1.13. ids 1-22. */
+const char *ACTIVITIES_FR[DEFAULT_ACTIVITY_COUNT] = {
     "Marche","Régime","Bible","Messe","Travail","Projet","Sieste","Gurumed",
-    "Maladie","Congé","Weekend","Sortie","Jeu","Docteur","Lecture","Shopping"
+    "Maladie","Congé","Weekend","Sortie","Jeu","Docteur","Lecture","Shopping",
+    "Sport","Cuisine","Ménage","Famille","Amis","Méditation"
 };
-const char *ACTIVITIES_EN[ACTIVITY_COUNT] = {
+const char *ACTIVITIES_EN[DEFAULT_ACTIVITY_COUNT] = {
     "Walk","Diet","Bible","Mass","Work","Project","Nap","Gurumed",
-    "Illness","Day off","Weekend","Outing","Gaming","Doctor","Reading","Shopping"
+    "Illness","Day off","Weekend","Outing","Gaming","Doctor","Reading","Shopping",
+    "Sport","Cooking","Chores","Family","Friends","Meditation"
 };
 const Date FIRST_DATE = {2000,1,1};
 const Date LAST_DATE = {2099,12,31};
@@ -18,9 +22,83 @@ const Date DEFAULT_DATE = {2026,9,17};
 
 /* DOS stack is tiny: decode into the far scratch then copy out on success. */
 LpsBuffers *lps_buf;
+DayNames *lps_day_names; /* DAY_SLOTS x 751 bytes, far heap */
 int lps_buffers_init(void){
     if(!lps_buf) lps_buf=(LpsBuffers*)calloc(1,sizeof(LpsBuffers));
-    return lps_buf!=0;
+    if(!lps_day_names) lps_day_names=(DayNames*)calloc(DAY_SLOTS,sizeof(DayNames));
+    return lps_buf!=0 && lps_day_names!=0;
+}
+
+/* ---- Activity catalog (LPS-DOS-115-CHG05, PicoCalc LPS-113-CHG07/CHG08) ---- */
+/* The default catalog in UTF-8, built once from the CP437 literals above. */
+static Activity default_catalog[DEFAULT_ACTIVITY_COUNT];
+static int default_catalog_built;
+static void utf8_of(const char *s, char *out, size_t cap){
+    size_t n=0; char u[3];
+    for(;*s;s++){ size_t k=cp437_to_utf8((unsigned char)*s,u); if(n+k>=cap) break; memcpy(out+n,u,k); n+=k; }
+    out[n]=0;
+}
+void default_activities(State *s){
+    unsigned i;
+    if(!default_catalog_built){
+        for(i=0;i<DEFAULT_ACTIVITY_COUNT;i++){
+            default_catalog[i].id=(uint16_t)(i+1);
+            utf8_of(ACTIVITIES_FR[i],default_catalog[i].fr,ACTIVITY_NAME_LENGTH+1);
+            utf8_of(ACTIVITIES_EN[i],default_catalog[i].en,ACTIVITY_NAME_LENGTH+1);
+        }
+        default_catalog_built=1;
+    }
+    memset(s->activities,0,sizeof(s->activities));
+    memcpy(s->activities,default_catalog,sizeof(default_catalog));
+    s->activityCount=DEFAULT_ACTIVITY_COUNT; s->nextActivityId=DEFAULT_ACTIVITY_COUNT+1;
+}
+const char *activity_stored_name(const Activity *a){ return a->fr[0]?a->fr:a->en; }
+const char *activity_display_name(const Activity *a, int language){
+    if(language==LANG_FR) return a->fr[0]?a->fr:a->en;
+    return a->en[0]?a->en:a->fr;
+}
+unsigned activity_index(const State *s, const char *name){
+    unsigned i;
+    if(!name||!*name) return ACTIVITY_CAPACITY;
+    for(i=0;i<s->activityCount;i++){
+        const char *n=activity_stored_name(&s->activities[i]);
+        if(n[0]==name[0]&&!strcmp(n,name)) return i;
+    }
+    return ACTIVITY_CAPACITY;
+}
+void day_names_clear(void){
+    unsigned i;
+    if(lps_day_names) for(i=0;i<DAY_SLOTS;i++) lps_day_names[i].count=0;
+}
+/* As PicoCalc freezeDayNames: the ticked catalog names, in catalog order. */
+void day_names_freeze(const State *s, unsigned slot, uint32_t flags){
+    DayNames *d=day_names(slot); unsigned i;
+    d->count=0;
+    for(i=0;i<s->activityCount&&d->count<ACTIVITY_CAPACITY;i++) if(FLAG_BIT(flags,i))
+        strcpy(d->names[d->count++],activity_stored_name(&s->activities[i]));
+}
+/* As PicoCalc resolveDayFlags: a day with stored names gets its flags from
+ * them; names the catalog lacks stay as frozen extras (orphans). */
+static void resolve_day(const State *s, Day *day, const DayNames *d){
+    unsigned i, k;
+    if(!d->count) return;
+    day->flags=0;
+    for(i=0;i<d->count;i++) if((k=activity_index(s,d->names[i]))<s->activityCount) day->flags|=FLAG_MASK(k);
+}
+void day_names_resolve(State *s){
+    unsigned i;
+    resolve_day(s,&s->today,day_names(0));
+    for(i=0;i<HISTORY_LENGTH;i++) resolve_day(s,&s->history[i],day_names(1+i));
+}
+unsigned day_orphan_count(const State *s, unsigned slot){
+    const DayNames *d=day_names(slot); unsigned i, n=0;
+    for(i=0;i<d->count;i++) if(activity_index(s,d->names[i])>=s->activityCount) n++;
+    return n;
+}
+const char *day_orphan(const State *s, unsigned slot, unsigned index){
+    const DayNames *d=day_names(slot); unsigned i;
+    for(i=0;i<d->count;i++) if(activity_index(s,d->names[i])>=s->activityCount && index--==0) return d->names[i];
+    return "";
 }
 
 int leap(uint16_t year){ return year%4==0 && (year%100!=0 || year%400==0); }
@@ -51,7 +129,13 @@ int parse_date(const char *text, Date *d){
     *d=t;
     return 1;
 }
-unsigned count_flags(uint16_t flags){ unsigned n=0; for(;flags;flags>>=1) n+=flags&1; return n; }
+/* 16 bits at a time: 32-bit shifts are slow loops on the 8088. */
+unsigned count_flags(uint32_t flags){
+    unsigned n=0, w=(unsigned)(flags&0xffffu), h=(unsigned)(flags>>16);
+    for(;w;w>>=1) n+=w&1u;
+    for(;h;h>>=1) n+=h&1u;
+    return n;
+}
 uint32_t points(const Day *d){ unsigned n=count_flags(d->flags); return n*10u + (n>=3?10u:0u); }
 int parse_weight(const char *s, int32_t *grams){
     uint32_t whole=0, fraction=0; unsigned digits=0, decimals=0;
@@ -131,6 +215,7 @@ void long_date_text(Date d, int language, char *out, size_t n){
 void state_init(State *s){
     unsigned i;
     memset(s,0,sizeof(*s));
+    default_activities(s);
     s->language=LANG_EN; s->palette=PAL_GREEN;
     s->today.number=1; s->today.date=DEFAULT_DATE;
     s->today.expected=-1; s->today.actual=-1;
@@ -150,7 +235,7 @@ static void put_n(Blob *b, uint32_t v, unsigned n){
 static void put_day(Blob *b, const Day *d){
     unsigned i;
     put_n(b,d->date.year,2); put_n(b,d->date.month,1); put_n(b,d->date.day,1);
-    put_n(b,d->number,4); put_n(b,d->flags,2);
+    put_n(b,d->number,4); put_n(b,d->flags&LEGACY_ACTIVITY_MASK,2);
     put_n(b, d->expected<0 ? 0xfffffffful : (uint32_t)d->expected, 4);
     put_n(b, d->actual<0 ? 0xfffffffful : (uint32_t)d->actual, 4);
     for(i=0;i<=NOTE_LENGTH;i++) put_n(b,(uint8_t)d->note[i],1);
@@ -188,6 +273,7 @@ int decode_state(const uint8_t *bytes, size_t size, State *out){
     if(!((version==1&&size==WIRE_V1)||(version==2&&size==WIRE_V2)||(version==3&&size==WIRE_V3)
         ||(version==4&&size==WIRE_V4)||(version==5&&size==WIRE_V5)||(version==6&&size==WIRE_SIZE))) return 0;
     memset(s,0,sizeof(*s));
+    default_activities(s); /* 16 bits per day: the first 16 default activities */
     s->today.expected=s->today.actual=-1;
     for(i=0;i<HISTORY_LENGTH;i++){ s->history[i].expected=-1; s->history[i].actual=-1; }
     s->xp=get_n(bytes,&pos,4); s->next=(uint8_t)get_n(bytes,&pos,1); s->count=(uint8_t)get_n(bytes,&pos,1);
@@ -208,7 +294,7 @@ int decode_state(const uint8_t *bytes, size_t size, State *out){
             wv=get_n(bytes,&pos,4);
             if(wv==0xfffffffful) d->actual=-1; else if(wv==0||wv>999999ul){ valid=0; d->actual=-1; } else d->actual=(int32_t)wv;
             for(j=0;j<=NOTE_LENGTH;j++) d->note[j]=(char)get_n(bytes,&pos,1);
-            valid = valid && d->number>0 && (d->flags & ~ACTIVITY_MASK)==0 && d->note[NOTE_LENGTH]==0
+            valid = valid && d->number>0 && (d->flags & ~(uint32_t)LEGACY_ACTIVITY_MASK)==0 && d->note[NOTE_LENGTH]==0
                 && (d->date.year==0 || valid_date(d->date));
             { int ended=0; for(j=0;j<=NOTE_LENGTH;j++){ char c=d->note[j]; if(!c) ended=1; else if(!ended && (c<32||c>126)) valid=0; } }
         }

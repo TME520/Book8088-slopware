@@ -2,23 +2,28 @@
 #include <stdio.h>
 #include <string.h>
 
-/* LPS-DOS-115-CHG03: program text is CP437 (screen), but the ICS file stays
- * UTF-8 like the PicoCalc's, so bytes 0x80-0xFF are written back as UTF-8.
- * User text (notes) is printable ASCII only - the saves refuse anything else -
- * so it passes through unchanged, as on the PicoCalc. */
-int ics_escape_append(char *dst, size_t cap, size_t *used, const char *text){
+/* LPS-DOS-115-CHG03: program text and notes are CP437 (screen), but the ICS
+ * file stays UTF-8 like the PicoCalc's, so bytes 0x80-0xFF are written back
+ * as UTF-8. Activity names are UTF-8 already (LPS-DOS-115-CHG05) and go
+ * through ics_escape_append_utf8 unchanged. Same escapes as the PicoCalc. */
+static int escape_append(char *dst, size_t cap, size_t *used, const char *text, int utf8){
     size_t u=*used;
     while(*text){
         char c=*text++;
         if(c=='\\'||c==';'||c==','){ if(u+2>=cap) return 0; dst[u++]='\\'; dst[u++]=c; }
         else if(c=='\n'){ if(u+2>=cap) return 0; dst[u++]='\\'; dst[u++]='n'; }
-        else if((unsigned char)c>=0x80){ char b[3]; size_t k,n=cp437_to_utf8((unsigned char)c,b); if(u+n>=cap) return 0; for(k=0;k<n;k++) dst[u++]=b[k]; }
+        else if(!utf8&&(unsigned char)c>=0x80){ char b[3]; size_t k,n=cp437_to_utf8((unsigned char)c,b); if(u+n>=cap) return 0; for(k=0;k<n;k++) dst[u++]=b[k]; }
         else { if(u+1>=cap) return 0; dst[u++]=c; }
     }
     dst[u]=0; *used=u; return 1;
 }
+int ics_escape_append(char *dst, size_t cap, size_t *used, const char *text){ return escape_append(dst,cap,used,text,0); }
+int ics_escape_append_utf8(char *dst, size_t cap, size_t *used, const char *text){ return escape_append(dst,cap,used,text,1); }
 
-int build_ics(const Day *day, uint32_t totalXp, uint32_t dayXp, int language, char *out, size_t cap){
+/* Activities as PicoCalc eachExportedActivity for a day just closed (its
+ * names frozen from the flags): ticked catalog entries, in catalog order, by
+ * their name in the export language. */
+int build_ics(const Day *day, const State *s, uint32_t totalXp, uint32_t dayXp, int language, char *out, size_t cap){
     char ymd[16], nxt[16], tmp[96];
     Date tomorrow; size_t u=0; int en=language!=LANG_FR; unsigned i; int first;
     if(!valid_date(day->date)) return 0;
@@ -31,9 +36,9 @@ int build_ics(const Day *day, uint32_t totalXp, uint32_t dayXp, int language, ch
     u+=sprintf(out+u,"SUMMARY:LPS Companion\r\nDESCRIPTION:");
     if(!ics_escape_append(out,cap,&u, en?"Activities: ":"Activités: ")) return 0;
     first=1;
-    for(i=0;i<ACTIVITY_COUNT;i++) if(day->flags&(1u<<i)){
+    for(i=0;i<s->activityCount;i++) if(FLAG_BIT(day->flags,i)){
         if(!first){ if(u+2>=cap) return 0; out[u++]=','; out[u++]=' '; out[u]=0; }
-        if(!ics_escape_append(out,cap,&u, en?ACTIVITIES_EN[i]:ACTIVITIES_FR[i])) return 0;
+        if(!ics_escape_append_utf8(out,cap,&u, activity_display_name(&s->activities[i],language))) return 0;
         first=0;
     }
     if(first){ if(u+4>=cap) return 0; memcpy(out+u,"none",4); u+=4; out[u]=0; }
@@ -65,10 +70,10 @@ int build_ics(const Day *day, uint32_t totalXp, uint32_t dayXp, int language, ch
     return 1;
 }
 
-int write_ics_file(const char *export_dir, const Day *day, uint32_t totalXp, uint32_t dayXp, int language){
+int write_ics_file(const char *export_dir, const Day *day, const State *s, uint32_t totalXp, uint32_t dayXp, int language){
     /* Far-heap buffer (lps_buffers_init), not the 4 KB DOS stack. */
     char *buf=lps_buf->ics; char path[200]; FILE *f;
-    if(!build_ics(day,totalXp,dayXp,language,buf,sizeof(lps_buf->ics))) return 0;
+    if(!build_ics(day,s,totalXp,dayXp,language,buf,sizeof(lps_buf->ics))) return 0;
     /* LPS-DOS-115-CHG02c: 8.3 name YYYYMMDD.ICS. The PicoCalc's long
      * YYYY-MM-DD_LPS-Companion.ics was cut by DOS to YYYY-MM-.ICS, so every
      * day of a month overwrote the same file. The content is unchanged. */

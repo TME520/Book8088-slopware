@@ -85,9 +85,9 @@ static int h_save(Platform *p, const State *s){
     if(!save_store(lps_data_dir(),s,&h->generation,&h->active)){ h->write_fault=1; return 0; }
     return 1;
 }
-static int h_ics(Platform *p, const Day *day, uint32_t totalXp, uint32_t dayXp, int language){
+static int h_ics(Platform *p, const Day *day, const State *s, uint32_t totalXp, uint32_t dayXp, int language){
     char d[160]; (void)p; lps_ensure_dirs(); lps_path_join(d,sizeof(d),lps_data_dir(),"EXPORT");
-    return write_ics_file(d,day,totalXp,dayXp,language);
+    return write_ics_file(d,day,s,totalXp,dayXp,language);
 }
 static int h_csv(Platform *p, const Day *day){
     char d[160]; (void)p; lps_ensure_dirs(); lps_path_join(d,sizeof(d),lps_data_dir(),"WEIGHTS");
@@ -110,3 +110,4 @@ void plat_host_dump(Platform *p, FILE *out){
     for(r=0;r<ROWS;r++){ put_row_utf8(out,h->rows[r]); fputc('\n',out); }
 }
 const char *plat_host_row(Platform *p, int row){ return H(p)->rows[row]; }
+int plat_host_rev(Platform *p, int row, int col){ return H(p)->rev[row][col]; }

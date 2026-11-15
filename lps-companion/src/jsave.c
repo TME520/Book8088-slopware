@@ -15,16 +15,17 @@
  *   DAY {"date":"YYYY-MM-DD"|null,"number":N,"activities":["Marche",...],
  *        "expected":grams|null,"actual":grams|null,"note":"..."}
  *
- * The DOS port has no activity editor, Meal Planner or home menu settings, so
- * what it does not use is kept here, beside the State, and written back as
- * read: the activity catalog, the names a day ticks that are not among the 16
- * DOS activities (PicoCalc extras, custom or renamed ones), the Meal Planner
- * deck ("meals") and the hidden home entries ("homeHidden"). Unknown keys are
- * skipped, as on the PicoCalc.
+ * The activity catalog lives in the State and each day's stored names in
+ * lps_day_names (LPS-DOS-115-CHG05): a day's flags are resolved from its
+ * names against the catalog after the read, as on the PicoCalc, and names the
+ * catalog lacks stay as frozen extras. The DOS port has no Meal Planner or
+ * home menu settings yet, so the Meal Planner deck ("meals") and the hidden
+ * home entries ("homeHidden") are kept here and written back as read.
+ * Unknown keys are skipped, as on the PicoCalc.
  *
- * Text in the file is UTF-8; the State holds CP437 (LPS-DOS-115-CHG03). Notes,
- * task names and reminder texts are converted at this boundary; a character
- * CP437 lacks becomes '?'. Activity names stay UTF-8 here.
+ * Text in the file is UTF-8; the State holds CP437 for notes, task names and
+ * reminder texts (LPS-DOS-115-CHG03), converted at this boundary; a character
+ * CP437 lacks becomes '?'. Activity names stay UTF-8 in the State.
  *
  * 8088: the whole file is read into one far block, ended by a NUL, and
  * parsed in one pass by a small pull tokenizer (no tree, no recursion, a few
@@ -38,17 +39,15 @@
 #include <string.h>
 
 #define SCHEMA_VERSION 2
-#define CATALOG_CAPACITY 30   /* PicoCalc ActivityCapacity */
-#define NAME_LENGTH 24        /* PicoCalc ActivityNameLength (UTF-8 bytes) */
-#define DAY_NAMES 30          /* ticked names per day */
+#define CATALOG_CAPACITY ACTIVITY_CAPACITY
+#define NAME_LENGTH ACTIVITY_NAME_LENGTH
+#define DAY_NAMES ACTIVITY_CAPACITY /* stored names per day */
 #define TEXT_CAPACITY 128     /* PicoCalc SaveTextCapacity */
 #define SAVE_MAX_BYTES 65000L /* one far block; the PicoCalc accepts 65536 */
 #define MEAL_CARDS 16
 #define HOME_ENTRIES 9
 #define HOME_LOCKED ((1u<<0)|(1u<<(HOME_ENTRIES-1))) /* Date, Close the day */
-#define DAY_SLOTS (HISTORY_LENGTH+1)                /* today + history */
 #define WRITE_CHUNK 512
-#define DEFAULT_ACTIVITIES (ACTIVITY_COUNT+6)
 /* Hot tables in DGROUP (near, zero-filled at start-up) rather than behind a far pointer. */
 #ifdef __WATCOMC__
 #define NEARDATA __near
@@ -56,21 +55,10 @@
 #define NEARDATA
 #endif
 
-typedef struct { uint16_t id; char fr[NAME_LENGTH+1], en[NAME_LENGTH+1]; } CatalogEntry;
-/* The names a day ticks, as read, keyed by the day number (the date can
- * still be edited on DOS). The 16 DOS activities among them also live in
- * Day.flags, which wins; the list keeps the others and the PicoCalc order. */
-typedef struct { uint32_t number; uint8_t count, used; char names[DAY_NAMES][NAME_LENGTH+1]; } DayNames;
 typedef struct {
-    char known[ACTIVITY_COUNT][NAME_LENGTH+1]; /* DOS activities, French, UTF-8 */
-    CatalogEntry defaults[DEFAULT_ACTIVITIES]; /* PicoCalc default catalog, UTF-8 */
-    uint8_t catalogCount;
-    uint16_t nextId;
-    CatalogEntry catalog[CATALOG_CAPACITY];
     uint8_t mealCount;
     uint8_t meals[MEAL_CARDS];
     uint16_t homeHidden;
-    DayNames days[DAY_SLOTS];
 } SaveExtras;
 
 static SaveExtras *X;
@@ -80,47 +68,19 @@ static const char *const LANGUAGES[2]={"en","fr"};
 static const char *const PALETTES[5]={"red","green","blue","orange","pink"};
 static const char *const STATUSES[3]={"todo","doing","done"};
 static const char *const HOME_IDS[HOME_ENTRIES]={"date","activities","weight","kanban","rosary","daily_review","reminders","timer","close_day"};
-/* PicoCalc default catalog entries 17-22 (the first 16 are the DOS list). */
-static const char *const MORE_FR[6]={"Sport","Cuisine","Ménage","Famille","Amis","Méditation"};
-static const char *const MORE_EN[6]={"Sport","Cooking","Chores","Family","Friends","Meditation"};
-
-/* CP437 literal (the build rewrote it) back to UTF-8. */
-static void utf8_of(const char *s, char *out, size_t cap){
-    size_t n=0; char u[3];
-    for(;*s;s++){ size_t k=cp437_to_utf8((unsigned char)*s,u); if(n+k>=cap) break; memcpy(out+n,u,k); n+=k; }
-    out[n]=0;
-}
 void jsave_reset(void){
-    unsigned i;
     if(!jsave_init()) return;
-    memset(X->catalog,0,sizeof(X->catalog));
-    memcpy(X->catalog,X->defaults,sizeof(X->defaults));
-    X->catalogCount=DEFAULT_ACTIVITIES; X->nextId=DEFAULT_ACTIVITIES+1;
     X->mealCount=0; X->homeHidden=0;
-    for(i=0;i<DAY_SLOTS;i++){ X->days[i].number=0; X->days[i].count=0; }
+    day_names_clear();
 }
 int jsave_init(void){
-    unsigned i;
     if(X) return 1;
+    if(!lps_buffers_init()) return 0;
     X=(SaveExtras*)calloc(1,sizeof(SaveExtras));
-    if(!X) return 0;
-    for(i=0;i<ACTIVITY_COUNT;i++) utf8_of(ACTIVITIES_FR[i],X->known[i],NAME_LENGTH+1);
-    for(i=0;i<DEFAULT_ACTIVITIES;i++){
-        X->defaults[i].id=(uint16_t)(i+1);
-        utf8_of(i<ACTIVITY_COUNT?ACTIVITIES_FR[i]:MORE_FR[i-ACTIVITY_COUNT],X->defaults[i].fr,NAME_LENGTH+1);
-        utf8_of(i<ACTIVITY_COUNT?ACTIVITIES_EN[i]:MORE_EN[i-ACTIVITY_COUNT],X->defaults[i].en,NAME_LENGTH+1);
-    }
-    jsave_reset();
-    return 1;
+    return X!=0;
 }
 /* Closing the day deals a new Meal Planner deck, as on the PicoCalc. */
 void jsave_new_day(void){ if(X) X->mealCount=0; }
-
-static int known_index(const char *name){
-    unsigned i;
-    for(i=0;i<ACTIVITY_COUNT;i++) if(X->known[i][0]==name[0]&&!strcmp(X->known[i],name)) return (int)i;
-    return -1;
-}
 
 /* ---- Reader ------------------------------------------------------------ */
 enum { T_END, T_ERROR, T_OBJ, T_OBJ_END, T_ARR, T_ARR_END, T_COLON, T_COMMA, T_STRING, T_NUMBER, T_TRUE, T_FALSE, T_NULL };
@@ -276,21 +236,7 @@ static int read_text(unsigned cap, int required){
     return 1;
 }
 /* J.text (UTF-8) to CP437; the result is never longer. */
-static void text_to_cp437(char *out){
-    const unsigned char *s=(const unsigned char*)J.text, *end=s+J.len; char *o=out;
-    while(s<end){
-        unsigned char c=*s; unsigned long cp; unsigned need,i; int ok=1, m;
-        if(c<0x80){ *o++=(char)c; s++; continue; }
-        if((c&0xe0)==0xc0){ cp=c&0x1f; need=1; } else if((c&0xf0)==0xe0){ cp=c&0x0f; need=2; }
-        else if((c&0xf8)==0xf0){ cp=c&0x07; need=3; } else { *o++='?'; s++; continue; }
-        for(i=1;i<=need;i++){ if(s+i>=end||(s[i]&0xc0)!=0x80){ ok=0; break; } cp=(cp<<6)|(s[i]&0x3f); }
-        if(!ok){ *o++='?'; s++; continue; }
-        s+=need+1;
-        m=unicode_to_cp437(cp);
-        *o++=(char)(m>=0x80 ? m : '?');
-    }
-    *o=0;
-}
+static void text_to_cp437(char *out){ utf8_to_cp437(J.text,J.len,out); }
 static int read_date(Date *d, int allow_null){
     int t=next();
     if(t==T_NULL&&allow_null){ d->year=0; d->month=0; d->day=0; return 1; }
@@ -317,14 +263,11 @@ static int read_day(int first, Day *d, DayNames *e){
         if(!strcmp(key,"date")){ if(!read_date(&d->date,1)) return 0; }
         else if(!strcmp(key,"number")){ if(!read_number(1,0xfffffffful)) return 0; d->number=J.number; }
         else if(!strcmp(key,"activities")){
-            int ast=1; unsigned named=0;
+            int ast=1;
             if(next()!=T_ARR) return 0;
-            d->flags=0; e->count=0;
+            d->flags=0; e->count=0; /* resolved against the catalog after the read */
             while((r=element(&ast,&t))>0){
-                int k;
-                if(t!=T_STRING||J.overflow||J.len>NAME_LENGTH||named>=DAY_NAMES) return 0;
-                named++;
-                if((k=known_index(J.text))>=0) d->flags|=(uint16_t)(1u<<k);
+                if(t!=T_STRING||J.overflow||J.len>NAME_LENGTH||e->count>=DAY_NAMES) return 0;
                 memcpy(e->names[e->count++],J.text,J.len+1);
             }
             if(r<0) return 0;
@@ -334,17 +277,16 @@ static int read_day(int first, Day *d, DayNames *e){
         else if(!strcmp(key,"note")){ if(!read_text(NOTE_LENGTH+1,0)) return 0; text_to_cp437(d->note); }
         else if(!skip(next())) return 0;
     }
-    e->number=d->number;
     return r==0;
 }
-static int read_catalog(void){
+static int read_catalog(State *s){
     int st=1, r, t; char key[24];
     if(next()!=T_ARR) return 0;
-    memset(X->catalog,0,sizeof(X->catalog)); X->catalogCount=0; X->nextId=1;
+    memset(s->activities,0,sizeof(s->activities)); s->activityCount=0; s->nextActivityId=1;
     while((r=element(&st,&t))>0){
-        CatalogEntry *a; int ms=1; unsigned i;
-        if(t!=T_OBJ||X->catalogCount>=CATALOG_CAPACITY) return 0;
-        a=&X->catalog[X->catalogCount];
+        Activity *a; int ms=1; unsigned i;
+        if(t!=T_OBJ||s->activityCount>=CATALOG_CAPACITY) return 0;
+        a=&s->activities[s->activityCount];
         while((r=member(&ms,key))>0){
             if(!strcmp(key,"id")){ if(!read_number(1,65535ul)) return 0; a->id=(uint16_t)J.number; }
             else if(!strcmp(key,"fr")){ if(!read_text(NAME_LENGTH+1,0)) return 0; memcpy(a->fr,J.text,J.len+1); }
@@ -352,10 +294,10 @@ static int read_catalog(void){
             else if(!skip(next())) return 0;
         }
         if(r<0||(!a->fr[0]&&!a->en[0])) return 0;
-        if(!a->id) a->id=X->nextId;
-        for(i=0;i<X->catalogCount;i++) if(X->catalog[i].id==a->id) return 0;
-        if(a->id>=X->nextId) X->nextId=(uint16_t)(a->id+1);
-        X->catalogCount++;
+        if(!a->id) a->id=s->nextActivityId;
+        for(i=0;i<s->activityCount;i++) if(s->activities[i].id==a->id) return 0;
+        if(a->id>=s->nextActivityId) s->nextActivityId=(uint16_t)(a->id+1);
+        s->activityCount++;
     }
     return r==0;
 }
@@ -366,14 +308,14 @@ static int read_state(State *s){
         if(!strcmp(key,"language")){ if(!read_choice(LANGUAGES,2,&s->language)) return 0; }
         else if(!strcmp(key,"palette")){ if(!read_choice(PALETTES,5,&s->palette)) return 0; }
         else if(!strcmp(key,"xp")){ if(!read_number(0,0xfffffffful)) return 0; s->xp=J.number; }
-        else if(!strcmp(key,"activities")){ if(!read_catalog()) return 0; }
-        else if(!strcmp(key,"today")){ if(!read_day(next(),&s->today,&X->days[0])) return 0; }
+        else if(!strcmp(key,"activities")){ if(!read_catalog(s)) return 0; }
+        else if(!strcmp(key,"today")){ if(!read_day(next(),&s->today,day_names(0))) return 0; }
         else if(!strcmp(key,"history")){
             int ast=1;
             if(next()!=T_ARR) return 0;
             s->count=0;
             while((r=element(&ast,&t))>0){
-                if(s->count>=HISTORY_LENGTH||!read_day(t,&s->history[s->count],&X->days[1+s->count])) return 0;
+                if(s->count>=HISTORY_LENGTH||!read_day(t,&s->history[s->count],day_names(1+s->count))) return 0;
                 s->count++;
             }
             s->next=(uint8_t)(s->count%HISTORY_LENGTH);
@@ -449,7 +391,9 @@ static int read_state(State *s){
         }
         else if(!skip(next())) return 0;
     }
-    return r==0;
+    if(r!=0) return 0;
+    day_names_resolve(s); /* the catalog may come after the days */
+    return 1;
 }
 static enum SaveCheck parse(const unsigned char *buf, size_t size, State *out, uint32_t *generation, uint32_t *checksum){
     char key[24]; int st=1, r=-1, formatOk=0, versionSeen=0, unsupported=0, generationSeen=0, stateSeen=0, crcSeen=0, parsed;
@@ -611,39 +555,19 @@ static void date(Date d){
     b[8]='-'; b[9]=(char)('0'+d.day/10u); b[10]=(char)('0'+d.day%10u); b[11]='"'; b[12]=0;
     raw(b);
 }
-static const char *stored_name(const CatalogEntry *a){ return a->fr[0]?a->fr:a->en; }
-static int in_catalog(const char *name){
-    unsigned i; for(i=0;i<X->catalogCount;i++) if(!strcmp(stored_name(&X->catalog[i]),name)) return 1;
-    return 0;
-}
-static int has_name(const DayNames *e, const char *name){
-    unsigned i; for(i=0;i<e->count;i++) if(!strcmp(e->names[i],name)) return 1;
-    return 0;
-}
 static void emit_name(const char *name, unsigned *n){
-    if(*n>=DAY_NAMES) return;
+    if(*n>=DAY_NAMES) return; /* the PicoCalc reader takes 30 names a day */
     if((*n)++) put(',');
     text(name);
 }
-/* As the PicoCalc writes them: ticked names in catalog order, then the names
- * the catalog lacks in the order they were read, then new DOS ticks the
- * catalog lacks. A DOS activity is written only while its flag is set. */
-static void write_day(const Day *d){
-    DayNames *e=0; unsigned i, n=0; uint16_t in_cat=0, listed=0;
-    for(i=0;i<DAY_SLOTS;i++) if(!X->days[i].used&&X->days[i].number==d->number){ e=&X->days[i]; e->used=1; break; }
+/* As PicoCalc writeDay: the ticked catalog names in catalog order, then the
+ * stored names the catalog lacks, in the order they were read. */
+static void write_day(const State *s, const Day *d, unsigned slot){
+    const DayNames *e=day_names(slot); unsigned i, n=0;
     put('{'); key("date"); date(d->date); put(','); key("number"); number(d->number);
     put(','); key("activities"); put('[');
-    for(i=0;i<X->catalogCount;i++){
-        const char *name=stored_name(&X->catalog[i]); int k=known_index(name);
-        if(k>=0){ in_cat|=(uint16_t)(1u<<k); if(d->flags&(1u<<k)) emit_name(name,&n); }
-        else if(e&&has_name(e,name)) emit_name(name,&n);
-    }
-    if(e) for(i=0;i<e->count;i++) if(!in_catalog(e->names[i])){
-        int k=known_index(e->names[i]);
-        if(k<0) emit_name(e->names[i],&n);
-        else { listed|=(uint16_t)(1u<<k); if(d->flags&(1u<<k)) emit_name(e->names[i],&n); }
-    }
-    for(i=0;i<ACTIVITY_COUNT;i++) if((d->flags&(1u<<i))&&!((in_cat|listed)&(1u<<i))) emit_name(X->known[i],&n);
+    for(i=0;i<s->activityCount;i++) if(FLAG_BIT(d->flags,i)) emit_name(activity_stored_name(&s->activities[i]),&n);
+    for(i=0;i<e->count;i++) if(activity_index(s,e->names[i])>=s->activityCount) emit_name(e->names[i],&n);
     raw("],"); key("expected"); weight(d->expected); put(','); key("actual"); weight(d->actual);
     put(','); key("note"); text_cp437(d->note,NOTE_LENGTH); put('}');
 }
@@ -653,23 +577,23 @@ int jsave_write(const char *path, const State *s, uint32_t generation, uint32_t 
     W.f=fopen(path,"wb");
     if(!W.f) return 0;
     W.used=0; W.crc=0xfffffffful; W.ok=1;
-    for(i=0;i<DAY_SLOTS;i++) X->days[i].used=0;
     put('{'); key("format"); text("lps-companion"); put(','); key("version"); number(SCHEMA_VERSION);
     put(','); key("generation"); number(generation); raw(",\n");
     key("state"); put('{'); key("language"); text(LANGUAGES[s->language&1]);
     put(','); key("palette"); text(PALETTES[s->palette<5?s->palette:PAL_GREEN]); put(','); key("xp"); number(s->xp);
     raw(",\n"); key("activities"); put('[');
-    for(i=0;i<X->catalogCount;i++){
+    for(i=0;i<s->activityCount;i++){
         if(i) put(',');
-        raw("\n{"); key("id"); number(X->catalog[i].id);
-        put(','); key("fr"); text(X->catalog[i].fr);
-        put(','); key("en"); text(X->catalog[i].en); put('}');
+        raw("\n{"); key("id"); number(s->activities[i].id);
+        put(','); key("fr"); text(s->activities[i].fr);
+        put(','); key("en"); text(s->activities[i].en); put('}');
     }
-    raw("],\n"); key("today"); write_day(&s->today);
+    raw("],\n"); key("today"); write_day(s,&s->today,0);
     raw(",\n"); key("history"); put('[');
     for(i=0;i<s->count;i++){
+        unsigned ring=(s->next+HISTORY_LENGTH-s->count+i)%HISTORY_LENGTH;
         if(i) put(',');
-        put('\n'); write_day(&s->history[(s->next+HISTORY_LENGTH-s->count+i)%HISTORY_LENGTH]);
+        put('\n'); write_day(s,&s->history[ring],1+ring);
     }
     raw("],\n"); key("kanban"); put('[');
     for(i=0;i<s->taskCount;i++){

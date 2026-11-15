@@ -10,8 +10,9 @@ typedef struct {
     Platform iface;
     char cells[ROWS][COLUMNS+1];
     unsigned char rev[ROWS][COLUMNS];
-    unsigned char sh_ch[ROWS][COLUMNS];
-    unsigned char sh_at[ROWS][COLUMNS];
+    char sh_ch[ROWS][COLUMNS];          /* last frame copied to VRAM */
+    unsigned char sh_rev[ROWS][COLUMNS];
+    int sh_palette;
     int painted; /* 0 until the first frame is copied to VRAM */
     int palette;
     uint32_t generation;
@@ -138,14 +139,15 @@ static void dos_clear(Platform *p){
     }
 }
 static void dos_text(Platform *p, int row, int col, const char *s, int reverse){
-    DosPlat *d=self_of(p); int c=col;
+    DosPlat *d=self_of(p); size_t n;
     if(row<0||row>=ROWS) return;
-    if(c<0) c=0;
-    while(*s && c<COLUMNS){
-        d->cells[row][c]=*s++;
-        d->rev[row][c]=(unsigned char)(reverse?1:0);
-        c++;
-    }
+    if(col<0) col=0;
+    if(col>=COLUMNS) return;
+    /* LPS-DOS-115-CHG05: block copies (rep movsb), ~10x faster than a
+     * cell-by-cell loop on the 8088. */
+    n=strlen(s); if(n>(size_t)(COLUMNS-col)) n=(size_t)(COLUMNS-col);
+    memcpy(&d->cells[row][col],s,n);
+    memset(&d->rev[row][col],reverse?1:0,n);
 }
 static void dos_alert(Platform *p, int row, int col, const char *s){
     char bar[COLUMNS+1]; int n,i;
@@ -205,26 +207,28 @@ static void present_bios(DosPlat *d){
     }
 }
 
-/* Write only cells whose character or attribute changed. A full clear each
- * key flickers on a 4.77 MHz 8088. */
+/* Write only the rows that changed since the last frame. A full clear each
+ * key flickers on a 4.77 MHz 8088. LPS-DOS-115-CHG05: rows are compared with
+ * memcmp (rep cmpsb) instead of cell by cell, which cost ~370 ms per key at
+ * 8088 speed; a changed row is rewritten whole. */
 static void present_vram(DosPlat *d){
     int r,c;
+    unsigned char normal=attr_for(d,0), reverse=attr_for(d,1);
 #if defined(__WATCOMC__)
     unsigned char far *vid = (unsigned char far *)MK_FP(d->video_seg, 0);
 #else
     unsigned char *vid = (unsigned char*)((unsigned long)d->video_seg << 4);
 #endif
-    for(r=0;r<ROWS;r++){
+    if(d->sh_palette!=d->palette){ d->painted=0; d->sh_palette=d->palette; }
+    for(r=0;r<ROWS;r++,vid+=COLUMNS*2){
+        const char *ch=d->cells[r]; const unsigned char *rev=d->rev[r];
+        if(d->painted && memcmp(d->sh_ch[r],ch,COLUMNS)==0 && memcmp(d->sh_rev[r],rev,COLUMNS)==0) continue;
         for(c=0;c<COLUMNS;c++){
-            char ch = d->cells[r][c];
-            unsigned char attr = attr_for(d, d->rev[r][c]);
-            if(!d->painted || d->sh_ch[r][c]!=(unsigned char)ch || d->sh_at[r][c]!=attr){
-                vid[(r*COLUMNS+c)*2]=(unsigned char)ch;
-                vid[(r*COLUMNS+c)*2+1]=attr;
-                d->sh_ch[r][c]=(unsigned char)ch;
-                d->sh_at[r][c]=attr;
-            }
+            vid[c*2]=(unsigned char)ch[c];
+            vid[c*2+1]=rev[c]?reverse:normal;
         }
+        memcpy(d->sh_ch[r],ch,COLUMNS);
+        memcpy(d->sh_rev[r],rev,COLUMNS);
     }
     d->painted=1;
 }
@@ -251,12 +255,12 @@ static int dos_save(Platform *p, const State *s){
     if(!save_store(lps_data_dir(),s,&d->generation,&d->active)){ d->write_fault=1; return 0; }
     return 1;
 }
-static int dos_export_ics(Platform *p, const Day *day, uint32_t totalXp, uint32_t dayXp, int language){
+static int dos_export_ics(Platform *p, const Day *day, const State *s, uint32_t totalXp, uint32_t dayXp, int language){
     char export_dir[160];
     (void)p;
     lps_ensure_dirs();
     lps_path_join(export_dir,sizeof(export_dir),lps_data_dir(),"EXPORT");
-    return write_ics_file(export_dir, day, totalXp, dayXp, language);
+    return write_ics_file(export_dir, day, s, totalXp, dayXp, language);
 }
 static int dos_export_csv(Platform *p, const Day *day){
     char weights_dir[160];

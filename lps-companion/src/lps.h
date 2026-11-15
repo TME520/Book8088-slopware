@@ -23,14 +23,23 @@ typedef uint64_t lps_tick_t;
 #define REMINDER_CAPACITY 3
 #define REMINDER_TEXT_LENGTH 32
 #define BLOB_CAPACITY 4700
-#define ACTIVITY_COUNT 16
-#define PAGE_SIZE 10
-#define PAGE_COUNT 2
-#define ACTIVITY_MASK 0xFFFFu
+/* Activities (LPS-DOS-115-CHG05, PicoCalc LPS-113-CHG07/CHG08): a catalog of
+ * up to 30 entries, read from the JSON save; 22 by default. Day.flags holds
+ * one bit per catalog index. The old binary saves hold 16 bits: the first 16
+ * default activities, in the same order. */
+#define ACTIVITY_CAPACITY 30
+#define ACTIVITY_NAME_LENGTH 24     /* UTF-8 bytes, as on the PicoCalc */
+#define DEFAULT_ACTIVITY_COUNT 22
+#define LEGACY_ACTIVITY_COUNT 16
+#define LEGACY_ACTIVITY_MASK 0xFFFFu
+#define DAY_SLOTS (HISTORY_LENGTH+1) /* today + history, for the frozen day names */
+/* Bit i of a 32-bit flag word, with 16-bit shifts only (32-bit shifts by a
+ * variable count are slow loops on the 8088). */
+#define FLAG_BIT(f,i) ((i)<16 ? (((unsigned)((f)&0xffffu)>>(i))&1u) : (((unsigned)((f)>>16)>>((i)-16))&1u))
+#define FLAG_MASK(i) ((i)<16 ? (uint32_t)(1u<<(i)) : ((uint32_t)(1u<<((i)-16)))<<16)
 /* Book 8088 text mode is 80x25. One width drives every screen. */
 #define COLUMNS 80
 #define ROWS 25
-#define ACT_PER_COL 8
 
 #define KEY_ENTER 13
 #define KEY_BACKSPACE 8
@@ -78,11 +87,18 @@ typedef struct { uint16_t year; uint8_t month, day; } Date;
 typedef struct {
     Date date;
     uint32_t number;
-    uint16_t flags;
+    uint32_t flags; /* bit i = catalog entry i ticked */
     int32_t expected, actual; /* grams; -1 missing */
     char note[NOTE_LENGTH + 1];
 } Day;
 typedef struct { uint8_t status; char name[TASK_NAME_LENGTH + 1]; } Task;
+/* One catalog entry. Names are UTF-8, as in the save; the screen shows them
+ * through utf8_to_cp437. The French name (or the English one when French is
+ * empty) is the identity a day stores. */
+typedef struct { uint16_t id; char fr[ACTIVITY_NAME_LENGTH + 1], en[ACTIVITY_NAME_LENGTH + 1]; } Activity;
+/* The names a day stores in the save ("activities":[...]), UTF-8, as read or
+ * frozen when the day was closed. count 0: none stored (the flags tell). */
+typedef struct { uint8_t count; char names[ACTIVITY_CAPACITY][ACTIVITY_NAME_LENGTH + 1]; } DayNames;
 typedef struct { Date from; uint16_t duration; char text[REMINDER_TEXT_LENGTH + 1]; } Reminder;
 typedef struct {
     uint8_t language;
@@ -95,6 +111,9 @@ typedef struct {
     Task tasks[TASK_CAPACITY];
     uint8_t reminderCount;
     Reminder reminders[REMINDER_CAPACITY];
+    uint8_t activityCount;
+    uint16_t nextActivityId;
+    Activity activities[ACTIVITY_CAPACITY];
 } State;
 typedef struct { uint8_t bytes[BLOB_CAPACITY]; size_t size; } Blob;
 
@@ -109,13 +128,13 @@ struct Platform {
     int  (*battery_low)(Platform *self);
     enum LoadResult (*load)(Platform *self, State *out); /* out is set only on LOAD_OK / LOAD_MIGRATED */
     int  (*save)(Platform *self, const State *s);
-    int  (*export_ics)(Platform *self, const Day *day, uint32_t totalXp, uint32_t dayXp, int language);
+    int  (*export_ics)(Platform *self, const Day *day, const State *s, uint32_t totalXp, uint32_t dayXp, int language);
     int  (*export_weight_csv)(Platform *self, const Day *day);
     void *user;
 };
 
-extern const char *ACTIVITIES_FR[ACTIVITY_COUNT];
-extern const char *ACTIVITIES_EN[ACTIVITY_COUNT];
+extern const char *ACTIVITIES_FR[DEFAULT_ACTIVITY_COUNT]; /* CP437 (build-time literals) */
+extern const char *ACTIVITIES_EN[DEFAULT_ACTIVITY_COUNT];
 extern const Date FIRST_DATE, LAST_DATE, DEFAULT_DATE;
 
 int leap(uint16_t year);
@@ -124,7 +143,7 @@ int valid_date(Date d);
 int next_date(Date *d);
 void date_text(Date d, char *out, size_t n);
 int parse_date(const char *text, Date *d);
-unsigned count_flags(uint16_t flags);
+unsigned count_flags(uint32_t flags);
 uint32_t points(const Day *d);
 int parse_weight(const char *s, int32_t *grams);
 void weight_text(int32_t grams, char *out, size_t n);
@@ -132,6 +151,7 @@ uint32_t crc32(const uint8_t *p, size_t n);
 uint32_t crc32_update(uint32_t c, const uint8_t *p, size_t n); /* running: start 0xffffffff, invert at the end */
 /* cp437.c (LPS-DOS-115-CHG03): screen text is CP437, files are UTF-8. */
 size_t cp437_to_utf8(unsigned char c, char *out); /* out: up to 3 bytes */
+size_t utf8_to_cp437(const char *in, size_t len, char *out); /* out: up to len+1 bytes; '?' for what CP437 lacks */
 int unicode_to_cp437(unsigned long cp);            /* -1 if CP437 lacks it */
 int cp437_text_byte(unsigned char c);              /* printable ASCII or CP437 letter */
 /* wrap.c (LPS-DOS-115-CHG03c): word wrap. wrap_line sets *len to the cells of
@@ -143,7 +163,21 @@ unsigned wrap_count(const char *text, unsigned width);
 void encode_state(const State *s, Blob *b); /* binary format 6: only the tests still write it */
 #endif
 int decode_state(const uint8_t *bytes, size_t size, State *out);
-void state_init(State *s);
+void state_init(State *s); /* includes the default catalog of 22 */
+/* Activity catalog (state.c, LPS-DOS-115-CHG05). */
+void default_activities(State *s);
+const char *activity_stored_name(const Activity *a);           /* identity, UTF-8 */
+const char *activity_display_name(const Activity *a, int language); /* UTF-8 */
+unsigned activity_index(const State *s, const char *name);     /* ACTIVITY_CAPACITY if absent */
+/* Frozen day names, outside the State so the State stays small to copy.
+ * Slot 0 is today, slot 1+i is history[i] (ring index). */
+extern DayNames *lps_day_names;
+#define day_names(slot) (&lps_day_names[slot])
+void day_names_clear(void);
+void day_names_freeze(const State *s, unsigned slot, uint32_t flags); /* ticked catalog names, catalog order */
+void day_names_resolve(State *s); /* each day's flags from its stored names */
+unsigned day_orphan_count(const State *s, unsigned slot);              /* stored names the catalog lacks */
+const char *day_orphan(const State *s, unsigned slot, unsigned index);
 /* Large working buffers (LPS-DOS-115-CHG03b). One block allocated at start-up
  * from the far heap (large model), so they sit outside DGROUP and add no
  * zero-filled bytes to LPSCOMP.EXE. lps_buffers_init() is idempotent. */
@@ -155,7 +189,7 @@ typedef struct {
     char csv[8192];               /* one WEIGHTS\YYYY.csv (was on the stack) */
 } LpsBuffers;
 extern LpsBuffers *lps_buf;
-int lps_buffers_init(void); /* 0 = out of memory */
+int lps_buffers_init(void); /* 0 = out of memory; also the frozen day names */
 #define lps_decode_scratch (lps_buf->decode)
 uint32_t day_index(Date d);
 unsigned weekday(Date d); /* 0=Sunday */
@@ -164,15 +198,17 @@ void long_date_text(Date d, int language, char *out, size_t n);
 
 /* ICS / CSV */
 int ics_escape_append(char *dst, size_t cap, size_t *used, const char *text);
-int build_ics(const Day *day, uint32_t totalXp, uint32_t dayXp, int language, char *out, size_t cap);
-int write_ics_file(const char *export_dir, const Day *day, uint32_t totalXp, uint32_t dayXp, int language);
+int ics_escape_append_utf8(char *dst, size_t cap, size_t *used, const char *text);
+int build_ics(const Day *day, const State *s, uint32_t totalXp, uint32_t dayXp, int language, char *out, size_t cap);
+int write_ics_file(const char *export_dir, const Day *day, const State *s, uint32_t totalXp, uint32_t dayXp, int language);
 int write_weight_csv(const char *weights_dir, const Day *day);
 
 /* JSON save file (jsave.c, LPS-DOS-115-CHG04): PicoCalc v1.15 schema 2. The
- * catalog, extra day names, Meal Planner deck and hidden home entries the DOS
- * port does not use are kept inside jsave.c and written back. */
+ * catalog is in the State and the day names in lps_day_names (CHG05); the
+ * Meal Planner deck and hidden home entries the DOS port does not use yet
+ * are kept inside jsave.c and written back. */
 int jsave_init(void);   /* far-heap tables; 0 = out of memory. Idempotent. */
-void jsave_reset(void); /* forget kept data: default catalog, nothing else */
+void jsave_reset(void); /* forget kept data: no day names, meals or hidden entries */
 void jsave_new_day(void); /* closing the day deals a new Meal Planner deck */
 enum SaveCheck jsave_read(const char *path, State *out, uint32_t *generation, uint32_t *checksum);
 int jsave_write(const char *path, const State *s, uint32_t generation, uint32_t *checksum);
@@ -194,6 +230,7 @@ void app_tick(App *app, lps_tick_t ms);
 void app_render(App *app);
 const State *app_state(const App *app);
 enum Screen app_screen(const App *app);
+unsigned app_selection(const App *app); /* cursor of the current screen */
 const Day *app_viewed_day(const App *app);
 int app_flush_save(App *app);
 int app_is_dirty(const App *app);

@@ -16,7 +16,7 @@ static void snap(Platform *hw, const char *name){
 }
 
 int main(void){
-    Platform *hw; App *app; static unsigned char store[8192];
+    Platform *hw; App *app; static unsigned char store[16384];
     lps_set_data_dir("/tmp/lps-msdos-cap");
     lps_ensure_dirs();
     hw=plat_host_create(0);

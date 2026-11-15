@@ -48,3 +48,23 @@ int unicode_to_cp437(unsigned long cp){
 int cp437_text_byte(unsigned char c){
     return (c>=32 && c<=126) || (c>=0x80 && c<=0xA5);
 }
+
+/* UTF-8 to CP437 (LPS-DOS-115-CHG04/CHG05): len bytes of in, NUL-ended in out,
+ * never longer. A character CP437 lacks, or a bad sequence, becomes '?'.
+ * Returns the length written. */
+size_t utf8_to_cp437(const char *in, size_t len, char *out){
+    const unsigned char *s=(const unsigned char*)in, *end=s+len; char *o=out;
+    while(s<end){
+        unsigned char c=*s; unsigned long cp; unsigned need,i; int ok=1, m;
+        if(c<0x80){ *o++=(char)c; s++; continue; }
+        if((c&0xe0)==0xc0){ cp=c&0x1f; need=1; } else if((c&0xf0)==0xe0){ cp=c&0x0f; need=2; }
+        else if((c&0xf8)==0xf0){ cp=c&0x07; need=3; } else { *o++='?'; s++; continue; }
+        for(i=1;i<=need;i++){ if(s+i>=end||(s[i]&0xc0)!=0x80){ ok=0; break; } cp=(cp<<6)|(s[i]&0x3f); }
+        if(!ok){ *o++='?'; s++; continue; }
+        s+=need+1;
+        m=unicode_to_cp437(cp);
+        *o++=(char)(m>=0x80 ? m : '?');
+    }
+    *o=0;
+    return (size_t)(o-out);
+}
