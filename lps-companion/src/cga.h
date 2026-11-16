@@ -7,8 +7,8 @@
  * 8 x 8 font of cgafont.c on a 40 x 25 grid: the 80-column rows are folded
  * to 40 columns by lps_fold_row. The card: header band, the picture from
  * MEALSCGA.DAT (LPS-DOS-115-CHG14; a dotted empty frame if the file is
- * missing or damaged), name, portion ribbon, and PLAYED #n over the picture
- * with a dithered border when played (a dithered played card is CHG15). */
+ * missing or damaged), name, portion ribbon. A played card is greyed out
+ * by a checkerboard of colour 0 with PLAYED #n on a solid box (CHG15). */
 #ifndef CGA_H
 #define CGA_H
 #include "lps.h"
@@ -21,7 +21,7 @@ extern const unsigned char cga_font8[2048];
 void cga_enter(unsigned char text, unsigned char background);
 /* One 80-cell text row (CP437) folded to 40 cells, at y = row * 8. */
 void cga_text_row(int row, const char *cells, const unsigned char *rev);
-/* The placeholder card in text rows 5-21 (y 40-175). Redrawn only when the
+/* The card in text rows 5-21 (y 40-175). Redrawn only when the
  * card, its language or played state changed since the last call. */
 void cga_card(const MealView *v, const uint8_t *picture); /* picture: MEALSCGA.DAT pixels, NULL = empty frame */
 #endif

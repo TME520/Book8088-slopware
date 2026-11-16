@@ -163,7 +163,7 @@ The Book 8088 has a **CGA** card, so the planner now has a CGA graphics mode as 
 
 - **Same layout as EGA, scaled to 320×200.** The title, labels and footer use an 8×8 font on a 40-column grid. Each 80-column row is folded to 40 columns by `lps_fold_row` (`src/wrap.c`, host-tested): blocks of text separated by 6 or more spaces keep their text and are placed by where they sat (right edge → right-aligned, centred → centred, else the left indent is halved); blocks never overlap, and anything too wide is cut. The card (176×136, text rows 5–21) has a yellow rounded border with the row's name on its band, the picture box, the name, and the portion on a red ribbon with notched ends.
 - **Font:** `src/cgafont.c` holds the CGA's 8×8 CP437 font (2 KB, taken from DOSBox Staging, GPL-2.0-or-later). Many CGA BIOSes leave the upper-128 glyphs (INT 1Fh) empty, so without it é, è, É and the other accented letters would not show in graphics mode.
-- **Pictures:** since LPS-DOS-115-CHG14 the picture box shows the card's picture from `MEALSCGA.DAT` (next section). In CHG13 it was a dotted placeholder frame, which now shows only when `MEALSCGA.DAT` is missing or damaged. A played card gets a dithered border and **PLAYED #n** / **JOUÉE #n** over the picture; a dithered played card comes with CHG15. `MEALS.DAT` is not read on CGA.
+- **Pictures:** since LPS-DOS-115-CHG14 the picture box shows the card's picture from `MEALSCGA.DAT` (next section). In CHG13 it was a dotted placeholder frame, which now shows only when `MEALSCGA.DAT` is missing or damaged. A played card is greyed out by a checkerboard and shows **PLAYED #n** / **JOUÉE #n** (LPS-DOS-115-CHG15, below). `MEALS.DAT` is not read on CGA.
 - **Mode switches:** leaving the planner, or opening Config/Space over it with TAB, sets the text mode back, with bright backgrounds instead of blink, the cursor hidden and the text palette restored (the BIOS mode set reloads 3D9h). Coming back sets mode 04h again and redraws the whole screen.
 - **Files unchanged:** saves, `MPYYMMDD.CSV`, ICS and weight CSV are the same bytes on every screen.
 - **Speed on an 8088** (DOSBox `machine=cga`, `cputype=8086`, `cycles=fixed 300`):
@@ -218,6 +218,28 @@ The CGA planner now shows the card pictures, converted from the user's own sheet
   DOSBox reads files almost instantly. On the Book 8088's own disk, a picture's first read (3.8 KB) will add more.
 
 ![Meal Planner, CGA pictures](captures/10-meal-planner-cga.png)
+
+### CGA played card (LPS-DOS-115-CHG15)
+
+On EGA a played card turns grey through the palette registers, without moving a pixel. Mode 04h has only one 4-colour palette for the whole screen, so the CGA greys the card another way.
+
+- **Checkerboard:** every other pixel of the whole card (border, header band, picture, name and ribbon) becomes colour 0, the background. The card reads as faded, like the EGA grey, and its colours still show. Colour 0 is the theme background, so the card fades towards blue with the Blue theme and towards black with the others.
+- **PLAYED #n / JOUÉE #n** sits in the middle of the picture on a solid box (colour 0 inside a yellow frame), so it stays sharp over the checkerboard. On a Blank card without `MEALSCGA.DAT`, *~ Blank ~* moves up to make room for it.
+- **Fast:** colour 0 is `00` in video memory, so greying is one AND per word. The mask is fixed for each line parity (`CCCCh` on even lines, `3333h` on odd ones; `lps_cga_grey_mask` in `wrap.c`, host-tested). The card is 22 words wide and 136 lines tall: 2,992 word ANDs, about one 55 ms timer tick on an 8088.
+  - Playing the card on screen only greys what is there and adds the box. It no longer redraws the card, so it is faster than in CHG14.
+  - Showing a card that is already played (moving onto it, coming back from Config) draws it, then greys it.
+  - Putting a card back redraws it normally. The result is identical to the card before it was played.
+- **The EGA is unchanged.**
+- **Speed on an 8088** (DOSBox `machine=cga`, `cputype=8086`, `cycles=fixed 300`, 10-play average; the timer ticks every 55 ms):
+
+  | Action | CHG14 | CHG15 |
+  |---|---|---|
+  | Enter, play | 0.28 s | 0.22 s |
+  | Enter, put back | 0.28 s | 0.28 s |
+  | Left/Right onto a played card (picture in memory) | 0.28 s | 0.33 s |
+  | TAB, Config → planner on a played card | 0.44 s | 0.50 s |
+
+  Other keys are as in CHG14.
 
 ![Meal Planner, CGA, played card in French](captures/11-meal-planner-cga-played-fr.png)
 
@@ -366,7 +388,7 @@ The EXE uses Open Watcom's **large model** (`-ml`): far data pointers and one
 code segment per module. The 64 KB DGROUP (near data + 4 KB stack) used to be
 almost full (63,088 bytes); it is now about 19 KB (17,664 bytes with
 LPS-DOS-115-CHG06d, 18,992 bytes with the EGA Meal Planner of
-LPS-DOS-115-CHG07, 19,552 bytes with the CGA planner of LPS-DOS-115-CHG13, 19,984 bytes with the MEALSCGA.DAT reader of LPS-DOS-115-CHG14). The Meal Planner pictures live in `MEALS.DAT` and the far
+LPS-DOS-115-CHG07, 19,552 bytes with the CGA planner of LPS-DOS-115-CHG13, 19,984 bytes with the MEALSCGA.DAT reader of LPS-DOS-115-CHG14, unchanged with the CGA played card of LPS-DOS-115-CHG15). The Meal Planner pictures live in `MEALS.DAT` and the far
 heap, never in DGROUP.
 
 - The prayer texts are not in the EXE. `tools/mkrosary` builds `ROSARY.DAT`
@@ -575,10 +597,10 @@ byte-compatible with the firmware.
 | `tools/mkrosary.c` | Writes `ROSARY.DAT` from `src/rosary_text.c` |
 | `src/cp437.c` | CP437 ↔ Unicode table; CP437 ↔ UTF-8 for the save and the ICS |
 | `tools/cp437.c` | Build step: UTF-8 string literals → CP437 copies in `build/cp437/` |
-| `src/wrap.c` | Word wrap at spaces for the 80-column screen (rosary texts); 80 → 40 column fold for CGA (LPS-DOS-115-CHG13) |
+| `src/wrap.c` | Word wrap at spaces for the 80-column screen (rosary texts); 80 → 40 column fold for CGA (LPS-DOS-115-CHG13); CGA played-card mask and PLAYED #n label (LPS-DOS-115-CHG15) |
 | `src/meals.c` | Meal Planner deck, keys and played order; loads `MEALS.DAT` and `MEALSCGA.DAT`; writes `EXPORT\MPYYMMDD.CSV` |
 | `src/ega.c` | EGA mode 10h drawing for the Meal Planner (DOS only) |
-| `src/cga.c`, `src/cga.h` | CGA mode 04h drawing for the Meal Planner, card with its `MEALSCGA.DAT` picture (DOS only, LPS-DOS-115-CHG13/14) |
+| `src/cga.c`, `src/cga.h` | CGA mode 04h drawing for the Meal Planner, card with its `MEALSCGA.DAT` picture, greyed out when played (DOS only, LPS-DOS-115-CHG13/14/15) |
 | `src/cgafont.c` | 8×8 CP437 font for CGA graphics (2 KB) |
 | `tools/mkmeals.py` | Writes `MEALS.DAT` from `assets/meal_deck_sheet*.png` |
 | `tools/mkmealscga.py` | Writes `MEALSCGA.DAT` (CGA pictures, Atkinson dithering) from the same sheets (LPS-DOS-115-CHG14) |
@@ -597,12 +619,12 @@ byte-compatible with the firmware.
 - Capitals À, È, Ê, Ô and Â show without their accent: code page 437 does not have them (LPS-DOS-115-CHG03).
 - ICS files are named `EXPORT\YYYYMMDD.ICS` (8.3) instead of `YYYY-MM-DD_LPS-Companion.ics`; the content is the same (LPS-DOS-115-CHG02c).
 - Saves are written when leaving a screen, confirming Date/Weight/Config, closing the day or quitting (**Q**), not after every change; the Meal Planner saves when it closes, not after each card. After a write DOS checks the CRC-32 only, not a full re-parse (8088 speed).
-- Meal Planner pictures are checked with a 32-bit sum instead of a CRC-32 (8088 speed). On CGA the planner is in 320×200 graphics with 4-colour dithered pictures (LPS-DOS-115-CHG14); a played card keeps its picture under a dithered border and PLAYED #n until CHG15. Without colour EGA or CGA it is in text mode.
+- Meal Planner pictures are checked with a 32-bit sum instead of a CRC-32 (8088 speed). On CGA the planner is in 320×200 graphics with 4-colour dithered pictures (LPS-DOS-115-CHG14); a played card is greyed out by a checkerboard of the background colour, with PLAYED #n on a solid box (LPS-DOS-115-CHG15), where the EGA uses grey palette registers. Without colour EGA or CGA it is in text mode.
 - No low-battery warning (no such hardware). Config has no "SD import" entry: the DOS disk **is** the storage.
 
 ## Captures
 
-PNG screenshots under `captures/`, all raw 640×350 DOSBox grabs of v1.15 at 8088 speed (`machine=ega`, `cputype=8086`, `cycles=fixed 300`, LPS-DOS-115-CHG12): Home EN/FR, Activities, Kanban, Rosary mode, Timer, a DOSBox Home grab and the EGA Meal Planner (EN, and FR with a played card); since LPS-DOS-115-CHG13 also two raw 320×200 grabs of the CGA planner (`machine=cga`), retaken with the `MEALSCGA.DAT` pictures in LPS-DOS-115-CHG14: `10-meal-planner-cga.png` (EN, Blue theme, Coffee (Latte)) and `11-meal-planner-cga-played-fr.png` (FR, Green theme, Biscuit played). Text dumps are not stored; `make captures` rewrites
+PNG screenshots under `captures/`, all raw 640×350 DOSBox grabs of v1.15 at 8088 speed (`machine=ega`, `cputype=8086`, `cycles=fixed 300`, LPS-DOS-115-CHG12): Home EN/FR, Activities, Kanban, Rosary mode, Timer, a DOSBox Home grab and the EGA Meal Planner (EN, and FR with a played card); since LPS-DOS-115-CHG13 also two raw 320×200 grabs of the CGA planner (`machine=cga`), retaken with the `MEALSCGA.DAT` pictures in LPS-DOS-115-CHG14: `10-meal-planner-cga.png` (EN, Blue theme, Coffee (Latte)) and `11-meal-planner-cga-played-fr.png` (FR, Green theme, Biscuit played, greyed out as in LPS-DOS-115-CHG15). Text dumps are not stored; `make captures` rewrites
 `captures/*.txt` from the host UI driver.
 
 ---
@@ -752,7 +774,7 @@ Le Book 8088 a une carte **CGA** : le planificateur a donc aussi un mode graphiq
 
 - **Même disposition qu'en EGA, ramenée à 320×200.** Le titre, les libellés et le pied de page utilisent une police 8×8 sur une grille de 40 colonnes. Chaque ligne de 80 colonnes est repliée sur 40 colonnes par `lps_fold_row` (`src/wrap.c`, testé sur l'hôte) : les blocs de texte séparés par 6 espaces ou plus gardent leur texte et leur place (bord droit → aligné à droite, centré → centré, sinon retrait gauche divisé par deux) ; les blocs ne se chevauchent jamais et ce qui dépasse est coupé. La carte (176×136, lignes 5 à 21) a un bord jaune arrondi avec le nom de la rangée sur son bandeau, le cadre de l'image, le nom, et la portion sur un ruban rouge à bouts échancrés.
 - **Police :** `src/cgafont.c` contient la police CP437 8×8 du CGA (2 Ko, reprise de DOSBox Staging, GPL-2.0 ou ultérieure). Beaucoup de BIOS CGA laissent vides les 128 caractères du haut (INT 1Fh) : sans elle, é, è, É et les autres lettres accentuées ne s'afficheraient pas en mode graphique.
-- **Images :** depuis LPS-DOS-115-CHG14, le cadre montre l'image de la carte, lue dans `MEALSCGA.DAT` (section suivante). Dans CHG13, c'était un cadre provisoire en pointillés, qui n'apparaît plus que si `MEALSCGA.DAT` manque ou est abîmé. Une carte jouée a un bord tramé et **JOUÉE #n** / **PLAYED #n** par-dessus l'image ; une carte jouée tramée arrive avec CHG15. `MEALS.DAT` n'est pas lu en CGA.
+- **Images :** depuis LPS-DOS-115-CHG14, le cadre montre l'image de la carte, lue dans `MEALSCGA.DAT` (section suivante). Dans CHG13, c'était un cadre provisoire en pointillés, qui n'apparaît plus que si `MEALSCGA.DAT` manque ou est abîmé. Une carte jouée est grisée par un damier et affiche **JOUÉE #n** / **PLAYED #n** (LPS-DOS-115-CHG15, plus bas). `MEALS.DAT` n'est pas lu en CGA.
 - **Changements de mode :** quitter le planificateur, ou ouvrir Config/Espace par-dessus avec TAB, remet le mode texte, avec fonds clairs au lieu du clignotement, curseur caché et palette texte rétablie (le changement de mode BIOS recharge 3D9h). Au retour, le mode 04h est remis et tout l'écran est redessiné.
 - **Fichiers inchangés :** sauvegardes, `MPYYMMDD.CSV`, ICS et CSV des poids sont les mêmes octets quel que soit l'écran.
 - **Vitesse sur 8088** (DOSBox `machine=cga`, `cputype=8086`, `cycles=fixed 300`) :
@@ -805,6 +827,28 @@ Le planificateur CGA affiche maintenant les images des cartes, converties depuis
   | Aller-retour Espace/Espace (images relues) | 0,75 s |
 
   DOSBox lit les fichiers presque instantanément. Sur le disque du Book 8088, la première lecture d'une image (3,8 Ko) prendra plus de temps.
+
+### Carte jouée en CGA (LPS-DOS-115-CHG15)
+
+En EGA, une carte jouée passe en gris par les registres de palette, sans toucher un pixel. Le mode 04h n'a qu'une palette de 4 couleurs pour tout l'écran : le CGA grise la carte autrement.
+
+- **Damier :** un pixel sur deux de toute la carte (bord, bandeau, image, nom et ruban) prend la couleur 0, celle du fond. La carte paraît estompée, comme le gris EGA, et ses couleurs restent visibles. La couleur 0 est le fond du thème : la carte s'estompe vers le bleu avec le thème Bleu, vers le noir avec les autres.
+- **JOUÉE #n / PLAYED #n** est au milieu de l'image sur un cadre plein (couleur 0 dans un cadre jaune) : il reste net sur le damier. Sur une carte Blank sans `MEALSCGA.DAT`, *~ Blank ~* remonte pour lui laisser la place.
+- **Rapide :** la couleur 0 vaut `00` en mémoire vidéo, donc griser coûte un ET par mot. Le masque est fixe selon la parité de la ligne (`CCCCh` sur les lignes paires, `3333h` sur les impaires ; `lps_cga_grey_mask` dans `wrap.c`, testé sur l'hôte). La carte fait 22 mots de large sur 136 lignes : 2 992 ET, environ un tic d'horloge de 55 ms sur 8088.
+  - Jouer la carte affichée ne fait que griser ce qui est là et ajouter le cadre. La carte n'est plus redessinée : c'est plus rapide qu'en CHG14.
+  - Afficher une carte déjà jouée (en y allant, en revenant de Config) la dessine puis la grise.
+  - Remettre une carte la redessine normalement. Le résultat est identique à la carte avant d'être jouée.
+- **L'EGA ne change pas.**
+- **Vitesse sur 8088** (DOSBox `machine=cga`, `cputype=8086`, `cycles=fixed 300`, moyenne de 10 coups ; l'horloge avance par pas de 55 ms) :
+
+  | Action | CHG14 | CHG15 |
+  |---|---|---|
+  | Entrée, jouer | 0,28 s | 0,22 s |
+  | Entrée, remettre | 0,28 s | 0,28 s |
+  | Gauche/Droite vers une carte jouée (image en mémoire) | 0,28 s | 0,33 s |
+  | TAB, Config → planificateur sur une carte jouée | 0,44 s | 0,50 s |
+
+  Les autres touches sont comme en CHG14.
 
 ## Book 8088 / materiel reel
 
@@ -894,7 +938,7 @@ DOSBox-X / DOSBox Staging (`cputype=8086`, `machine=ega`) : copier les EXE, `ROS
 
 `LPSCOMP.EXE` fait environ **104 Ko** (modele large, 8086, pile 4 Ko), `ROSARY.DAT` environ **10 Ko**, `MEALS.DAT` environ **196 Ko** et `MEALSCGA.DAT` environ **49 Ko**. `HELLO.EXE` ~3 Ko.
 
-Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) passe d'environ 63 Ko a environ 14 Ko (17,3 Ko avec LPS-DOS-115-CHG06d, 18,5 Ko avec le planificateur EGA de LPS-DOS-115-CHG07, 19,1 Ko avec le planificateur CGA de LPS-DOS-115-CHG13, 19,5 Ko avec le lecteur de MEALSCGA.DAT de LPS-DOS-115-CHG14, dont les images restent dans `MEALS.DAT` et la memoire lointaine) : les textes du rosaire sont dans `ROSARY.DAT`, charge en memoire lointaine a l'ouverture du rosaire, et les gros tampons (copies de `State`, sauvegarde, exports ICS/CSV) sont alloues en memoire lointaine au demarrage. Un `ROSARY.DAT` absent ou abime affiche un message, sans plantage.
+Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) passe d'environ 63 Ko a environ 14 Ko (17,3 Ko avec LPS-DOS-115-CHG06d, 18,5 Ko avec le planificateur EGA de LPS-DOS-115-CHG07, 19,1 Ko avec le planificateur CGA de LPS-DOS-115-CHG13, 19,5 Ko avec le lecteur de MEALSCGA.DAT de LPS-DOS-115-CHG14 (inchange avec la carte jouee CGA de LPS-DOS-115-CHG15), dont les images restent dans `MEALS.DAT` et la memoire lointaine) : les textes du rosaire sont dans `ROSARY.DAT`, charge en memoire lointaine a l'ouverture du rosaire, et les gros tampons (copies de `State`, sauvegarde, exports ICS/CSV) sont alloues en memoire lointaine au demarrage. Un `ROSARY.DAT` absent ou abime affiche un message, sans plantage.
 
 ## Ecarts connus
 
@@ -906,8 +950,9 @@ Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) p
   en quittant le planificateur, pas a chaque carte ; les images sont controlees
   par une somme 32 bits au lieu d'un CRC-32 (vitesse sur 8088) ; en CGA, le
   planificateur est en 320×200 avec des images tramees en 4 couleurs
-  (LPS-DOS-115-CHG14) ; une carte jouee garde son image sous un bord trame et
-  JOUEE #n jusqu'a CHG15 ; sans EGA ni CGA couleur, il passe en mode texte.
+  (LPS-DOS-115-CHG14) ; une carte jouee est grisee par un damier de la couleur
+  de fond, avec JOUEE #n sur un cadre plein (LPS-DOS-115-CHG15), la ou l'EGA
+  passe la palette en gris ; sans EGA ni CGA couleur, il passe en mode texte.
 - Fichiers ICS nommes `EXPORT\YYYYMMDD.ICS` (8.3) au lieu de
   `YYYY-MM-DD_LPS-Companion.ics` ; contenu identique (LPS-DOS-115-CHG02c).
 - Sauvegarde ecrite en quittant un ecran, en confirmant Date/Poids/Config, en

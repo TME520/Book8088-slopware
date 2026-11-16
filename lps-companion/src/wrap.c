@@ -6,6 +6,7 @@
  * the line is cut at the line width. '\n' forces a break. */
 #include "lps.h"
 #include <string.h>
+#include <stdio.h>
 
 const char *wrap_line(const char *text, unsigned width, unsigned *len){
     unsigned i, cut;
@@ -75,4 +76,12 @@ void lps_fold_row(const char *cells, const unsigned char *rev, unsigned width, c
         }
         lim=x[i]+n[i]+1;
     }
+}
+
+/* LPS-DOS-115-CHG15: see lps.h. Two bits a pixel, leftmost in bits 7-6, so
+ * 0xCC keeps pixels 0 and 2 of each byte and 0x33 pixels 1 and 3. */
+unsigned short lps_cga_grey_mask(int y){ return (unsigned short)((y&1)?0x3333u:0xCCCCu); }
+unsigned lps_played_label(char *out, int french, unsigned position){
+    sprintf(out,french?"JOUÉE #%u":"PLAYED #%u",position);
+    return (unsigned)strlen(out);
 }

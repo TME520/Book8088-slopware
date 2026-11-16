@@ -14,13 +14,14 @@
  * Card (EGA layout scaled to 320 x 200): 176 x 136 at (72, 40), text rows
  * 5-21. Yellow rounded border with the row's name on its top band, then the
  * body in colour 0: picture box 160 x 96 (MEALSCGA.DAT, CHG14), the
- * name, and the portion on a red ribbon with notched ends. Played: the
- * border is dithered (yellow / colour 0) and PLAYED #n sits in the box. */
+ * name, and the portion on a red ribbon with notched ends. Played
+ * (LPS-DOS-115-CHG15): the whole card is greyed out by a checkerboard of
+ * colour 0 (one AND per word, see grey_out) and PLAYED #n sits on a solid
+ * box over the picture. Putting the card back redraws it. */
 #include "cga.h"
 #include "meals.h"
 #include <dos.h>
 #include <string.h>
-#include <stdio.h>
 
 #define CGA_SEG 0xB800
 #define CARD_X 72
@@ -126,20 +127,46 @@ static void art_box(void){
     pattern(ART_X,ART_Y,ART_W,1,dots,dots); pattern(ART_X,ART_Y+ART_H-1,ART_W,1,dots,dots);
     pattern(ART_X,ART_Y+1,1,ART_H-2,0,fill_byte(INK_BOX)); pattern(ART_X+ART_W-1,ART_Y+1,1,ART_H-2,0,fill_byte(INK_BOX));
 }
+/* LPS-DOS-115-CHG15: a played card greyed out, the CGA's answer to the EGA
+ * grey palette. Every other pixel of the card, in a checkerboard, becomes
+ * colour 0 (00 in VRAM), so one AND per word does it: the mask is fixed per
+ * line parity (lps_cga_grey_mask, host-tested in wrap.c).
+ * CARD_X is on a byte and CARD_W a whole number of words, so each line is
+ * CARD_W/8 word ANDs; the corners outside the border are colour 0 already. */
+#if CARD_X % 4 || CARD_W % 8
+#error "grey_out needs the card on whole words"
+#endif
+static void grey_out(void){
+    int y, i;
+    for(y=CARD_Y;y<CARD_Y+CARD_H;y++){
+        unsigned short far *p=(unsigned short far *)(line_at(y)+CARD_X/4);
+        unsigned short m=lps_cga_grey_mask(y);
+        for(i=0;i<CARD_W/8;i++) p[i]&=m;
+    }
+}
+/* PLAYED #n / JOUÉE #n on a solid colour-0 box with a yellow frame, centred
+ * on the picture, so it reads cleanly over the checkerboard. */
+static void played_label(const MealView *v){
+    char b[24]; int n, x, w, y=ART_Y+ART_H/2-8;
+    n=(int)lps_played_label(b,v->language==LANG_FR,(unsigned)v->position); w=(n+2)*8; x=CARD_X+(CARD_W/8-n)/2*8-8;
+    fill(x,y,w,16,INK_EDGE); fill(x+1,y+1,w-2,14,0);
+    centred(y+4,b,INK_EDGE,0);
+}
 void cga_card(const MealView *v, const uint8_t *picture){
     static const unsigned char outer[4]={4,2,1,1};
-    char b[24]; int played=v->position!=0, blank=v->row==MEAL_BLANK;
+    int played=v->position!=0, blank=v->row==MEAL_BLANK;
     unsigned char edge=fill_byte(INK_EDGE);
-    if(drawn.valid && drawn.card==v->card && drawn.language==v->language && drawn.played==(uint8_t)played && drawn.art==(picture!=0)) return;
-    /* Border: solid, or yellow / colour 0 every other pixel when played. */
-    if(played) rounded(CARD_X,CARD_Y,CARD_W,CARD_H,(unsigned char)(edge&0xCC),(unsigned char)(edge&0x33),outer,4);
-    else rounded(CARD_X,CARD_Y,CARD_W,CARD_H,edge,edge,outer,4);
+    int same=drawn.valid && drawn.card==v->card && drawn.language==v->language && drawn.art==(picture!=0);
+    if(same && drawn.played==(uint8_t)played) return;
+    if(same && played && (picture || !blank)){ /* just played: grey the card as it stands */
+        grey_out(); played_label(v); drawn.played=1; return;
+    }
+    rounded(CARD_X,CARD_Y,CARD_W,CARD_H,edge,edge,outer,4);
     fill(BODY_X,BODY_Y,BODY_W,BODY_H,0);
-    if(played){ int n=(int)strlen(v->rowName); fill(CARD_X+(CARD_W/8-n)/2*8-4,CARD_Y+2,n*8+8,10,0); centred(CARD_Y+3,v->rowName,INK_EDGE,0); }
-    else centred(CARD_Y+3,v->rowName,0,INK_EDGE);
+    centred(CARD_Y+3,v->rowName,0,INK_EDGE);
     if(picture) art_picture(picture);
     else art_box();
-    if(blank && !picture) centred(ART_Y+ART_H/2-(played?16:4),"~ Blank ~",INK_EDGE,0);
+    if(blank && !picture) centred(ART_Y+ART_H/2-(played?28:4),"~ Blank ~",INK_EDGE,0); /* clear of PLAYED #n */
     else {
         int n=(int)strlen(v->portion), rw=n*8+24, rx, j;
         if(rw<96) rw=96;
@@ -149,9 +176,6 @@ void cga_card(const MealView *v, const uint8_t *picture){
         for(j=0;j<RIBBON_H;j++){ int notch=j<RIBBON_H/2?j:RIBBON_H-1-j; fill(rx+notch,RIBBON_Y+j,rw-2*notch,1,INK_RIBBON); }
         centred(RIBBON_Y+1,v->portion,0,INK_RIBBON);
     }
-    if(played){
-        sprintf(b,v->language==LANG_FR?"JOUÉE #%u":"PLAYED #%u",(unsigned)v->position);
-        centred(ART_Y+ART_H/2-4,b,INK_RIBBON,0);
-    }
+    if(played){ grey_out(); played_label(v); }
     drawn.valid=1; drawn.card=v->card; drawn.language=v->language; drawn.played=(uint8_t)played; drawn.art=(uint8_t)(picture!=0);
 }

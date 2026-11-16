@@ -222,6 +222,13 @@ unsigned wrap_count(const char *text, unsigned width);
 /* wrap.c (LPS-DOS-115-CHG13): an 80-cell row folded to `width` cells for the
  * CGA 40-column screen; out and outRev get exactly width cells (no NUL). */
 void lps_fold_row(const char *cells, const unsigned char *rev, unsigned width, char *out, unsigned char *outRev);
+/* wrap.c (LPS-DOS-115-CHG15): the CGA played card. lps_cga_grey_mask is the
+ * AND mask for a word of mode 04h pixels on screen line y: it clears every
+ * other pixel to colour 0 in a checkerboard (pixel x stays when x + y is
+ * even). lps_played_label writes PLAYED #n / JOUÉE #n (CP437) and returns
+ * its length in cells. */
+unsigned short lps_cga_grey_mask(int y);
+unsigned lps_played_label(char *out, int french, unsigned position);
 #ifndef LPS_DOS
 void encode_state(const State *s, Blob *b); /* binary format 6: only the tests still write it */
 #endif

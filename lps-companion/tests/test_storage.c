@@ -1476,6 +1476,54 @@ static void check_cga_fold(const char *dir){
     fold_host_row(hw,23,o,orev); assert(strstr(o,"MEALSCGA.DAT damaged: no pictures"));
     fake_card_result=MEALS_OK; app_key(app,' '); assert(app_screen(app)==SCR_HOME);
 }
+/* LPS-DOS-115-CHG15: the CGA played card. A card-sized patch of mode 04h
+ * memory (2 bits a pixel, leftmost pixel in bits 7-6) greyed out word by
+ * word as cga.c does, and the PLAYED #n label sizes. */
+#define GREY_W 176
+#define GREY_H 136
+static unsigned grey_pixel(const unsigned char *rows, int x, int y){ return (rows[y*(GREY_W/4)+x/4]>>(6-2*(x&3)))&3u; }
+static void grey_patch(unsigned char *rows, int y0){
+    int y, i;
+    for(y=0;y<GREY_H;y++){
+        unsigned short m=lps_cga_grey_mask(y0+y);
+        for(i=0;i<GREY_W/8;i++){
+            unsigned char *p=rows+y*(GREY_W/4)+i*2;
+            unsigned short w=(unsigned short)(p[0]|(p[1]<<8)); /* little-endian, as the 8088 reads it */
+            w&=m; p[0]=(unsigned char)(w&0xFF); p[1]=(unsigned char)(w>>8);
+        }
+    }
+}
+static void check_cga_grey(void){
+    static unsigned char before[GREY_W/4*GREY_H], after[GREY_W/4*GREY_H];
+    char b[24]; unsigned n, pos, seed=12345u, kept=0; int x, y, y0;
+    /* Masks: fixed per line parity, equal bytes, and complementary. */
+    assert(lps_cga_grey_mask(0)==0xCCCCu && lps_cga_grey_mask(1)==0x3333u && lps_cga_grey_mask(40)==0xCCCCu && lps_cga_grey_mask(175)==0x3333u);
+    assert((lps_cga_grey_mask(0)|lps_cga_grey_mask(1))==0xFFFFu && !(lps_cga_grey_mask(0)&lps_cga_grey_mask(1)));
+    for(y0=40;y0<=41;y0++){ /* the card starts on an even line; check an odd start too */
+        for(x=0;x<(int)sizeof(before);x++){ seed=seed*1103515245u+12345u; before[x]=(unsigned char)(seed>>16); }
+        memset(before,0xFF,GREY_W/4*10); /* a solid yellow band like the card's border */
+        memcpy(after,before,sizeof(before)); grey_patch(after,y0);
+        for(y=0;y<GREY_H;y++) for(x=0;x<GREY_W;x++){
+            unsigned p=grey_pixel(before,x,y), q=grey_pixel(after,x,y);
+            if(((x+y+y0)&1)==0){ assert(q==p); kept++; } else assert(q==0); /* checkerboard of colour 0 */
+        }
+        /* Yellow turns into yellow / colour 0 every other pixel: half stays. */
+        for(x=0;x<GREY_W;x++) assert(grey_pixel(after,x,0)==(((x+y0)&1)?0u:3u));
+        /* Idempotent: greying a greyed card changes nothing. */
+        memcpy(before,after,sizeof(after)); grey_patch(after,y0); assert(!memcmp(before,after,sizeof(after)));
+    }
+    assert(kept==GREY_W*GREY_H); /* half of the pixels, on each of the two runs */
+    /* Colour 0 stays colour 0. */
+    memset(after,0,sizeof(after)); grey_patch(after,40); for(x=0;x<(int)sizeof(after);x++) assert(!after[x]);
+    /* Labels: CP437, and the framed box ((n + 2) cells) fits the 160-pixel picture. */
+    assert(lps_played_label(b,0,1)==9 && !strcmp(b,"PLAYED #1"));
+    assert(lps_played_label(b,1,1)==8 && !strcmp(b,"JOU\220E #1"));
+    for(pos=1;pos<=MEAL_CARD_COUNT;pos++){
+        n=lps_played_label(b,0,pos); assert(n==strlen(b) && (n+2)*8<=160);
+        n=lps_played_label(b,1,pos); assert(n==strlen(b) && (n+2)*8<=160);
+    }
+    assert(lps_played_label(b,0,16)==10 && !strcmp(b,"PLAYED #16") && lps_played_label(b,1,16)==9);
+}
 static void check_meal_csv(const char *dir){
     static unsigned char store[16384]; static State st; App *app=(App*)store; Platform *hw;
     char pa[300], ex[300], csv[600], next[600], name[16]; Date d, saved; uint32_t gen=0; int active=-1; size_t n;
@@ -2087,6 +2135,7 @@ int main(void){
     check_meal_planner(tmpdir);
     check_meal_csv(tmpdir);
     check_cga_fold(tmpdir);
+    check_cga_grey();
     check_overlay_keys(tmpdir);
     check_home_entries(tmpdir);
     check_home_filtered(tmpdir);
@@ -2095,7 +2144,7 @@ int main(void){
     printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, title v1.15, menu 0-8 without notepad or Config, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
     printf("%s", " unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture),");
     printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), MEALSCGA.DAT (13 CGA pictures, colours, checksums, damaged/missing, EGA/CGA independent), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical),");
-    printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR, MEALSCGA.DAT messages), fixture decode (%u captures)\n", 0);
+    printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR, MEALSCGA.DAT messages), CGA played card (checkerboard grey-out masks, PLAYED/JOUEE label sizes), fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }
