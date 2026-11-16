@@ -70,7 +70,23 @@ As on the PicoCalc v1.14/v1.15, **Space on Home** opens the Meal Planner: a deck
 - **Played cards** are greyed through the palette only: no pixel is redrawn.
 - **Checks:** `MEALS.DAT` starts with `LPSMEALS`, version 1, 13 pictures of 240×128, then a table (16 palette bytes and a 32-bit sum per picture) protected by a CRC-32; the file size must match. Each picture is checked against its sum (two 16-bit running sums, as in Fletcher's checksum) when it is loaded, not with a CRC-32: a CRC-32 of one 15 KB picture took 1.2 s on the 8088, the sum takes 0.11 s.
 - **Speed on an 8088** (DOSBox `machine=ega`, `cputype=8086`, `cycles=fixed 300`): Space on Home → planner drawn in 0.50 s (mode switch, whole screen, first picture read and checked); Left/Right to a picture not shown yet 0.24 s (0.155 s of it is the disk read and check), to a picture already in memory 0.15–0.16 s; Up/Down 0.17 s; Enter (play or put back) 0.15 s; Esc back to the text Home 0.22 s, plus the save (0.6 s for a small save). Drawing a whole card takes 88 ms. A real floppy or hard disk adds its own read time to the first view of each picture.
-- CSV export of the planner (`MPYYMMDD.CSV`) comes with LPS-DOS-115-CHG08, the global TAB/SPACE keys with CHG09.
+- The global TAB/SPACE keys come with LPS-DOS-115-CHG09.
+
+### Meal Planner CSV (LPS-DOS-115-CHG08)
+
+Leaving the Meal Planner (**Space** or **Esc**) rewrites `EXPORT\MPYYMMDD.CSV` for today, for example `EXPORT\MP261114.CSV` for 14 November 2026, as the PicoCalc v1.15 does (LPS-114-CHG02). The name is the PicoCalc's own: it is already 8.3, so unlike the ICS files (CHG02c) **there is no mapping**, and a file copied either way between `C:\LPS\EXPORT\` and the SD card's `LPS/EXPORT/` keeps its name.
+
+```
+order,category,card,portion
+1,Drinks,Tea,1 cup
+2,Drinks,Coffee (Latte),1 mug
+3,Blank,Blank,
+```
+
+- **The same bytes as the PicoCalc**: CRLF line ends, UTF-8 (the names are plain ASCII), the played cards in order of play, the English names and portions whatever the screen language, an empty portion for Blank cards, RFC 4180 quoting. The code is the PicoCalc's `mealCsvName`, `writeCsvField` and `writeMealCsv`, line for line. `tests/fixtures/mealcsv/` holds files written by the PicoCalc's own code (`tools/picocalc_fixture.cpp mealcsv`), and the host tests compare DOS's output with them byte for byte (5 cards, and all 16 with a card put back and played again). In DOSBox, the file DOS wrote equals the one the PicoCalc's writer makes from the save DOS wrote.
+- **When**: on every exit from the planner, after the save. Entering does not write. The whole file is rewritten each time. With nothing played, no file is created, but an existing file is reset to its header line. A failed write removes the incomplete file and shows *Meal CSV export failed* / *Export CSV repas échoué* on Home; the deck stays saved and the next exit tries again. An undated day writes nothing and shows *Set Date to export meals* / *Renseignez Date pour exporter les repas*.
+- **Closing the day writes no CSV**, as on the PicoCalc: you can only reach Close the day from Home, so the file of the closed day is the one written when the planner was last left, and it stays as it is. The next day starts with a new deck (since LPS-DOS-115-CHG07) and gets its own file once a card is played.
+- **Speed on an 8088** (DOSBox, `cputype=8086`, `cycles=fixed 300`): the export takes 13 ms with nothing played, 34 ms with 5 cards and 89 ms with all 16 (it was 144 ms before the file was built in memory and the per-field `strpbrk` was replaced by a single pass). Leaving the planner takes one BIOS tick (55 ms) more than before: 0.28 s instead of 0.22 s, or 0.66 s instead of 0.61 s when the save is written too. A real disk adds its own write time.
 
 ![Meal Planner, EGA](captures/08-meal-planner-ega.png)
 
@@ -125,7 +141,8 @@ Saves are JSON files, `SAVE_A.JSN` and `SAVE_B.JSN`, exactly as on the PicoCalc 
 | Dual A/B JSON save (`SAVE_A/B.JSN`, schema 2) + CRC | Yes (read **and** write, PicoCalc-compatible) |
 | `SAVE_A/B.BIN` v1–v6 migration | Yes (read once; `.BIN` files left untouched) |
 | ICS + weights CSV byte-compatible | Yes |
-| Meal Planner (16 cards, Space on Home, card pictures) | Yes (LPS-DOS-115-CHG07, EGA graphics; text mode without EGA); CSV export in CHG08 |
+| Meal Planner (16 cards, Space on Home, card pictures) | Yes (LPS-DOS-115-CHG07, EGA graphics; text mode without EGA) |
+| Meal Planner CSV `EXPORT\MPYYMMDD.CSV` byte-compatible | Yes (LPS-DOS-115-CHG08, same name as the PicoCalc) |
 
 ## Build
 
@@ -188,7 +205,9 @@ round trip and A/B alternation, byte-identical rewriting of the PicoCalc
 fixtures, BIN migration, a damaged A falling back to B, unknown keys and a
 newer schema. The Meal Planner tests cover `MEALS.DAT` (load, sums, damaged and
 missing files) and the planner itself (keys, wrap, play and put back, saves,
-archived days, text cards, the graphics hooks, French).
+archived days, text cards, the graphics hooks, French) and its CSV (names,
+quoting, PicoCalc files byte for byte, overwrite rules, failures, undated
+day, close day).
 
 `tools/picocalc_fixture.cpp` builds the PicoCalc's own save code (from a
 checkout of [LPS-Companion-PicoCalc](https://github.com/TME520/LPS-Companion-PicoCalc))
@@ -200,6 +219,9 @@ g++ -std=c++17 -I$P/src -I$P/tests -o /tmp/pcfix tools/picocalc_fixture.cpp
 /tmp/pcfix full tests/fixtures/picocalc_full.jsn
 /tmp/pcfix custom tests/fixtures/picocalc_custom.jsn
 /tmp/pcfix meals tests/fixtures/picocalc_custom.jsn tests/fixtures/picocalc_meals.jsn 8 2 0 9 14 15 13
+/tmp/pcfix meals tests/fixtures/picocalc_intl.jsn tests/fixtures/picocalc_meals_all.jsn 13 15 4 0 11 7 2 13 9 1 14 5 10 3 8 12 6 0 0
+/tmp/pcfix mealcsv tests/fixtures/picocalc_meals.jsn tests/fixtures/mealcsv       # MP261114.CSV
+/tmp/pcfix mealcsv tests/fixtures/picocalc_meals_all.jsn tests/fixtures/mealcsv   # MP261115.CSV
 /tmp/pcfix check C:/LPS/SAVE_A.JSN      # prints valid / damaged / ...
 ```
 
@@ -408,6 +430,7 @@ C:\LPS\
   SAVE_A.BIN     old saves (before LPS-DOS-115-CHG04): read once for migration, never changed
   SAVE_B.BIN
   EXPORT\YYYYMMDD.ICS        e.g. EXPORT\20260917.ICS
+  EXPORT\MPYYMMDD.CSV        Meal Planner, e.g. EXPORT\MP261114.CSV (same name as on the PicoCalc)
   WEIGHTS\YYYY.csv
 ```
 
@@ -438,7 +461,7 @@ byte-compatible with the firmware.
 | `src/cp437.c` | CP437 ↔ Unicode table; CP437 ↔ UTF-8 for the save and the ICS |
 | `tools/cp437.c` | Build step: UTF-8 string literals → CP437 copies in `build/cp437/` |
 | `src/wrap.c` | Word wrap at spaces for the 80-column screen (rosary texts) |
-| `src/meals.c` | Meal Planner deck, keys and played order; loads `MEALS.DAT` |
+| `src/meals.c` | Meal Planner deck, keys and played order; loads `MEALS.DAT`; writes `EXPORT\MPYYMMDD.CSV` |
 | `src/ega.c` | EGA mode 10h drawing for the Meal Planner (DOS only) |
 | `tools/mkmeals.py` | Writes `MEALS.DAT` from `assets/meal_deck_sheet*.png` |
 | `assets/meal_deck_sheet*.png` | The PicoCalc's Meal Planner card illustrations |
@@ -448,6 +471,7 @@ byte-compatible with the firmware.
 | `tests/test_storage.c` | Host encode/decode, ICS, CSV, A/B, `ROSARY.DAT`, v1.2 fixture, French CP437 screens, JSON saves, activities, custom activities |
 | `tests/fixtures/v12_payload.bin` | Synthetic Companion v1.2 payload |
 | `tests/fixtures/picocalc_*.jsn` | JSON saves written by the PicoCalc's own code |
+| `tests/fixtures/mealcsv/MP*.CSV` | Meal Planner CSV files written by the PicoCalc's own code |
 | `tools/picocalc_fixture.cpp` | Builds the PicoCalc save code on the host: fixtures and checks |
 
 ## Captures
@@ -537,7 +561,16 @@ Comme sur la PicoCalc v1.14/v1.15, **Espace sur l'accueil** ouvre le planificate
 - **Les cartes jouées** passent en gris par la palette seule : aucun pixel n'est redessiné.
 - **Contrôles :** `MEALS.DAT` commence par `LPSMEALS`, version 1, 13 images de 240×128, puis une table (16 octets de palette et une somme 32 bits par image) protégée par un CRC-32 ; la taille du fichier doit correspondre. Chaque image est vérifiée au chargement par sa somme (deux sommes 16 bits cumulées, comme la somme de Fletcher), pas par un CRC-32 : un CRC-32 d'une image de 15 Ko prenait 1,2 s sur le 8088, la somme 0,11 s.
 - **Vitesse sur 8088** (DOSBox `machine=ega`, `cputype=8086`, `cycles=fixed 300`) : Espace sur l'accueil → planificateur affiché en 0,50 s (changement de mode, écran entier, première image lue et vérifiée) ; Gauche/Droite vers une image pas encore vue 0,24 s (dont 0,155 s de lecture et de contrôle), vers une image déjà en mémoire 0,15 à 0,16 s ; Haut/Bas 0,17 s ; Entrée (jouer ou remettre) 0,15 s ; Échap vers l'accueil texte 0,22 s, plus la sauvegarde (0,6 s pour une petite sauvegarde). Dessiner une carte entière prend 88 ms. Une vraie disquette ou un vrai disque dur ajoute son temps de lecture à la première vue de chaque image.
-- L'export CSV du planificateur (`MPYYMMDD.CSV`) arrive avec LPS-DOS-115-CHG08, les touches TAB/ESPACE globales avec CHG09.
+- Les touches TAB/ESPACE globales arrivent avec LPS-DOS-115-CHG09.
+
+### CSV du planificateur de repas (LPS-DOS-115-CHG08)
+
+Quitter le planificateur (**Espace** ou **Échap**) réécrit `EXPORT\MPYYMMDD.CSV` pour le jour en cours, par exemple `EXPORT\MP261114.CSV` pour le 14 novembre 2026, comme la PicoCalc v1.15 (LPS-114-CHG02). Le nom est celui de la PicoCalc : il est déjà en 8.3, donc contrairement aux fichiers ICS (CHG02c) **il n'y a aucune correspondance de nom à faire**, et un fichier copié dans un sens ou dans l'autre entre `C:\LPS\EXPORT\` et `LPS/EXPORT/` sur la carte SD garde son nom.
+
+- **Les mêmes octets que la PicoCalc** : fins de ligne CRLF, UTF-8 (les noms sont en ASCII), les cartes jouées dans l'ordre, les noms et portions anglais quelle que soit la langue de l'écran, une portion vide pour les cartes Blank, guillemets RFC 4180. Le code reprend ligne à ligne `mealCsvName`, `writeCsvField` et `writeMealCsv` de la PicoCalc. `tests/fixtures/mealcsv/` contient des fichiers écrits par le code de la PicoCalc (`tools/picocalc_fixture.cpp mealcsv`) ; les tests les comparent octet pour octet avec ceux de DOS. Sous DOSBox, le fichier écrit par DOS est identique à celui que l'écrivain de la PicoCalc produit à partir de la sauvegarde DOS.
+- **Quand** : à chaque sortie du planificateur, après la sauvegarde ; l'entrée n'écrit rien. Le fichier est réécrit en entier. Sans carte jouée, aucun fichier n'est créé, mais un fichier existant est remis à sa seule ligne d'en-tête. Une écriture ratée supprime le fichier incomplet et affiche *Export CSV repas échoué* sur l'accueil ; le paquet reste sauvegardé et la sortie suivante réessaie. Un jour sans date n'écrit rien et affiche *Renseignez Date pour exporter les repas*.
+- **Terminer le jour n'écrit pas de CSV**, comme sur la PicoCalc : on ne termine le jour que depuis l'accueil, donc le fichier du jour terminé est celui écrit à la dernière sortie du planificateur, et il ne change plus. Le jour suivant commence avec un paquet neuf et a son propre fichier dès qu'une carte est jouée.
+- **Vitesse sur 8088** (DOSBox, `cputype=8086`, `cycles=fixed 300`) : l'export prend 13 ms sans carte jouée, 34 ms avec 5 cartes et 89 ms avec les 16 (144 ms avant que le fichier soit construit en mémoire en un seul passage). Quitter le planificateur prend un tic BIOS (55 ms) de plus : 0,28 s au lieu de 0,22 s, ou 0,66 s au lieu de 0,61 s avec la sauvegarde. Un vrai disque ajoute son temps d'écriture.
 
 
 Le **Minuteur** propose **5, 30 ou 60 minutes** (LPS-DOS-115-CHG02b, comme les CHG01/CHG02 de la PicoCalc v1.12). Les touches **1**, **2** et **3** lancent directement une duree, sans Entree. Sur l'ecran de fin, elles relancent aussitot un compte a rebours et Entree revient au choix de la duree ; pendant un compte a rebours, elles sont ignorees et Entree met en pause ou reprend. Le temps vient toujours du tic BIOS (environ 55 ms). Une note deja enregistree par une ancienne version reste dans la sauvegarde et part toujours dans l'ICS (`\NNote: ...`) a la cloture du jour ; elle n'est plus affichee ni modifiable.
@@ -587,6 +620,7 @@ C:\LPS\
   SAVE_A.BIN     anciennes sauvegardes (avant LPS-DOS-115-CHG04) : lues une fois, jamais modifiees
   SAVE_B.BIN
   EXPORT\YYYYMMDD.ICS
+  EXPORT\MPYYMMDD.CSV   planificateur de repas, meme nom que sur la PicoCalc
   WEIGHTS\YYYY.csv
 ```
 
@@ -636,7 +670,7 @@ Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) p
 - Config n'a pas d'entree « import SD » : le disque DOS **est** le stockage.
 - Masquage des entrees de l'accueil de la PicoCalc : pas encore sur DOS, mais
   ses donnees sont conservees dans la sauvegarde (LPS-DOS-115-CHG04).
-- Planificateur de repas (LPS-DOS-115-CHG07) : pas encore d'export CSV
-  (CHG08) ni de touches TAB/ESPACE globales (CHG09) ; la sauvegarde est ecrite
+- Planificateur de repas (LPS-DOS-115-CHG07) : pas encore de touches
+  TAB/ESPACE globales (CHG09) ; la sauvegarde est ecrite
   en quittant le planificateur, pas a chaque carte ; les images sont controlees
   par une somme 32 bits au lieu d'un CRC-32 (vitesse sur 8088).

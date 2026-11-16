@@ -342,6 +342,16 @@ static const char *meals_problem(const App *a, int r){
     if(r==MEALS_NO_MEMORY) return tr(a,"Not enough memory for the pictures","Mémoire insuffisante pour les images");
     return tr(a,"No EGA screen: Meal Planner in text mode","Pas d'écran EGA : planificateur en mode texte");
 }
+/* LPS-DOS-115-CHG08 (PicoCalc LPS-114-CHG02 / LPS-115-CHG02 exportMeals):
+ * leaving the planner rewrites the day's EXPORT\MPYYMMDD.CSV; a failure is
+ * shown on the screen it returns to, and the deck itself stays saved. */
+static void export_meals(App *a){
+    if(a->missingStorage) return; /* the missing-storage warning already explains it */
+    if(!valid_date(a->state.today.date)){ say(a,tr(a,"Set Date to export meals","Renseignez Date pour exporter les repas")); return; }
+    if(a->hw->export_meal_csv && !a->hw->export_meal_csv(a->hw,&a->state)) say(a,tr(a,"Meal CSV export failed","Export CSV repas échoué"));
+}
+/* Space or Esc: save the deck, back to Home, then the CSV. */
+static void leave_meal_planner(App *a){ flush_save(a); go(a,SCR_HOME); export_meals(a); }
 static void go(App *a, int s){
     const Day *vd;
     /* LPS-DOS-115-CHG07: the pictures stay in memory while the planner is open. */
@@ -580,6 +590,7 @@ void app_key(App *a, int k){
     if(k==KEY_ESCAPE && a->screen==SCR_ACTIVITY_EDIT){
         a->screen=SCR_ACTIVITIES; memset(a->activityDraft,0,sizeof(a->activityDraft)); a->message[0]=0; app_render(a); return;
     }
+    if(k==KEY_ESCAPE && a->screen==SCR_MEAL_PLANNER){ leave_meal_planner(a); app_render(a); return; }
     if(k==KEY_ESCAPE){
         int target=SCR_HOME;
         int from=a->screen;
@@ -594,7 +605,7 @@ void app_key(App *a, int k){
                ||from==SCR_KANBAN||from==SCR_REMINDERS||from==SCR_CONFIG
                ||from==SCR_COLORS||from==SCR_LANGUAGE||from==SCR_DAILY_REVIEW
                ||from==SCR_ROSARY_MODE||from==SCR_ROSARY_COMPLETE||from==SCR_FINISH
-               ||from==SCR_REWARD||from==SCR_TIMER_SELECT||from==SCR_MEAL_PLANNER)){
+               ||from==SCR_REWARD||from==SCR_TIMER_SELECT)){
             flush_save(a);
         }
         go(a,target); app_render(a); return;
@@ -852,7 +863,7 @@ void app_key(App *a, int k){
          * Esc), as the other screens do. */
         if(k==KEY_LEFT||k==KEY_RIGHT||k==KEY_UP||k==KEY_DOWN) a->mealCursor=meal_move(a->mealCursor,k);
         else if(k==KEY_ENTER){ g_scratch=a->state; meal_toggle(&g_scratch,a->mealCursor); commit(a,&g_scratch); }
-        else if(k==' '){ flush_save(a); go(a,SCR_HOME); }
+        else if(k==' ') leave_meal_planner(a);
     }
     app_render(a);
 }

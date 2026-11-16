@@ -1323,6 +1323,99 @@ static void check_meal_planner(const char *dir){
     app_key(app,KEY_UP); app_key(app,KEY_LEFT); app_key(app,KEY_LEFT); assert(text_card_shows(hw,"Soupe","1 bol")); app_key(app,KEY_ENTER); /* play 13 */
     assert(row_has(hw,3,"JOU\220E #5") && row_has(hw,4,"11/16 restantes"));
     app_key(app,' '); assert(app_screen(app)==SCR_HOME && same_file("tests/fixtures/picocalc_meals.jsn",pa));
+    /* LPS-DOS-115-CHG08: and the CSV written on leaving is the PicoCalc's. */
+    {   char csv[256]; sprintf(csv,"%s/EXPORT/MP261114.CSV",dir);
+        assert(same_file("tests/fixtures/mealcsv/MP261114.CSV",csv)); }
+}
+
+/* ---- LPS-DOS-115-CHG08: Meal Planner CSV, byte for byte the PicoCalc's.
+ * tests/fixtures/mealcsv/ holds files written by the PicoCalc's own
+ * mealCsvName/writeMealCsv and main.cpp exportMealCsv rules
+ * (tools/picocalc_fixture mealcsv); the rules below are its
+ * meal_planner_test and storage_test cases. */
+#define MCSV_HEAD "order,category,card,portion\r\n"
+static int file_is(const char *path, const char *text){
+    size_t n; if(!exists(path)) return 0;
+    n=slurp(path,jbuf2,sizeof(jbuf2)); return n==strlen(text) && memcmp(jbuf2,text,n)==0;
+}
+static int field_is(const char *value, const char *want){
+    char b[64]; size_t u=0; return meal_csv_field(b,sizeof(b),&u,value) && u==strlen(want) && !strcmp(b,want);
+}
+static int csv_is(const State *st, const char *want){
+    char b[1024]; size_t n=meal_csv_text(st,b,sizeof(b)); return n && n==strlen(want) && !strcmp(b,want);
+}
+static void check_meal_csv(const char *dir){
+    static unsigned char store[16384]; static State st; App *app=(App*)store; Platform *hw;
+    char pa[300], ex[300], csv[600], next[600], name[16]; Date d, saved; uint32_t gen=0; int active=-1; size_t n;
+    static const unsigned plays[5]={4,0,14,7,2}; unsigned i;
+    /* File names: the PicoCalc's MPYYMMDD.CSV is already 8.3. */
+    d.year=2026; d.month=11; d.day=14; meal_csv_name(&d,name); assert(!strcmp(name,"MP261114.CSV"));
+    d.year=2000; d.month=1; d.day=5; meal_csv_name(&d,name); assert(!strcmp(name,"MP000105.CSV"));
+    d.year=2099; d.month=12; d.day=31; meal_csv_name(&d,name); assert(!strcmp(name,"MP991231.CSV"));
+    /* Content in order of play; quoting; UTF-8 passes through. */
+    state_init(&st); assert(csv_is(&st,MCSV_HEAD));
+    for(i=0;i<5;i++) meal_toggle(&st,plays[i]);
+    assert(csv_is(&st,MCSV_HEAD "1,Drinks,Mint Tea,1 cup\r\n2,Drinks,Coffee (Latte),1 mug\r\n3,Blank,Blank,\r\n4,Food,Light Cheese Wrap,1 wrap\r\n5,Drinks,Coffee (Black),1 cup\r\n"));
+    meal_toggle(&st,0); meal_toggle(&st,0);
+    assert(csv_is(&st,MCSV_HEAD "1,Drinks,Mint Tea,1 cup\r\n2,Blank,Blank,\r\n3,Food,Light Cheese Wrap,1 wrap\r\n4,Drinks,Coffee (Black),1 cup\r\n5,Drinks,Coffee (Latte),1 mug\r\n"));
+    assert(field_is("Coffee (Latte)","Coffee (Latte)") && field_is("",""));
+    assert(field_is("a,b","\"a,b\"") && field_is("say \"hi\"","\"say \"\"hi\"\"\"") && field_is("two\nlines","\"two\nlines\""));
+    assert(field_is("Th\303\251 \303\240 la menthe","Th\303\251 \303\240 la menthe"));
+    {   char b[40]; size_t u=0; assert(!meal_csv_field(b,4,&u,"abcd") && meal_csv_field(b,5,&u,"abcd") && u==4);
+        state_init(&st); for(i=0;i<MEAL_CARD_COUNT;i++) meal_toggle(&st,i);
+        assert(st.mealCount==16 && meal_csv_text(&st,b,sizeof(b))==0 && meal_csv_text(&st,jbuf,449)==448 && meal_csv_text(&st,jbuf,448)==0); }
+    for(i=0;i<MEAL_CARD_COUNT;i++){ const char *p; for(p=MEAL_DECK[i].en;*p;p++) assert((unsigned char)*p<0x80); }
+    /* All 16 cards, from a PicoCalc save: the same bytes as the PicoCalc's file. */
+    fresh_dir(dir); jpath(pa,dir,"SAVE_A.JSN"); jpath(ex,dir,"EXPORT");
+    copy_file("tests/fixtures/picocalc_meals_all.jsn",pa);
+    assert(save_load(dir,&st,&gen,&active)==LOAD_OK && st.mealCount==16);
+    assert(meal_csv_export(ex,&st)); jpath(csv,ex,"MP261115.CSV");
+    assert(same_file("tests/fixtures/mealcsv/MP261115.CSV",csv));
+    st.today.date.month=2; st.today.date.day=30; assert(!meal_csv_export(ex,&st)); /* invalid date */
+    /* Through the app: entering writes nothing, leaving (Space or Esc) rewrites. */
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    meal_csv_name(&app_state(app)->today.date,name); jpath(csv,ex,name);
+    app_key(app,' '); app_key(app,KEY_ESCAPE); assert(!exists(csv)); /* nothing played: no file */
+    app_key(app,' '); app_key(app,KEY_ENTER); assert(!exists(csv));
+    app_key(app,KEY_DOWN); app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER);
+    app_key(app,KEY_DOWN); app_key(app,KEY_ENTER); app_key(app,' ');
+    assert(app_screen(app)==SCR_HOME && !row_has(hw,23,"export"));
+    assert(file_is(csv,MCSV_HEAD "1,Drinks,Coffee (Latte),1 mug\r\n2,Food,Tomato Salad,1 bowl\r\n3,Blank,Blank,\r\n"));
+    app_key(app,' '); app_key(app,KEY_LEFT); app_key(app,KEY_ENTER); app_key(app,KEY_ESCAPE);
+    assert(file_is(csv,MCSV_HEAD "1,Food,Tomato Salad,1 bowl\r\n2,Blank,Blank,\r\n"));
+    /* A failed export is shown on Home; the deck stays saved; the next exit retries. */
+    rm_tree(ex); write_file(ex,(const unsigned char*)"x",1);
+    app_key(app,' '); app_key(app,KEY_ESCAPE);
+    assert(app_screen(app)==SCR_HOME && row_has(hw,23,"Meal CSV export failed") && app_state(app)->mealCount==2);
+    assert(save_load(dir,&st,&gen,&active)==LOAD_OK && st.mealCount==2);
+    ((State*)app_state(app))->language=LANG_FR; app_key(app,' '); app_key(app,' ');
+    assert(row_has(hw,23,"Export CSV repas \202chou\202"));
+    ((State*)app_state(app))->language=LANG_EN;
+    remove(ex); lps_ensure_dirs(); app_key(app,' '); app_key(app,' ');
+    assert(!row_has(hw,23,"export") && file_is(csv,MCSV_HEAD "1,Food,Tomato Salad,1 bowl\r\n2,Blank,Blank,\r\n"));
+    /* Everything put back: the existing file is reset to its header. */
+    app_key(app,' '); app_key(app,KEY_DOWN); app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER);
+    app_key(app,KEY_DOWN); app_key(app,KEY_ENTER); app_key(app,KEY_ESCAPE);
+    assert(app_state(app)->mealCount==0 && file_is(csv,MCSV_HEAD));
+    /* An undated day: nothing written, and the planner says why. */
+    saved=app_state(app)->today.date; ((State*)app_state(app))->today.date.year=0;
+    app_key(app,' '); app_key(app,KEY_ENTER); app_key(app,KEY_ESCAPE);
+    assert(row_has(hw,23,"Set Date to export meals") && file_is(csv,MCSV_HEAD));
+    ((State*)app_state(app))->language=LANG_FR; app_key(app,' '); app_key(app,' ');
+    assert(row_has(hw,23,"Renseignez Date pour exporter les repas"));
+    ((State*)app_state(app))->language=LANG_EN; ((State*)app_state(app))->today.date=saved;
+    app_key(app,' '); app_key(app,KEY_ESCAPE);
+    assert(file_is(csv,MCSV_HEAD "1,Drinks,Coffee (Latte),1 mug\r\n"));
+    /* Closing the day writes no CSV: the closed day's file stays final, and
+     * the next day starts a new deck (and no file until a card is played). */
+    n=slurp(csv,jbuf,sizeof(jbuf));
+    app_key(app,'9'); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD && app_state(app)->mealCount==0);
+    app_key(app,KEY_ENTER);
+    assert(slurp(csv,jbuf2,sizeof(jbuf2))==n && memcmp(jbuf,jbuf2,n)==0);
+    meal_csv_name(&app_state(app)->today.date,name); jpath(next,ex,name); assert(strcmp(next,csv)!=0);
+    app_key(app,' '); app_key(app,KEY_ESCAPE); assert(!exists(next) && file_is(csv,MCSV_HEAD "1,Drinks,Coffee (Latte),1 mug\r\n"));
+    app_key(app,' '); app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER); app_key(app,' ');
+    assert(file_is(next,MCSV_HEAD "1,Drinks,Coffee (Black),1 cup\r\n"));
 }
 
 int main(void){
@@ -1500,11 +1593,12 @@ int main(void){
     check_intl_interop(tmpdir);
     check_meals_dat(tmpdir);
     check_meal_planner(tmpdir);
+    check_meal_csv(tmpdir);
     assert(orphan_hits>0); /* some edit took a name history had stored */
 
     printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
     printf("%s", " unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture),");
-    printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical), fixture decode (%u captures)\n", 0);
+    printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical), Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

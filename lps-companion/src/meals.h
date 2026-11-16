@@ -25,6 +25,27 @@ unsigned meal_first_unplayed(const State *s);
 unsigned meal_move(unsigned card, int key);
 void meal_view(const State *s, unsigned card, MealView *v);
 
+/* Meal Planner CSV (LPS-DOS-115-CHG08, PicoCalc LPS-114-CHG02): EXPORT\MPYYMMDD.CSV,
+ * the same 8.3 name and the same bytes as the PicoCalc's LPS/EXPORT file:
+ *   order,category,card,portion<CR><LF>
+ *   1,Drinks,Coffee (Latte),1 mug<CR><LF>
+ * the played cards in order of play, English names whatever the language,
+ * an empty portion for Blank cards, RFC 4180 quoting, UTF-8. */
+#define MEAL_CSV_HEADER "order,category,card,portion\r\n"
+/* "MPYYMMDD.CSV" for a day (out: 13 bytes or more). */
+void meal_csv_name(const Date *d, char *out);
+/* Appends one field at out+*used (NUL-terminated), quoted when it holds a
+ * comma, a quote or a line break; 0 when it does not fit in cap. */
+int meal_csv_field(char *out, size_t cap, size_t *used, const char *value);
+/* The whole file: the header and one line per played card. Its length, or
+ * 0 when it does not fit in cap with its NUL (all 16 cards: 448 bytes). */
+size_t meal_csv_text(const State *s, char *out, size_t cap);
+/* Rewrites export_dir\MPYYMMDD.CSV for s->today, as the PicoCalc's
+ * exportMealCsv: whole file each time; nothing played and no file yet
+ * writes nothing, while an existing file is reset to its header; a failed
+ * write removes the incomplete file. 0 on error or an invalid date. */
+int meal_csv_export(const char *export_dir, const State *s);
+
 /* MEALS.DAT, little-endian (tools/mkmeals.py writes it):
  *   0  8 bytes  magic "LPSMEALS"
  *   8  u16      version (1)

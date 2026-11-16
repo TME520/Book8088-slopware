@@ -1,5 +1,6 @@
 /* Host (Linux/gcc) platform for unit tests and headless demos. */
 #include "lps.h"
+#include "meals.h"
 #include <stdio.h>
 #include <string.h>
 #ifndef _WIN32
@@ -94,6 +95,11 @@ static int h_csv(Platform *p, const Day *day){
     return write_weight_csv(d,day);
 }
 
+static int h_meal_csv(Platform *p, const State *s){
+    char d[160]; (void)p; lps_ensure_dirs(); lps_path_join(d,sizeof(d),lps_data_dir(),"EXPORT");
+    return meal_csv_export(d,s);
+}
+
 Platform *plat_host_create(int capture){
     static HostPlat h;
     memset(&h,0,sizeof(h));
@@ -101,6 +107,7 @@ Platform *plat_host_create(int capture){
     h.iface.clear=h_clear; h.iface.text=h_text; h.iface.alert=h_alert; h.iface.large_text=h_large;
     h.iface.present=h_present; h.iface.set_palette=h_palette; h.iface.battery_low=h_batt;
     h.iface.load=h_load; h.iface.save=h_save; h.iface.export_ics=h_ics; h.iface.export_weight_csv=h_csv;
+    h.iface.export_meal_csv=h_meal_csv;
     h.palette=PAL_GREEN; h.mounted=1; h.capture=capture;
     return &h.iface;
 }

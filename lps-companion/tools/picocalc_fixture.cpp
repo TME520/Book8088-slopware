@@ -18,6 +18,10 @@
 //   ./picocalc_fixture meals IN.JSN OUT.JSN GENERATION CARD...   (LPS-DOS-115-CHG07)
 //       plays each card, or puts it back if played (toggleMealCard, the
 //       Meal Planner's Enter), and writes the save with that generation.
+//   ./picocalc_fixture mealcsv IN.JSN DIR   (LPS-DOS-115-CHG08)
+//       leaving the Meal Planner: main.cpp exportMealCsv with stdio instead of
+//       FatFs, DIR/MPYYMMDD.CSV for the save's today, written by the
+//       PicoCalc's own mealCsvName and writeMealCsv; prints the file name.
 #include "lps_companion.cpp"
 #include "save_helpers.h"
 #include <cstdio>
@@ -161,6 +165,30 @@ static int closeDay(const char* in,const char* ics,const char* csv,const char* o
     next.meals=MealDeckState{};
     return writeFile(out,next,generation+1)?0:1;
 }
+// main.cpp FileSink and exportMealCsv (LPS-114-CHG02), line for line; FatFs
+// calls replaced by stdio, DIR in place of 0:/LPS/EXPORT.
+struct StdioSink final:SaveSink {
+    FILE* file;explicit StdioSink(FILE* f):file(f){}
+    bool write(const char* data,size_t size)override{return std::fwrite(data,1,size,file)==size;}
+};
+static bool exportMealCsv(const char* dir,const Date& date,const MealDeckState& meals){
+    if(!validDate(date))return false;
+    char name[16],path[512];mealCsvName(date,name,sizeof name);
+    std::snprintf(path,sizeof path,"%s/%s",dir,name);
+    if(!meals.playedCount){
+        // Nothing played: do not create a file, but reset an existing one.
+        FILE* probe=std::fopen(path,"rb");
+        if(!probe)return true;
+        if(std::fclose(probe)!=0)return false;
+    }
+    FILE* f=std::fopen(path,"wb");if(!f)return false;
+    StdioSink sink(f);
+    const bool ok=writeMealCsv(meals,sink);
+    const bool close=std::fclose(f)==0;
+    if(!(ok&&close)){std::remove(path);return false;}
+    std::printf("%s\n",name);
+    return true;
+}
 int main(int argc,char** argv){
     const std::string mode=argc>1?argv[1]:"";
     if(mode=="full"&&argc==3){
@@ -187,6 +215,10 @@ int main(int argc,char** argv){
         for(int i=5;i<argc;++i)toggleMealCard(s.meals,unsigned(std::atoi(argv[i])));
         return writeFile(argv[3],s,uint32_t(std::atol(argv[4])))?0:1;
     }
+    if(mode=="mealcsv"&&argc==4){
+        State state;uint32_t generation=0;if(!readFile(argv[2],state,generation))return 3;
+        return exportMealCsv(argv[3],state.today.date,state.meals)?0:1;
+    }
     if(mode=="check"){
         static const char* const names[]={"valid","damaged","unsupported","ioerror"};
         for(int i=2;i<argc;++i){
@@ -197,6 +229,6 @@ int main(int argc,char** argv){
         }
         return 0;
     }
-    std::fprintf(stderr,"usage: %s full|custom|intl OUT.JSN | resave IN.JSN OUT.JSN | check FILE... | close IN.JSN OUT.ICS OUT.CSV OUT.JSN | meals IN.JSN OUT.JSN GENERATION CARD...\n",argv[0]);
+    std::fprintf(stderr,"usage: %s full|custom|intl OUT.JSN | resave IN.JSN OUT.JSN | check FILE... | close IN.JSN OUT.ICS OUT.CSV OUT.JSN | meals IN.JSN OUT.JSN GENERATION CARD... | mealcsv IN.JSN DIR\n",argv[0]);
     return 2;
 }

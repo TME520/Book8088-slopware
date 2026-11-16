@@ -329,6 +329,14 @@ static int dos_export_csv(Platform *p, const Day *day){
     return write_weight_csv(weights_dir, day);
 }
 
+static int dos_export_meal_csv(Platform *p, const State *s){
+    char export_dir[160];
+    (void)p;
+    lps_ensure_dirs();
+    lps_path_join(export_dir,sizeof(export_dir),lps_data_dir(),"EXPORT");
+    return meal_csv_export(export_dir,s);
+}
+
 static int probe_storage(void){
     char test[160]; FILE *f;
     lps_ensure_dirs();
@@ -356,6 +364,7 @@ Platform *plat_dos_create(void){
     dp->iface.meal_open=dos_meal_open;
     dp->iface.meal_card=dos_meal_card;
     dp->iface.meal_close=dos_meal_close;
+    dp->iface.export_meal_csv=dos_export_meal_csv;
     dp->palette=PAL_GREEN;
     detect_video(dp);
     detect_adapter(dp);

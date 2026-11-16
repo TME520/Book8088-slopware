@@ -170,6 +170,9 @@ struct Platform {
     int  (*meal_open)(Platform *self);
     int  (*meal_card)(Platform *self, const MealView *view);
     void (*meal_close)(Platform *self);
+    /* LPS-DOS-115-CHG08: rewrites EXPORT\MPYYMMDD.CSV for s->today
+     * (meal_csv_export); 0 on failure. NULL: nothing to write. */
+    int  (*export_meal_csv)(Platform *self, const State *s);
     void *user;
 };
 

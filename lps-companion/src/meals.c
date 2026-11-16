@@ -32,6 +32,71 @@ const char *meal_row_name(unsigned row, int language){
     if(row>=MEAL_ROW_COUNT) row=MEAL_BLANK;
     return language==LANG_FR?fr[row]:en[row];
 }
+/* ---- Meal Planner CSV (LPS-DOS-115-CHG08), line for line the PicoCalc's
+ * lps_companion.cpp mealCsvName / writeCsvField / writeMealCsv and main.cpp
+ * exportMealCsv (a FatFs sink there, a buffer and stdio here). The names written are the
+ * English ones of MEAL_DECK and the row names below: plain ASCII, so the
+ * CP437 build step leaves them alone and the bytes match the PicoCalc's. */
+void meal_csv_name(const Date *d, char *out){
+    sprintf(out,"MP%02u%02u%02u.CSV",(unsigned)(d->year%100),(unsigned)d->month,(unsigned)d->day);
+}
+static int append(char *out, size_t cap, size_t *used, const char *p, size_t n){
+    if(*used+n>=cap) return 0;
+    memcpy(out+*used,p,n); *used+=n; out[*used]=0; return 1;
+}
+int meal_csv_field(char *out, size_t cap, size_t *used, const char *value){
+    /* One pass that copies while it looks for , " CR LF: strpbrk on each
+     * field took most of the 0.1 s a full deck needed at 8088 speed. */
+    size_t u=*used; const char *p=value; char c;
+    while((c=*p)!=0 && c!=',' && c!='"' && c!='\r' && c!='\n'){
+        if(u+1>=cap) return 0;
+        out[u++]=c; p++;
+    }
+    if(!c){ out[u]=0; *used=u; return 1; }
+    /* Quoted, quotes doubled. */
+    u=*used;
+    if(u+1>=cap) return 0;
+    out[u++]='"';
+    for(p=value;(c=*p)!=0;p++){
+        if(u+(c=='"'?2:1)>=cap) return 0;
+        if(c=='"') out[u++]='"';
+        out[u++]=c;
+    }
+    if(u+1>=cap) return 0;
+    out[u++]='"'; out[u]=0; *used=u; return 1;
+}
+size_t meal_csv_text(const State *s, char *out, size_t cap){
+    unsigned i; size_t u=0; int ok=append(out,cap,&u,MEAL_CSV_HEADER,sizeof(MEAL_CSV_HEADER)-1);
+    for(i=0;i<s->mealCount&&ok;++i){
+        const MealCard *card=&MEAL_DECK[s->meals[i]<MEAL_CARD_COUNT?s->meals[i]:0];
+        char number[8]; sprintf(number,"%u,",i+1);
+        ok=append(out,cap,&u,number,strlen(number))&&meal_csv_field(out,cap,&u,meal_row_name(card->row,LANG_EN))
+            &&append(out,cap,&u,",",1)&&meal_csv_field(out,cap,&u,card->en)&&append(out,cap,&u,",",1)
+            &&meal_csv_field(out,cap,&u,card->row==MEAL_BLANK?"":card->enPortion)&&append(out,cap,&u,"\r\n",2);
+    }
+    return ok?u:0;
+}
+int meal_csv_export(const char *export_dir, const State *s){
+    char name[16], path[200]; FILE *f; int ok; size_t n;
+    if(!valid_date(s->today.date)) return 0;
+    meal_csv_name(&s->today.date,name);
+    if(strlen(export_dir)+2+strlen(name)>sizeof(path)) return 0;
+    lps_path_join(path,sizeof(path),export_dir,name);
+    if(!s->mealCount){
+        /* Nothing played: do not create a file, but reset an existing one. */
+        f=fopen(path,"rb"); if(!f) return 1;
+        fclose(f);
+    }
+    /* Built in the far export buffer and written at once: 16 lines of small
+     * fwrite calls took 144 ms at 8088 speed. */
+    n=meal_csv_text(s,lps_buf->ics,sizeof(lps_buf->ics));
+    f=fopen(path,"wb"); if(!f) return 0;
+    ok=n&&fwrite(lps_buf->ics,1,n,f)==n;
+    if(fclose(f)!=0) ok=0;
+    if(!ok){ remove(path); return 0; }
+    return 1;
+}
+
 unsigned meal_play_position(const State *s, unsigned card){
     unsigned i;
     for(i=0;i<s->mealCount;i++) if(s->meals[i]==card) return i+1;
