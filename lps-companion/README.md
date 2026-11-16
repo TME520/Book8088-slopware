@@ -9,7 +9,7 @@ Companion). Data lives under `C:\LPS\` by default and uses the **same**
 `SAVE_A.JSN` / `SAVE_B.JSN` (JSON save, schema 2), `EXPORT\*.ics` and
 `WEIGHTS\*.csv` formats as the PicoCalc firmware v1.13 and later.
 
-Ready-to-run files are at the **repository root** (the directory above this one): [`../LPSCOMP.EXE`](../LPSCOMP.EXE), [`../ROSARY.DAT`](../ROSARY.DAT), [`../MEALS.DAT`](../MEALS.DAT) and [`../HELLO.EXE`](../HELLO.EXE). Copy **`LPSCOMP.EXE`, `ROSARY.DAT` and `MEALS.DAT` into the same directory** on the Book 8088; `ROSARY.DAT` holds the rosary prayer texts and `MEALS.DAT` the Meal Planner card pictures. Without `ROSARY.DAT` everything works except the Rosary, which then shows *ROSARY.DAT not found: copy it next to LPSCOMP.EXE*; without `MEALS.DAT` the Meal Planner runs in text mode. `make dos`, `make rosary`, `make meals` and `make hello` rebuild into this directory only; those local copies are gitignored. After a source change, copy the new files up (`cp LPSCOMP.EXE ROSARY.DAT MEALS.DAT HELLO.EXE ..`) so the root copies stay current. CI rebuilds and fails if the root files differ.
+Ready-to-run files are at the **repository root** (the directory above this one): [`../LPSCOMP.EXE`](../LPSCOMP.EXE), [`../ROSARY.DAT`](../ROSARY.DAT), [`../MEALS.DAT`](../MEALS.DAT), [`../MEALSCGA.DAT`](../MEALSCGA.DAT) and [`../HELLO.EXE`](../HELLO.EXE). Copy **`LPSCOMP.EXE`, `ROSARY.DAT`, `MEALS.DAT` and `MEALSCGA.DAT` into the same directory** on the Book 8088; `ROSARY.DAT` holds the rosary prayer texts, `MEALS.DAT` the Meal Planner card pictures for EGA and `MEALSCGA.DAT` the same pictures for CGA (LPS-DOS-115-CHG14). Without `ROSARY.DAT` everything works except the Rosary, which then shows *ROSARY.DAT not found: copy it next to LPSCOMP.EXE*; without `MEALS.DAT` the Meal Planner runs in text mode on EGA; without `MEALSCGA.DAT` the CGA planner shows empty card frames. `make dos`, `make rosary`, `make meals`, `make mealscga` and `make hello` rebuild into this directory only; those local copies are gitignored. After a source change, copy the new files up (`cp LPSCOMP.EXE ROSARY.DAT MEALS.DAT MEALSCGA.DAT HELLO.EXE ..`) so the root copies stay current. CI rebuilds and fails if the root files differ.
 
 The screen is the full **80×25** text mode (no 43/50-line modes). Home is two panes: the menu on the left, and a day summary (date, weight, reminders, kanban counts) on the right. The 22 activities sit on one page in three columns (see *Activities* below). Kanban shows TODO, DOING and DONE side by side. The rosary uses 80-character lines; the timer stays centered. Keys, English and French wording, palettes, and the SAVE/ICS/CSV bytes are unchanged. On the 8088 the video driver rewrites only the rows that changed.
 
@@ -163,7 +163,7 @@ The Book 8088 has a **CGA** card, so the planner now has a CGA graphics mode as 
 
 - **Same layout as EGA, scaled to 320×200.** The title, labels and footer use an 8×8 font on a 40-column grid. Each 80-column row is folded to 40 columns by `lps_fold_row` (`src/wrap.c`, host-tested): blocks of text separated by 6 or more spaces keep their text and are placed by where they sat (right edge → right-aligned, centred → centred, else the left indent is halved); blocks never overlap, and anything too wide is cut. The card (176×136, text rows 5–21) has a yellow rounded border with the row's name on its band, the picture box, the name, and the portion on a red ribbon with notched ends.
 - **Font:** `src/cgafont.c` holds the CGA's 8×8 CP437 font (2 KB, taken from DOSBox Staging, GPL-2.0-or-later). Many CGA BIOSes leave the upper-128 glyphs (INT 1Fh) empty, so without it é, è, É and the other accented letters would not show in graphics mode.
-- **Temporary placeholder card:** there are **no pictures on CGA yet**. The picture box is a dotted frame; a played card gets a dithered border and **PLAYED #n** / **JOUÉE #n** inside the box. Dithered 4-colour pictures (`MEALSCGA.DAT`, about 160×96) come with LPS-DOS-115-CHG14, and dithered played cards with CHG15. `MEALS.DAT` is not read on CGA.
+- **Pictures:** since LPS-DOS-115-CHG14 the picture box shows the card's picture from `MEALSCGA.DAT` (next section). In CHG13 it was a dotted placeholder frame, which now shows only when `MEALSCGA.DAT` is missing or damaged. A played card gets a dithered border and **PLAYED #n** / **JOUÉE #n** over the picture; a dithered played card comes with CHG15. `MEALS.DAT` is not read on CGA.
 - **Mode switches:** leaving the planner, or opening Config/Space over it with TAB, sets the text mode back, with bright backgrounds instead of blink, the cursor hidden and the text palette restored (the BIOS mode set reloads 3D9h). Coming back sets mode 04h again and redraws the whole screen.
 - **Files unchanged:** saves, `MPYYMMDD.CSV`, ICS and weight CSV are the same bytes on every screen.
 - **Speed on an 8088** (DOSBox `machine=cga`, `cputype=8086`, `cycles=fixed 300`):
@@ -180,7 +180,44 @@ The Book 8088 has a **CGA** card, so the planner now has a CGA graphics mode as 
   EGA for comparison: open 0.50 s, card 0.23 s.
 - **CGA snow:** mode 04h does not snow, even on an original IBM CGA (snow only hits its 80-column text mode). The text screens write VRAM directly as before, so a true IBM CGA or an exact clone could show brief snow there; most later CGA chips do not. DOSBox shows no snow either way. Check this on the Book 8088 ([`BOOK8088-TEST.md`](BOOK8088-TEST.md)).
 
-![Meal Planner, CGA](captures/10-meal-planner-cga.png)
+### CGA pictures: MEALSCGA.DAT (LPS-DOS-115-CHG14)
+
+The CGA planner now shows the card pictures, converted from the user's own sheets (`assets/meal_deck_sheet1.png`, `assets/meal_deck_sheet2.png`; nothing redrawn). The user picked the conversion from three trial sheets: **B, Atkinson error diffusion**.
+
+- **Conversion** (`tools/mkmealscga.py`, Python 3 standard library only, `make mealscga`):
+  1. The same crop as `tools/mkmeals.py`, which it imports.
+  2. The drawing is fitted into the **160×96** picture box with the CGA pixel aspect (1.2).
+  3. Saturation ×1.35, then contrast ×1.15.
+  4. Serpentine Atkinson dithering in linear light, nearest colour in CIELAB, to palette 0 high intensity. The error is clamped and never spreads to the card background.
+  5. The background is colour 0: black, or blue with the Blue theme.
+- **Deterministic:** `make test` rebuilds the file and compares it with `../MEALSCGA.DAT`, like `MEALS.DAT`.
+- **File:** 49,996 bytes.
+  - Magic `LPSMEALC`, version 1, 13 pictures of 160×96, 3,840 bytes each.
+  - A table with each picture's 32-bit sum, protected by a CRC-32.
+  - The pictures, in the CGA's own 2-bit layout (40 bytes per row, leftmost pixel in bits 7–6), so one row is one copy to video memory.
+  - `src/meals.c` reads `MEALS.DAT` and `MEALSCGA.DAT` with the same code.
+- **On demand, CGA only:**
+  - The table (52 bytes) is read when the planner opens.
+  - A picture is read the first time its card shows, its sum is checked, and it is kept in far memory (3.75 KB each, at most 49 KB) until the planner closes.
+  - `MEALS.DAT` is not read on CGA, and `MEALSCGA.DAT` is not read on EGA.
+- **Fallback:** if `MEALSCGA.DAT` is missing, damaged, or a picture fails its sum, the planner stays in CGA graphics. The card shows the dotted empty frame (and *~ Blank ~* on Blank cards), and row 23 says *MEALSCGA.DAT missing: no pictures* or *MEALSCGA.DAT damaged: no pictures* (FR: *MEALSCGA.DAT absent : pas d'images*, *MEALSCGA.DAT abîmé : pas d'images*). Both messages fit the 40-column row.
+- **Speed on an 8088** (DOSBox `machine=cga`, `cputype=8086`, `cycles=fixed 300`):
+
+  | Action | Time |
+  |---|---|
+  | Space from Home (mode 04h, table, first picture) | 0.55 s |
+  | Card not seen yet (disk read + sum + draw) | 0.22–0.24 s |
+  | Card already in memory | 0.20–0.21 s |
+  | Enter, play / put back | 0.28 s |
+  | TAB → Config | 0.17 s |
+  | TAB → planner (redraw with picture) | 0.39 s |
+  | TAB/TAB round trip | 0.59 s |
+  | Esc to Home (save + CSV) | 0.72 s |
+  | Space/Space round trip (pictures read again) | 0.75 s |
+
+  DOSBox reads files almost instantly. On the Book 8088's own disk, a picture's first read (3.8 KB) will add more.
+
+![Meal Planner, CGA pictures](captures/10-meal-planner-cga.png)
 
 ![Meal Planner, CGA, played card in French](captures/11-meal-planner-cga-played-fr.png)
 
@@ -188,10 +225,10 @@ The Book 8088 has a **CGA** card, so the planner now has a CGA graphics mode as 
 
 - MS-DOS 3.3+ / FreeDOS / MS-DOS 7.x (FAT12/16)
 - Intel 8088 or compatible (EXE built with Open Watcom `-0`)
-- ~310 KB free disk for `LPSCOMP.EXE` (~103 KB), `ROSARY.DAT` (~10 KB) and `MEALS.DAT` (~196 KB); the data folder grows with history (each JSON save is up to about 10 KB)
+- ~360 KB free disk for `LPSCOMP.EXE` (~104 KB), `ROSARY.DAT` (~10 KB), `MEALS.DAT` (~196 KB) and `MEALSCGA.DAT` (~49 KB); the data folder grows with history (each JSON save is up to about 10 KB)
 - Colour text (CGA/EGA/VGA) for palettes; mono still readable
-- EGA (128 KB or more) or VGA in colour for the Meal Planner pictures; a colour CGA gets the CGA planner without pictures (LPS-DOS-115-CHG13); otherwise the planner runs in text mode
-- Python 3 to build `MEALS.DAT` (`make meals`, `make test`)
+- EGA (128 KB or more) or VGA in colour for the Meal Planner pictures; a colour CGA gets the CGA planner (LPS-DOS-115-CHG13) with the `MEALSCGA.DAT` pictures (LPS-DOS-115-CHG14); otherwise the planner runs in text mode
+- Python 3 to build `MEALS.DAT` and `MEALSCGA.DAT` (`make meals`, `make mealscga`, `make test`)
 - Open Watcom C/C++ (v2) to build; gcc to run the host tests
 
 ## Feature parity (Companion v1.15)
@@ -216,7 +253,7 @@ The Book 8088 has a **CGA** card, so the planner now has a CGA graphics mode as 
 | Dual A/B JSON save (`SAVE_A/B.JSN`, schema 2) + CRC | Yes (read **and** write, PicoCalc-compatible) |
 | `SAVE_A/B.BIN` v1–v6 migration | Yes (read once; `.BIN` files left untouched) |
 | ICS + weights CSV byte-compatible | Yes |
-| Meal Planner (16 cards, Space, card pictures) | Yes (LPS-DOS-115-CHG07, EGA graphics; CGA 320×200 placeholder cards, LPS-DOS-115-CHG13; text mode otherwise) |
+| Meal Planner (16 cards, Space, card pictures) | Yes (LPS-DOS-115-CHG07, EGA graphics; CGA 320×200, LPS-DOS-115-CHG13, with dithered pictures from LPS-DOS-115-CHG14; text mode otherwise) |
 | Meal Planner CSV `EXPORT\MPYYMMDD.CSV` byte-compatible | Yes (LPS-DOS-115-CHG08, same name as the PicoCalc) |
 
 ## Build
@@ -245,12 +282,13 @@ From this directory:
 make dos      # LPSCOMP.EXE  (-0 -bt=dos -ml, 8086/8088, soft FP, 4 KB stack)
 make rosary   # ROSARY.DAT   prayer texts, built by tools/mkrosary (host gcc)
 make meals    # MEALS.DAT    Meal Planner pictures, built by tools/mkmeals.py (python3)
+make mealscga # MEALSCGA.DAT the same pictures for CGA, built by tools/mkmealscga.py (python3)
 make hello    # HELLO.EXE    BIOS smoke test
-make test     # host gcc tests (no WATCOM required; builds ROSARY.DAT and MEALS.DAT first)
+make test     # host gcc tests (no WATCOM required; builds ROSARY.DAT, MEALS.DAT and MEALSCGA.DAT first)
 make clean
 ```
 
-`make` (no target) builds both EXEs, `ROSARY.DAT` and `MEALS.DAT`, and runs the host tests. `make dos` and
+`make` (no target) builds both EXEs, `ROSARY.DAT`, `MEALS.DAT` and `MEALSCGA.DAT`, and runs the host tests. `make dos` and
 `make hello` prepend `$WATCOM/binl64` (or `binl`) to `PATH` for that command:
 `wcl` looks up `wcc` and `wlink` on `PATH`, not beside the `wcl` binary.
 `make captures` regenerates text dumps under `captures/` with the host UI driver.
@@ -271,8 +309,8 @@ wcl -0 -bt=dos -ml -zt256 -ox -fpc -k4096 -dLPS_DOS -i=$G -fe=LPSCOMP.EXE \
 
 ### Host tests (gcc, no DOS)
 
-`make test` builds `tools/mkrosary`, `ROSARY.DAT` and `MEALS.DAT` (and
-checks that `MEALS.DAT` matches the copy at the repository root), then
+`make test` builds `tools/mkrosary`, `ROSARY.DAT`, `MEALS.DAT` and `MEALSCGA.DAT` (and
+checks that `MEALS.DAT` and `MEALSCGA.DAT` match the copies at the repository root), then
 `tests/test_storage` from the CP437 copies, and runs it from this directory so
 it finds `tests/fixtures/v12_payload.bin`, the PicoCalc JSON saves
 `tests/fixtures/picocalc_*.jsn` and `ROSARY.DAT`. The JSON tests cover the
@@ -328,7 +366,7 @@ The EXE uses Open Watcom's **large model** (`-ml`): far data pointers and one
 code segment per module. The 64 KB DGROUP (near data + 4 KB stack) used to be
 almost full (63,088 bytes); it is now about 19 KB (17,664 bytes with
 LPS-DOS-115-CHG06d, 18,992 bytes with the EGA Meal Planner of
-LPS-DOS-115-CHG07, 19,552 bytes with the CGA planner of LPS-DOS-115-CHG13). The Meal Planner pictures live in `MEALS.DAT` and the far
+LPS-DOS-115-CHG07, 19,552 bytes with the CGA planner of LPS-DOS-115-CHG13, 19,984 bytes with the MEALSCGA.DAT reader of LPS-DOS-115-CHG14). The Meal Planner pictures live in `MEALS.DAT` and the far
 heap, never in DGROUP.
 
 - The prayer texts are not in the EXE. `tools/mkrosary` builds `ROSARY.DAT`
@@ -440,7 +478,7 @@ Other screens (activities, kanban, rosary, timer) are in `captures/`.
 
 ## Install on a real machine / DOSBox
 
-1. Copy the repository-root `LPSCOMP.EXE`, **`ROSARY.DAT` and `MEALS.DAT`** into the same directory on a floppy or the hard disk (and `HELLO.EXE` for the smoke test).
+1. Copy the repository-root `LPSCOMP.EXE`, **`ROSARY.DAT`, `MEALS.DAT` and `MEALSCGA.DAT`** into the same directory on a floppy or the hard disk (and `HELLO.EXE` for the smoke test).
 2. Create `C:\LPS` (or pass the path as argv: `LPSCOMP D:\DATA`).
 3. Optional: `SET LPSDIR=C:\LPS`
 4. Run `LPSCOMP` or `LPSCOMP C:\LPS`.
@@ -449,7 +487,7 @@ Other screens (activities, kanban, rosary, timer) are in `captures/`.
 DOSBox-X or DOSBox Staging. `dosbox.conf` mounts the current directory as `C:` and sets an 8086 CPU with EGA, so the EXE has to sit in this directory. Copy the root binaries down (they are gitignored here) or use a local `make dos`, then start DOSBox:
 
 ```sh
-cp ../LPSCOMP.EXE ../ROSARY.DAT ../MEALS.DAT ../HELLO.EXE .
+cp ../LPSCOMP.EXE ../ROSARY.DAT ../MEALS.DAT ../MEALSCGA.DAT ../HELLO.EXE .
 dosbox-x -conf dosbox.conf
 ```
 
@@ -538,11 +576,12 @@ byte-compatible with the firmware.
 | `src/cp437.c` | CP437 ↔ Unicode table; CP437 ↔ UTF-8 for the save and the ICS |
 | `tools/cp437.c` | Build step: UTF-8 string literals → CP437 copies in `build/cp437/` |
 | `src/wrap.c` | Word wrap at spaces for the 80-column screen (rosary texts); 80 → 40 column fold for CGA (LPS-DOS-115-CHG13) |
-| `src/meals.c` | Meal Planner deck, keys and played order; loads `MEALS.DAT`; writes `EXPORT\MPYYMMDD.CSV` |
+| `src/meals.c` | Meal Planner deck, keys and played order; loads `MEALS.DAT` and `MEALSCGA.DAT`; writes `EXPORT\MPYYMMDD.CSV` |
 | `src/ega.c` | EGA mode 10h drawing for the Meal Planner (DOS only) |
-| `src/cga.c`, `src/cga.h` | CGA mode 04h drawing for the Meal Planner, placeholder card (DOS only, LPS-DOS-115-CHG13) |
+| `src/cga.c`, `src/cga.h` | CGA mode 04h drawing for the Meal Planner, card with its `MEALSCGA.DAT` picture (DOS only, LPS-DOS-115-CHG13/14) |
 | `src/cgafont.c` | 8×8 CP437 font for CGA graphics (2 KB) |
 | `tools/mkmeals.py` | Writes `MEALS.DAT` from `assets/meal_deck_sheet*.png` |
+| `tools/mkmealscga.py` | Writes `MEALSCGA.DAT` (CGA pictures, Atkinson dithering) from the same sheets (LPS-DOS-115-CHG14) |
 | `assets/meal_deck_sheet*.png` | The PicoCalc's Meal Planner card illustrations |
 | `src/plat_dos.c` | BIOS video/keyboard/timer; EGA/CGA detection and switch for the Meal Planner |
 | `src/plat_host.c` | Linux host for tests |
@@ -558,12 +597,12 @@ byte-compatible with the firmware.
 - Capitals À, È, Ê, Ô and Â show without their accent: code page 437 does not have them (LPS-DOS-115-CHG03).
 - ICS files are named `EXPORT\YYYYMMDD.ICS` (8.3) instead of `YYYY-MM-DD_LPS-Companion.ics`; the content is the same (LPS-DOS-115-CHG02c).
 - Saves are written when leaving a screen, confirming Date/Weight/Config, closing the day or quitting (**Q**), not after every change; the Meal Planner saves when it closes, not after each card. After a write DOS checks the CRC-32 only, not a full re-parse (8088 speed).
-- Meal Planner pictures are checked with a 32-bit sum instead of a CRC-32 (8088 speed). On CGA the planner is in 320×200 graphics, with **placeholder cards without pictures until LPS-DOS-115-CHG14/15**; without colour EGA or CGA it is in text mode.
+- Meal Planner pictures are checked with a 32-bit sum instead of a CRC-32 (8088 speed). On CGA the planner is in 320×200 graphics with 4-colour dithered pictures (LPS-DOS-115-CHG14); a played card keeps its picture under a dithered border and PLAYED #n until CHG15. Without colour EGA or CGA it is in text mode.
 - No low-battery warning (no such hardware). Config has no "SD import" entry: the DOS disk **is** the storage.
 
 ## Captures
 
-PNG screenshots under `captures/`, all raw 640×350 DOSBox grabs of v1.15 at 8088 speed (`machine=ega`, `cputype=8086`, `cycles=fixed 300`, LPS-DOS-115-CHG12): Home EN/FR, Activities, Kanban, Rosary mode, Timer, a DOSBox Home grab and the EGA Meal Planner (EN, and FR with a played card); since LPS-DOS-115-CHG13 also two raw 320×200 grabs of the CGA planner (`machine=cga`): `10-meal-planner-cga.png` (EN, Blue theme) and `11-meal-planner-cga-played-fr.png` (FR, Green theme, played card). Text dumps are not stored; `make captures` rewrites
+PNG screenshots under `captures/`, all raw 640×350 DOSBox grabs of v1.15 at 8088 speed (`machine=ega`, `cputype=8086`, `cycles=fixed 300`, LPS-DOS-115-CHG12): Home EN/FR, Activities, Kanban, Rosary mode, Timer, a DOSBox Home grab and the EGA Meal Planner (EN, and FR with a played card); since LPS-DOS-115-CHG13 also two raw 320×200 grabs of the CGA planner (`machine=cga`), retaken with the `MEALSCGA.DAT` pictures in LPS-DOS-115-CHG14: `10-meal-planner-cga.png` (EN, Blue theme, Coffee (Latte)) and `11-meal-planner-cga-played-fr.png` (FR, Green theme, Biscuit played). Text dumps are not stored; `make captures` rewrites
 `captures/*.txt` from the host UI driver.
 
 ---
@@ -576,7 +615,7 @@ Memes formats `SAVE_A/B.JSN` (sauvegarde JSON, schema 2), ICS et CSV que le firm
 
 Seul le nom du fichier ICS differe de la PicoCalc (LPS-DOS-115-CHG02c) : `EXPORT\YYYYMMDD.ICS`, par exemple `EXPORT\20260917.ICS`, au lieu de `YYYY-MM-DD_LPS-Companion.ics`. DOS ne garde que des noms 8.3 et coupait le nom long en `YYYY-MM-.ICS` : tous les jours d'un mois ecrasaient le meme fichier. Le contenu ne change pas, et les anciens fichiers deja dans `EXPORT\` restent en place. Sous Linux, un disque FAT affiche en general ces noms en majuscules : un lecteur qui ne cherche que `*.ics` ne les voit pas.
 
-Les fichiers prets a lancer sont a la **racine du depot** : [`../LPSCOMP.EXE`](../LPSCOMP.EXE), [`../ROSARY.DAT`](../ROSARY.DAT), [`../MEALS.DAT`](../MEALS.DAT) et [`../HELLO.EXE`](../HELLO.EXE). Copiez **`LPSCOMP.EXE`, `ROSARY.DAT` et `MEALS.DAT` dans le meme dossier** sur le Book 8088 ; `ROSARY.DAT` contient les textes du rosaire et `MEALS.DAT` les images des cartes du planificateur de repas. Sans `ROSARY.DAT`, tout fonctionne sauf le rosaire, qui affiche *ROSARY.DAT introuvable : copiez-le a cote de LPSCOMP.EXE* ; sans `MEALS.DAT`, le planificateur passe en mode texte. `make dos` / `make rosary` / `make meals` / `make hello` reconstruisent seulement dans ce dossier (copies non versionnees). Apres une modification des sources, recopiez-les a la racine (`cp LPSCOMP.EXE ROSARY.DAT MEALS.DAT HELLO.EXE ..`). La CI reconstruit et echoue si les fichiers a la racine different.
+Les fichiers prets a lancer sont a la **racine du depot** : [`../LPSCOMP.EXE`](../LPSCOMP.EXE), [`../ROSARY.DAT`](../ROSARY.DAT), [`../MEALS.DAT`](../MEALS.DAT), [`../MEALSCGA.DAT`](../MEALSCGA.DAT) et [`../HELLO.EXE`](../HELLO.EXE). Copiez **`LPSCOMP.EXE`, `ROSARY.DAT`, `MEALS.DAT` et `MEALSCGA.DAT` dans le meme dossier** sur le Book 8088 ; `ROSARY.DAT` contient les textes du rosaire, `MEALS.DAT` les images des cartes du planificateur de repas en EGA et `MEALSCGA.DAT` les memes images en CGA (LPS-DOS-115-CHG14). Sans `ROSARY.DAT`, tout fonctionne sauf le rosaire, qui affiche *ROSARY.DAT introuvable : copiez-le a cote de LPSCOMP.EXE* ; sans `MEALS.DAT`, le planificateur passe en mode texte en EGA ; sans `MEALSCGA.DAT`, le planificateur CGA montre des cadres vides. `make dos` / `make rosary` / `make meals` / `make mealscga` / `make hello` reconstruisent seulement dans ce dossier (copies non versionnees). Apres une modification des sources, recopiez-les a la racine (`cp LPSCOMP.EXE ROSARY.DAT MEALS.DAT MEALSCGA.DAT HELLO.EXE ..`). La CI reconstruit et echoue si les fichiers a la racine different.
 
 L'ecran utilise tout le mode texte **80×25**. L'accueil a deux volets : le menu a gauche, le resume du jour a droite (date, poids, rappels, kanban). Les 22 activites tiennent sur une page en trois colonnes (voir *Activites* plus bas). Le kanban montre A FAIRE, EN COURS et FINI cote a cote. Le rosaire utilise des lignes de 80 caracteres ; le minuteur reste centre. Les touches, les textes, les palettes et les octets SAVE/ICS/CSV ne changent pas. Sur 8088, seules les lignes modifiees sont reecrites.
 
@@ -713,7 +752,7 @@ Le Book 8088 a une carte **CGA** : le planificateur a donc aussi un mode graphiq
 
 - **Même disposition qu'en EGA, ramenée à 320×200.** Le titre, les libellés et le pied de page utilisent une police 8×8 sur une grille de 40 colonnes. Chaque ligne de 80 colonnes est repliée sur 40 colonnes par `lps_fold_row` (`src/wrap.c`, testé sur l'hôte) : les blocs de texte séparés par 6 espaces ou plus gardent leur texte et leur place (bord droit → aligné à droite, centré → centré, sinon retrait gauche divisé par deux) ; les blocs ne se chevauchent jamais et ce qui dépasse est coupé. La carte (176×136, lignes 5 à 21) a un bord jaune arrondi avec le nom de la rangée sur son bandeau, le cadre de l'image, le nom, et la portion sur un ruban rouge à bouts échancrés.
 - **Police :** `src/cgafont.c` contient la police CP437 8×8 du CGA (2 Ko, reprise de DOSBox Staging, GPL-2.0 ou ultérieure). Beaucoup de BIOS CGA laissent vides les 128 caractères du haut (INT 1Fh) : sans elle, é, è, É et les autres lettres accentuées ne s'afficheraient pas en mode graphique.
-- **Carte provisoire :** **pas encore d'images en CGA**. Le cadre de l'image est en pointillés ; une carte jouée a un bord tramé et **JOUÉE #n** / **PLAYED #n** dans le cadre. Les images tramées en 4 couleurs (`MEALSCGA.DAT`, environ 160×96) arrivent avec LPS-DOS-115-CHG14, et les cartes jouées tramées avec CHG15. `MEALS.DAT` n'est pas lu en CGA.
+- **Images :** depuis LPS-DOS-115-CHG14, le cadre montre l'image de la carte, lue dans `MEALSCGA.DAT` (section suivante). Dans CHG13, c'était un cadre provisoire en pointillés, qui n'apparaît plus que si `MEALSCGA.DAT` manque ou est abîmé. Une carte jouée a un bord tramé et **JOUÉE #n** / **PLAYED #n** par-dessus l'image ; une carte jouée tramée arrive avec CHG15. `MEALS.DAT` n'est pas lu en CGA.
 - **Changements de mode :** quitter le planificateur, ou ouvrir Config/Espace par-dessus avec TAB, remet le mode texte, avec fonds clairs au lieu du clignotement, curseur caché et palette texte rétablie (le changement de mode BIOS recharge 3D9h). Au retour, le mode 04h est remis et tout l'écran est redessiné.
 - **Fichiers inchangés :** sauvegardes, `MPYYMMDD.CSV`, ICS et CSV des poids sont les mêmes octets quel que soit l'écran.
 - **Vitesse sur 8088** (DOSBox `machine=cga`, `cputype=8086`, `cycles=fixed 300`) :
@@ -729,6 +768,43 @@ Le Book 8088 a une carte **CGA** : le planificateur a donc aussi un mode graphiq
 
   En EGA, pour comparer : ouverture 0,50 s, carte 0,23 s.
 - **« Neige » CGA :** le mode 04h ne neige pas, même sur une CGA IBM d'origine (la neige ne touche que son mode texte 80 colonnes). Les écrans texte écrivent toujours directement en mémoire vidéo : une vraie CGA IBM ou un clone exact pourrait y montrer un peu de neige ; la plupart des puces CGA plus récentes non. DOSBox n'en montre jamais. À vérifier sur le Book 8088 ([`BOOK8088-TEST.md`](BOOK8088-TEST.md)).
+
+### Images CGA : MEALSCGA.DAT (LPS-DOS-115-CHG14)
+
+Le planificateur CGA affiche maintenant les images des cartes, converties depuis les planches de l'utilisateur (`assets/meal_deck_sheet1.png`, `assets/meal_deck_sheet2.png` ; rien n'est redessiné). L'utilisateur a choisi la conversion parmi trois planches d'essai : **B, diffusion d'erreur d'Atkinson**.
+
+- **Conversion** (`tools/mkmealscga.py`, Python 3, bibliothèque standard seulement, `make mealscga`) :
+  1. Le même découpage que `tools/mkmeals.py`, qu'il importe.
+  2. Le dessin est ajusté au cadre de **160×96** avec le rapport des pixels CGA (1,2).
+  3. Saturation ×1,35, puis contraste ×1,15.
+  4. Tramage d'Atkinson en serpentin, en lumière linéaire, couleur la plus proche en CIELAB, vers la palette 0 haute intensité. L'erreur est bornée et ne déborde jamais sur le fond de la carte.
+  5. Le fond est la couleur 0 : noir, ou bleu avec le thème Bleu.
+- **Déterministe :** `make test` reconstruit le fichier et le compare à `../MEALSCGA.DAT`, comme `MEALS.DAT`.
+- **Fichier :** 49 996 octets.
+  - Signature `LPSMEALC`, version 1, 13 images de 160×96, de 3 840 octets chacune.
+  - Une table avec la somme 32 bits de chaque image, protégée par un CRC-32.
+  - Les images, dans la disposition 2 bits du CGA (40 octets par ligne, pixel de gauche dans les bits 7-6) : une ligne se copie d'un bloc en mémoire vidéo.
+  - `src/meals.c` lit `MEALS.DAT` et `MEALSCGA.DAT` avec le même code.
+- **À la demande, en CGA seulement :**
+  - La table (52 octets) est lue à l'ouverture du planificateur.
+  - Une image est lue la première fois que sa carte s'affiche, sa somme est vérifiée, et elle reste en mémoire lointaine (3,75 Ko chacune, 49 Ko au plus) jusqu'à la fermeture du planificateur.
+  - `MEALS.DAT` n'est pas lu en CGA, et `MEALSCGA.DAT` n'est pas lu en EGA.
+- **Repli :** si `MEALSCGA.DAT` manque, est abîmé, ou si une image a une mauvaise somme, le planificateur reste en graphique CGA. La carte montre le cadre vide en pointillés (et *~ Blank ~* sur les cartes Blank), et la ligne 23 indique *MEALSCGA.DAT absent : pas d'images* ou *MEALSCGA.DAT abîmé : pas d'images*. Les deux messages tiennent sur la ligne de 40 colonnes.
+- **Vitesse sur 8088** (DOSBox `machine=cga`, `cputype=8086`, `cycles=fixed 300`) :
+
+  | Action | Temps |
+  |---|---|
+  | Espace depuis l'accueil (mode 04h, table, première image) | 0,55 s |
+  | Carte pas encore vue (lecture disque + somme + dessin) | 0,22 à 0,24 s |
+  | Carte déjà en mémoire | 0,20 à 0,21 s |
+  | Entrée, jouer / remettre | 0,28 s |
+  | TAB → Config | 0,17 s |
+  | TAB → planificateur (redessin avec image) | 0,39 s |
+  | Aller-retour TAB/TAB | 0,59 s |
+  | Échap vers l'accueil (sauvegarde + CSV) | 0,72 s |
+  | Aller-retour Espace/Espace (images relues) | 0,75 s |
+
+  DOSBox lit les fichiers presque instantanément. Sur le disque du Book 8088, la première lecture d'une image (3,8 Ko) prendra plus de temps.
 
 ## Book 8088 / materiel reel
 
@@ -792,13 +868,14 @@ Open Watcom V2, variable `WATCOM` pointant sur la racine du compilateur
 make dos      # LPSCOMP.EXE (-0 -bt=dos -ml)
 make rosary   # ROSARY.DAT (textes du rosaire)
 make meals    # MEALS.DAT (images du planificateur de repas, python3)
+make mealscga # MEALSCGA.DAT (les memes images pour le CGA, python3)
 make hello    # HELLO.EXE
 make test     # tests gcc, sans Watcom
 ```
 
 ## Utilisation
 
-Copier `LPSCOMP.EXE`, `ROSARY.DAT`, `MEALS.DAT` (dans le meme dossier) et `HELLO.EXE` depuis la racine du depot, creer `C:\LPS`, lancer `LPSCOMP` (ou `LPSCOMP chemin`).
+Copier `LPSCOMP.EXE`, `ROSARY.DAT`, `MEALS.DAT`, `MEALSCGA.DAT` (dans le meme dossier) et `HELLO.EXE` depuis la racine du depot, creer `C:\LPS`, lancer `LPSCOMP` (ou `LPSCOMP chemin`).
 **Q** quitte depuis l'accueil. Les touches reprennent celles du Companion.
 Activites (LPS-DOS-115-CHG05) : **Haut/Bas** dans une colonne, **Gauche/Droite**
 entre les colonnes (les deux bouclent), **Entree** coche (Espace ouvre le planificateur), **1–9, 0**
@@ -811,13 +888,13 @@ colonne seulement). LPS-DOS-115-CHG06 : **E** renommer, **N** nouvelle,
 (planificateur) et **Tab** (Config) marchent depuis tous les ecrans sauf les
 saisies et les confirmations, et reviennent a l'ecran de depart.
 
-DOSBox-X / DOSBox Staging (`cputype=8086`, `machine=ega`) : copier les EXE, `ROSARY.DAT` et `MEALS.DAT` de la racine ici, puis `dosbox-x -conf dosbox.conf`.
+DOSBox-X / DOSBox Staging (`cputype=8086`, `machine=ega`) : copier les EXE, `ROSARY.DAT`, `MEALS.DAT` et `MEALSCGA.DAT` de la racine ici, puis `dosbox-x -conf dosbox.conf`.
 
 ## Empreinte
 
-`LPSCOMP.EXE` fait environ **103 Ko** (modele large, 8086, pile 4 Ko), `ROSARY.DAT` environ **10 Ko** et `MEALS.DAT` environ **196 Ko**. `HELLO.EXE` ~3 Ko.
+`LPSCOMP.EXE` fait environ **104 Ko** (modele large, 8086, pile 4 Ko), `ROSARY.DAT` environ **10 Ko**, `MEALS.DAT` environ **196 Ko** et `MEALSCGA.DAT` environ **49 Ko**. `HELLO.EXE` ~3 Ko.
 
-Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) passe d'environ 63 Ko a environ 14 Ko (17,3 Ko avec LPS-DOS-115-CHG06d, 18,5 Ko avec le planificateur EGA de LPS-DOS-115-CHG07, 19,1 Ko avec le planificateur CGA de LPS-DOS-115-CHG13, dont les images restent dans `MEALS.DAT` et la memoire lointaine) : les textes du rosaire sont dans `ROSARY.DAT`, charge en memoire lointaine a l'ouverture du rosaire, et les gros tampons (copies de `State`, sauvegarde, exports ICS/CSV) sont alloues en memoire lointaine au demarrage. Un `ROSARY.DAT` absent ou abime affiche un message, sans plantage.
+Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) passe d'environ 63 Ko a environ 14 Ko (17,3 Ko avec LPS-DOS-115-CHG06d, 18,5 Ko avec le planificateur EGA de LPS-DOS-115-CHG07, 19,1 Ko avec le planificateur CGA de LPS-DOS-115-CHG13, 19,5 Ko avec le lecteur de MEALSCGA.DAT de LPS-DOS-115-CHG14, dont les images restent dans `MEALS.DAT` et la memoire lointaine) : les textes du rosaire sont dans `ROSARY.DAT`, charge en memoire lointaine a l'ouverture du rosaire, et les gros tampons (copies de `State`, sauvegarde, exports ICS/CSV) sont alloues en memoire lointaine au demarrage. Un `ROSARY.DAT` absent ou abime affiche un message, sans plantage.
 
 ## Ecarts connus
 
@@ -828,8 +905,9 @@ Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) p
 - Planificateur de repas (LPS-DOS-115-CHG07) : la sauvegarde est ecrite
   en quittant le planificateur, pas a chaque carte ; les images sont controlees
   par une somme 32 bits au lieu d'un CRC-32 (vitesse sur 8088) ; en CGA, le
-  planificateur est en 320×200 avec des **cartes provisoires sans images
-  jusqu'a LPS-DOS-115-CHG14/15** ; sans EGA ni CGA couleur, il passe en mode texte.
+  planificateur est en 320×200 avec des images tramees en 4 couleurs
+  (LPS-DOS-115-CHG14) ; une carte jouee garde son image sous un bord trame et
+  JOUEE #n jusqu'a CHG15 ; sans EGA ni CGA couleur, il passe en mode texte.
 - Fichiers ICS nommes `EXPORT\YYYYMMDD.ICS` (8.3) au lieu de
   `YYYY-MM-DD_LPS-Companion.ics` ; contenu identique (LPS-DOS-115-CHG02c).
 - Sauvegarde ecrite en quittant un ecran, en confirmant Date/Poids/Config, en

@@ -18,4 +18,4 @@ Sources and rebuild instructions are in [`lps-companion/`](lps-companion/). A lo
 
 | Program | Directory | What it is |
 |---|---|---|
-| LPS Companion | [`lps-companion/`](lps-companion/) | MS-DOS port of [LPS Companion v1.15](https://github.com/TME520/LPS-Companion-PicoCalc) (Open Watcom, real-mode 8086, 80×25 text, EGA Meal Planner). Run [`LPSCOMP.EXE`](LPSCOMP.EXE) (with [`ROSARY.DAT`](ROSARY.DAT) and [`MEALS.DAT`](MEALS.DAT) beside it) and [`HELLO.EXE`](HELLO.EXE) from this repository root. |
+| LPS Companion | [`lps-companion/`](lps-companion/) | MS-DOS port of [LPS Companion v1.15](https://github.com/TME520/LPS-Companion-PicoCalc) (Open Watcom, real-mode 8086, 80×25 text, EGA and CGA Meal Planner). Run [`LPSCOMP.EXE`](LPSCOMP.EXE) (with [`ROSARY.DAT`](ROSARY.DAT), [`MEALS.DAT`](MEALS.DAT) and [`MEALSCGA.DAT`](MEALSCGA.DAT) beside it) and [`HELLO.EXE`](HELLO.EXE) from this repository root. |

@@ -40,7 +40,7 @@ WBIN = $(WATCOM)/binl64
 endif
 WCL = $(WBIN)/wcl
 
-.PHONY: all dos host test clean captures hello rosary meals
+.PHONY: all dos host test clean captures hello rosary meals mealscga
 
 # tools/cp437 and its table are plain ASCII C, built straight from src/.
 tools/cp437: tools/cp437.c src/cp437.c src/lps.h
@@ -62,7 +62,7 @@ $(GEN)/capture_drive.c: tools/capture_drive.c tools/cp437
 	@mkdir -p $(GEN)
 	./tools/cp437 $< $@
 
-all: dos hello rosary meals host test
+all: dos hello rosary meals mealscga host test
 
 dos: LPSCOMP.EXE
 
@@ -78,6 +78,15 @@ ROSARY.DAT: tools/mkrosary
 # tools/mkmeals.py needs only Python 3 (no Pillow) and is deterministic, so
 # `make test` rebuilds it and checks that the committed ../MEALS.DAT matches.
 meals: MEALS.DAT
+
+# MEALSCGA.DAT (LPS-DOS-115-CHG14): the same pictures for the CGA planner,
+# 160 x 96 in CGA palette 0 (Atkinson dithering). Standard-library Python and
+# deterministic like mkmeals.py: `make test` rebuilds it and compares it with
+# the committed ../MEALSCGA.DAT.
+mealscga: MEALSCGA.DAT
+
+MEALSCGA.DAT: tools/mkmealscga.py tools/mkmeals.py assets/meal_deck_sheet1.png assets/meal_deck_sheet2.png
+	python3 tools/mkmealscga.py MEALSCGA.DAT
 
 MEALS.DAT: tools/mkmeals.py assets/meal_deck_sheet1.png assets/meal_deck_sheet2.png
 	python3 tools/mkmeals.py MEALS.DAT
@@ -108,9 +117,10 @@ host: lpscomp-host
 lpscomp-host: $(HOST_OBJS) $(HEADERS)
 	$(HOST_CC) $(HOST_CFLAGS) -o lpscomp-host $(HOST_OBJS)
 
-test: tests/test_storage ROSARY.DAT MEALS.DAT
+test: tests/test_storage ROSARY.DAT MEALS.DAT MEALSCGA.DAT
 	./tests/test_storage
 	cmp MEALS.DAT ../MEALS.DAT
+	cmp MEALSCGA.DAT ../MEALSCGA.DAT
 
 tests/test_storage: $(GEN)/test_storage.c $(COMMON_OBJS) $(ROSARY_SRC) $(GEN)/plat_host.c $(HEADERS)
 	$(HOST_CC) $(HOST_CFLAGS) -o tests/test_storage $(GEN)/test_storage.c $(COMMON_OBJS) $(ROSARY_SRC) $(GEN)/plat_host.c
@@ -119,5 +129,5 @@ captures: $(GEN)/capture_drive.c $(COMMON_OBJS) $(GEN)/plat_host.c $(HEADERS)
 	./tools/drive_captures.sh
 
 clean:
-	rm -f LPSCOMP.EXE HELLO.EXE ROSARY.DAT MEALS.DAT lpscomp-host tests/test_storage tools/capture_drive tools/mkrosary tools/cp437 *.o src/*.o tests/*.o *.err *.map
+	rm -f LPSCOMP.EXE HELLO.EXE ROSARY.DAT MEALS.DAT MEALSCGA.DAT lpscomp-host tests/test_storage tools/capture_drive tools/mkrosary tools/cp437 *.o src/*.o tests/*.o *.err *.map
 	rm -rf build

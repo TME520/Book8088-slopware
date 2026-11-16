@@ -20,6 +20,8 @@ LPS/
 ROSARY.DAT
 # Built by `make meals`; the copy to ship is ../MEALS.DAT
 MEALS.DAT
+# Built by `make mealscga`; the copy to ship is ../MEALSCGA.DAT (LPS-DOS-115-CHG14)
+MEALSCGA.DAT
 tools/mkrosary
 
 # CP437 copies of the sources (tools/cp437, LPS-DOS-115-CHG03)

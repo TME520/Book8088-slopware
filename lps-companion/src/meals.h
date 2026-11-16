@@ -90,4 +90,22 @@ const uint8_t *meals_palette(unsigned picture);
  * meals_close; its checksum is checked on that first read. enum MealsLoad. */
 int meals_picture(unsigned picture, const uint8_t **planes);
 void meals_close(void);
+
+/* MEALSCGA.DAT (LPS-DOS-115-CHG14): the pictures for the CGA planner, made
+ * by tools/mkmealscga.py from the same sheets (Atkinson dithering to CGA
+ * palette 0). Same header as MEALS.DAT with magic "LPSMEALC", 160 x 96
+ * pixels; the table holds each picture's checksum (u32); a picture is 96
+ * rows of 40 bytes, 4 pixels a byte, leftmost in bits 7-6, colours 0-3. */
+#define MEALSCGA_DAT_NAME "MEALSCGA.DAT"
+#define MEALSCGA_DAT_MAGIC "LPSMEALC"
+#define MEALSCGA_TABLE_ENTRY 4
+#define MEALSCGA_WIDTH 160
+#define MEALSCGA_HEIGHT 96
+#define MEALSCGA_ROW_BYTES (MEALSCGA_WIDTH / 4)
+#define MEALSCGA_PICTURE_BYTES (MEALSCGA_ROW_BYTES * MEALSCGA_HEIGHT)
+#define MEALSCGA_DAT_SIZE (MEALS_DAT_HEADER + MEAL_PICTURE_COUNT * (MEALSCGA_TABLE_ENTRY + (long)MEALSCGA_PICTURE_BYTES))
+void mealscga_set_path(const char *path);
+int mealscga_open(void);   /* header + table; enum MealsLoad */
+int mealscga_picture(unsigned picture, const uint8_t **pixels); /* read on first use, kept until close */
+void mealscga_close(void);
 #endif

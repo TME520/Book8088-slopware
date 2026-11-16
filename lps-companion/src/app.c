@@ -384,6 +384,9 @@ static const char *meals_problem(const App *a, int r){
     if(r==MEALS_MISSING) return tr(a,"MEALS.DAT not found: copy it next to LPSCOMP.EXE","MEALS.DAT introuvable : copiez-le à côté de LPSCOMP.EXE");
     if(r==MEALS_CORRUPT) return tr(a,"MEALS.DAT is damaged: copy it again","MEALS.DAT endommagé : recopiez-le");
     if(r==MEALS_NO_MEMORY) return tr(a,"Not enough memory for the pictures","Mémoire insuffisante pour les images");
+    /* LPS-DOS-115-CHG14: CGA rows hold 40 columns, so these stay short. */
+    if(r==MEALS_CGA_MISSING) return tr(a,"MEALSCGA.DAT missing: no pictures","MEALSCGA.DAT absent : pas d'images");
+    if(r==MEALS_CGA_CORRUPT) return tr(a,"MEALSCGA.DAT damaged: no pictures","MEALSCGA.DAT abîmé : pas d'images");
     return tr(a,"No EGA/CGA colour screen: Meal Planner in text mode","Pas d'écran couleur EGA/CGA : planificateur en mode texte");
 }
 /* LPS-DOS-115-CHG08 (PicoCalc LPS-114-CHG02 / LPS-115-CHG02 exportMeals):

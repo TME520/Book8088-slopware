@@ -142,14 +142,25 @@ void meal_view(const State *s, unsigned card, MealView *v){
     v->portion=c->row==MEAL_BLANK?"":(fr?c->frPortion:c->enPortion);
 }
 
-/* ---- MEALS.DAT ------------------------------------------------------------
- * The table (palettes and CRCs) is read when the planner opens; a picture is
- * read the first time its card shows, its checksum checked, and kept in far
- * memory (15 KB, malloc in the large model) until the planner closes. */
-static char g_meals_path[160]=MEALS_DAT_NAME;
-static uint8_t *g_table;                       /* MEAL_PICTURE_COUNT entries */
-static uint8_t *g_pictures[MEAL_PICTURE_COUNT];
-static int g_in_cwd; /* opened from the current directory's copy */
+/* ---- MEALS.DAT and MEALSCGA.DAT ---------------------------------------------
+ * The table (palettes and checksums) is read when the planner opens; a
+ * picture is read the first time its card shows, its checksum checked, and
+ * kept in far memory (malloc in the large model) until the planner closes.
+ * LPS-DOS-115-CHG14: the same code reads both files, which differ only in
+ * their magic, picture size and table entry (MEALS.DAT: 16 palette bytes,
+ * then the checksum; MEALSCGA.DAT: the checksum only). */
+typedef struct {
+    const char *name, *magic;
+    unsigned width, height, entry;   /* entry: table bytes per picture, checksum last */
+    unsigned bytes;                  /* per picture */
+    long size;                       /* whole file */
+    char path[160];
+    uint8_t *table;                  /* MEAL_PICTURE_COUNT entries */
+    uint8_t *pictures[MEAL_PICTURE_COUNT];
+    int in_cwd;                      /* opened from the current directory's copy */
+} DatFile;
+static DatFile g_ega={MEALS_DAT_NAME,MEALS_DAT_MAGIC,MEALS_WIDTH,MEALS_HEIGHT,MEALS_TABLE_ENTRY,MEALS_PICTURE_BYTES,MEALS_DAT_SIZE,MEALS_DAT_NAME,0,{0},0};
+static DatFile g_cga={MEALSCGA_DAT_NAME,MEALSCGA_DAT_MAGIC,MEALSCGA_WIDTH,MEALSCGA_HEIGHT,MEALSCGA_TABLE_ENTRY,MEALSCGA_PICTURE_BYTES,MEALSCGA_DAT_SIZE,MEALSCGA_DAT_NAME,0,{0},0};
 
 static unsigned get16(const uint8_t *p){ return (unsigned)p[0]|((unsigned)p[1]<<8); }
 static uint32_t get32(const uint8_t *p){ return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24); }
@@ -182,62 +193,76 @@ uint32_t meals_checksum(const uint8_t *p, unsigned n){
 #endif
     return ((uint32_t)s2<<16)|s1;
 }
-void meals_set_path(const char *path){
+static void dat_set_path(DatFile *d, const char *path){
     size_t n=strlen(path);
-    if(n>=sizeof(g_meals_path)) n=sizeof(g_meals_path)-1;
-    memcpy(g_meals_path,path,n); g_meals_path[n]=0;
+    if(n>=sizeof(d->path)) n=sizeof(d->path)-1;
+    memcpy(d->path,path,n); d->path[n]=0;
 }
-void meals_close(void){
+static void dat_close(DatFile *d){
     unsigned i;
-    for(i=0;i<MEAL_PICTURE_COUNT;i++) if(g_pictures[i]){ free(g_pictures[i]); g_pictures[i]=0; }
-    if(g_table){ free(g_table); g_table=0; }
+    for(i=0;i<MEAL_PICTURE_COUNT;i++) if(d->pictures[i]){ free(d->pictures[i]); d->pictures[i]=0; }
+    if(d->table){ free(d->table); d->table=0; }
 }
-static int open_from(const char *path){
-    FILE *f; uint8_t hdr[MEALS_DAT_HEADER]; long size; unsigned i;
-    size_t table=(size_t)MEAL_PICTURE_COUNT*MEALS_TABLE_ENTRY;
+static int dat_open_from(DatFile *d, const char *path){
+    FILE *f; uint8_t hdr[MEALS_DAT_HEADER]; long size;
+    size_t table=(size_t)MEAL_PICTURE_COUNT*d->entry;
     f=fopen(path,"rb"); if(!f) return MEALS_MISSING;
-    if(fread(hdr,1,sizeof(hdr),f)!=sizeof(hdr) || memcmp(hdr,MEALS_DAT_MAGIC,8)!=0
+    if(fread(hdr,1,sizeof(hdr),f)!=sizeof(hdr) || memcmp(hdr,d->magic,8)!=0
        || get16(hdr+8)!=MEALS_DAT_VERSION || get16(hdr+10)!=MEAL_PICTURE_COUNT
-       || get16(hdr+12)!=MEALS_WIDTH || get16(hdr+14)!=MEALS_HEIGHT
-       || get32(hdr+16)!=(uint32_t)MEALS_PICTURE_BYTES
-       || fseek(f,0,SEEK_END)!=0 || (size=ftell(f))!=MEALS_DAT_SIZE
+       || get16(hdr+12)!=d->width || get16(hdr+14)!=d->height
+       || get32(hdr+16)!=(uint32_t)d->bytes
+       || fseek(f,0,SEEK_END)!=0 || (size=ftell(f))!=d->size
        || fseek(f,MEALS_DAT_HEADER,SEEK_SET)!=0){ fclose(f); return MEALS_CORRUPT; }
-    g_table=(uint8_t*)malloc(table);
-    if(!g_table){ fclose(f); return MEALS_NO_MEMORY; }
-    if(fread(g_table,1,table,f)!=table || crc32(g_table,table)!=get32(hdr+20)){ fclose(f); meals_close(); return MEALS_CORRUPT; }
+    d->table=(uint8_t*)malloc(table);
+    if(!d->table){ fclose(f); return MEALS_NO_MEMORY; }
+    if(fread(d->table,1,table,f)!=table || crc32(d->table,table)!=get32(hdr+20)){ fclose(f); dat_close(d); return MEALS_CORRUPT; }
     fclose(f);
-    for(i=0;i<MEAL_PICTURE_COUNT*16u;i++) if(g_table[(i/16u)*MEALS_TABLE_ENTRY+i%16u]>63){ meals_close(); return MEALS_CORRUPT; }
     return MEALS_OK;
 }
-int meals_open(void){
+static int dat_open(DatFile *d){
     int r;
-    meals_close();
-    g_in_cwd=0;
-    r=open_from(g_meals_path);
-    if(r==MEALS_MISSING && strcmp(g_meals_path,MEALS_DAT_NAME)!=0){ g_in_cwd=1; r=open_from(MEALS_DAT_NAME); }
+    dat_close(d);
+    d->in_cwd=0;
+    r=dat_open_from(d,d->path);
+    if(r==MEALS_MISSING && strcmp(d->path,d->name)!=0){ d->in_cwd=1; r=dat_open_from(d,d->name); }
+    return r;
+}
+static int dat_picture(DatFile *d, unsigned picture, const uint8_t **out){
+    FILE *f; uint8_t *p; unsigned i; int ok;
+    *out=0;
+    if(!d->table || picture>=MEAL_PICTURE_COUNT) return MEALS_CORRUPT;
+    if(d->pictures[picture]){ *out=d->pictures[picture]; return MEALS_OK; }
+    p=(uint8_t*)malloc(d->bytes);
+    /* Short of memory: drop the other pictures (read again when shown). */
+    for(i=0;!p && i<MEAL_PICTURE_COUNT;i++)
+        if(d->pictures[i]){ free(d->pictures[i]); d->pictures[i]=0; p=(uint8_t*)malloc(d->bytes); }
+    if(!p) return MEALS_NO_MEMORY;
+    f=fopen(d->in_cwd?d->name:d->path,"rb");
+    if(!f){ free(p); return MEALS_MISSING; }
+    ok=fseek(f,MEALS_DAT_HEADER+(long)MEAL_PICTURE_COUNT*d->entry+(long)picture*d->bytes,SEEK_SET)==0
+       && fread(p,1,d->bytes,f)==d->bytes
+       && meals_checksum(p,d->bytes)==get32(d->table+picture*d->entry+d->entry-4);
+    fclose(f);
+    if(!ok){ free(p); return MEALS_CORRUPT; }
+    d->pictures[picture]=p; *out=p;
+    return MEALS_OK;
+}
+
+void meals_set_path(const char *path){ dat_set_path(&g_ega,path); }
+void meals_close(void){ dat_close(&g_ega); }
+int meals_open(void){
+    unsigned i; int r=dat_open(&g_ega);
+    /* EGA palette values are 0-63. */
+    if(r==MEALS_OK) for(i=0;i<MEAL_PICTURE_COUNT*16u;i++) if(g_ega.table[(i/16u)*MEALS_TABLE_ENTRY+i%16u]>63){ dat_close(&g_ega); return MEALS_CORRUPT; }
     return r;
 }
 const uint8_t *meals_palette(unsigned picture){
-    if(!g_table || picture>=MEAL_PICTURE_COUNT) return 0;
-    return g_table+picture*MEALS_TABLE_ENTRY;
+    if(!g_ega.table || picture>=MEAL_PICTURE_COUNT) return 0;
+    return g_ega.table+picture*MEALS_TABLE_ENTRY;
 }
-int meals_picture(unsigned picture, const uint8_t **planes){
-    FILE *f; uint8_t *p; unsigned i; int ok;
-    *planes=0;
-    if(!g_table || picture>=MEAL_PICTURE_COUNT) return MEALS_CORRUPT;
-    if(g_pictures[picture]){ *planes=g_pictures[picture]; return MEALS_OK; }
-    p=(uint8_t*)malloc(MEALS_PICTURE_BYTES);
-    /* Short of memory: drop the other pictures (read again when shown). */
-    for(i=0;!p && i<MEAL_PICTURE_COUNT;i++)
-        if(g_pictures[i]){ free(g_pictures[i]); g_pictures[i]=0; p=(uint8_t*)malloc(MEALS_PICTURE_BYTES); }
-    if(!p) return MEALS_NO_MEMORY;
-    f=fopen(g_in_cwd?MEALS_DAT_NAME:g_meals_path,"rb");
-    if(!f){ free(p); return MEALS_MISSING; }
-    ok=fseek(f,MEALS_DAT_HEADER+(long)MEAL_PICTURE_COUNT*MEALS_TABLE_ENTRY+(long)picture*MEALS_PICTURE_BYTES,SEEK_SET)==0
-       && fread(p,1,MEALS_PICTURE_BYTES,f)==MEALS_PICTURE_BYTES
-       && meals_checksum(p,MEALS_PICTURE_BYTES)==get32(g_table+picture*MEALS_TABLE_ENTRY+16);
-    fclose(f);
-    if(!ok){ free(p); return MEALS_CORRUPT; }
-    g_pictures[picture]=p; *planes=p;
-    return MEALS_OK;
-}
+int meals_picture(unsigned picture, const uint8_t **planes){ return dat_picture(&g_ega,picture,planes); }
+
+void mealscga_set_path(const char *path){ dat_set_path(&g_cga,path); }
+void mealscga_close(void){ dat_close(&g_cga); }
+int mealscga_open(void){ return dat_open(&g_cga); }
+int mealscga_picture(unsigned picture, const uint8_t **pixels){ return dat_picture(&g_cga,picture,pixels); }

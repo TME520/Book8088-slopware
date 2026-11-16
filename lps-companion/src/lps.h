@@ -152,7 +152,9 @@ typedef struct { uint8_t bytes[BLOB_CAPACITY]; size_t size; } Blob;
 /* Meal Planner pictures (LPS-DOS-115-CHG07). MEALS_NO_EGA: the platform
  * has no EGA or CGA colour screen (CHG13); the app then shows the planner
  * in text mode. */
-enum MealsLoad { MEALS_OK = 0, MEALS_MISSING = 1, MEALS_CORRUPT = 2, MEALS_NO_MEMORY = 3, MEALS_NO_EGA = 4 };
+enum MealsLoad { MEALS_OK = 0, MEALS_MISSING = 1, MEALS_CORRUPT = 2, MEALS_NO_MEMORY = 3, MEALS_NO_EGA = 4,
+                 /* LPS-DOS-115-CHG14: CGA planner, MEALSCGA.DAT; the frame is drawn without picture */
+                 MEALS_CGA_MISSING = 5, MEALS_CGA_CORRUPT = 6 };
 /* The card the planner shows. Texts are screen text (CP437). */
 typedef struct {
     uint8_t card;      /* deck index 0-15 */

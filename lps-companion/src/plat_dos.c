@@ -32,6 +32,7 @@ typedef struct {
     int ega_colour;     /* an EGA/VGA colour display with 128 KB or more */
     unsigned char text_mode; /* BIOS text mode to come back to (2, 3 or 7) */
     int cga_colour;     /* LPS-DOS-115-CHG13: a colour CGA and no EGA: mode 04h */
+    int cga_open;       /* LPS-DOS-115-CHG14: mealscga_open's result */
     int in_gfx;         /* mode 10h (or 04h on CGA) is on */
     int want_card;      /* this frame shows a card (meal_card since clear) */
     MealView card;
@@ -306,24 +307,33 @@ static void present_graphics(DosPlat *d){
         memcpy(d->sh_rev[r],d->rev[r],COLUMNS);
     }
     d->painted=1;
-    if(d->cga_colour) cga_card(&d->card);
+    if(d->cga_colour) cga_card(&d->card,d->card_planes);
     else ega_card(&d->card,d->card_planes,meals_palette(d->card.picture));
 }
 static int dos_meal_open(Platform *p){
     DosPlat *d=self_of(p);
     if(d->use_bios) return MEALS_NO_EGA;
     if(d->ega_colour) return meals_open();
-    /* CHG13: the CGA card has no pictures yet (MEALSCGA.DAT, CHG14). */
-    if(d->cga_colour) return MEALS_OK;
+    /* LPS-DOS-115-CHG14: the CGA planner always opens in graphics; without
+     * MEALSCGA.DAT its cards show the empty frame and meal_card says why. */
+    if(d->cga_colour){ d->cga_open=mealscga_open(); return MEALS_OK; }
     return MEALS_NO_EGA;
 }
 static int dos_meal_card(Platform *p, const MealView *v){
     DosPlat *d=self_of(p);
     d->card=*v; d->want_card=1;
+    if(d->cga_colour){
+        int r;
+        d->card_planes=0;
+        if(d->cga_open==MEALS_MISSING) return MEALS_CGA_MISSING;
+        if(d->cga_open!=MEALS_OK) return d->cga_open==MEALS_CORRUPT?MEALS_CGA_CORRUPT:d->cga_open;
+        r=mealscga_picture(v->picture,&d->card_planes);
+        return r==MEALS_CORRUPT?MEALS_CGA_CORRUPT:r==MEALS_MISSING?MEALS_CGA_MISSING:r;
+    }
     if(!d->ega_colour){ d->card_planes=0; return MEALS_OK; }
     return meals_picture(v->picture,&d->card_planes);
 }
-static void dos_meal_close(Platform *p){ (void)p; meals_close(); }
+static void dos_meal_close(Platform *p){ (void)p; meals_close(); mealscga_close(); }
 
 static void dos_present(Platform *p){
     DosPlat *d=self_of(p);

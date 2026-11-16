@@ -42,6 +42,7 @@ static void set_data_paths(const char *exe){
     char path[160];
     data_file_path(path,sizeof(path),exe,ROSARY_DAT_NAME); rosary_set_path(path);
     data_file_path(path,sizeof(path),exe,MEALS_DAT_NAME); meals_set_path(path);
+    data_file_path(path,sizeof(path),exe,MEALSCGA_DAT_NAME); mealscga_set_path(path); /* LPS-DOS-115-CHG14 */
 }
 
 int main(int argc, char **argv){

@@ -13,7 +13,7 @@
  *
  * Card (EGA layout scaled to 320 x 200): 176 x 136 at (72, 40), text rows
  * 5-21. Yellow rounded border with the row's name on its top band, then the
- * body in colour 0: picture box 160 x 96 (a dotted frame until CHG14), the
+ * body in colour 0: picture box 160 x 96 (MEALSCGA.DAT, CHG14), the
  * name, and the portion on a red ribbon with notched ends. Played: the
  * border is dithered (yellow / colour 0) and PLAYED #n sits in the box. */
 #include "cga.h"
@@ -45,7 +45,7 @@
 
 static unsigned short g_spread[256]; /* font byte -> 8 pixels of colour 3 */
 static unsigned char g_text;
-static struct { int valid; uint8_t card, language, played; } drawn;
+static struct { int valid; uint8_t card, language, played, art; } drawn;
 
 static unsigned char far *line_at(int y){ return (unsigned char far *)MK_FP(CGA_SEG,(unsigned)((y&1)*0x2000+(y>>1)*80)); }
 static unsigned char fill_byte(unsigned char colour){ return (unsigned char)(colour*0x55u); }
@@ -111,25 +111,35 @@ static void centred(int y, const char *s, unsigned char fg, unsigned char bg){
     int n=(int)strlen(s); if(n>CARD_W/8-2) n=CARD_W/8-2;
     text(CARD_X/8+(CARD_W/8-n)/2,y,s,n,fg,bg);
 }
-/* The picture box, dotted until the pictures come (LPS-DOS-115-CHG14). */
+/* LPS-DOS-115-CHG14: the picture, MEALSCGA.DAT's rows copied straight to
+ * VRAM (same 2-bit layout; ART_X is a multiple of 4). */
+#if MEALSCGA_WIDTH != ART_W || MEALSCGA_HEIGHT != ART_H || ART_X % 4
+#error "MEALSCGA.DAT pictures must fill the picture box"
+#endif
+static void art_picture(const uint8_t *pixels){
+    int y;
+    for(y=0;y<ART_H;y++) _fmemcpy(line_at(ART_Y+y)+ART_X/4,pixels+(unsigned)y*MEALSCGA_ROW_BYTES,MEALSCGA_ROW_BYTES);
+}
+/* The empty picture box (no MEALSCGA.DAT): a dotted frame. */
 static void art_box(void){
     unsigned char dots=fill_byte(INK_BOX)&0xCC; /* every other pixel */
     pattern(ART_X,ART_Y,ART_W,1,dots,dots); pattern(ART_X,ART_Y+ART_H-1,ART_W,1,dots,dots);
     pattern(ART_X,ART_Y+1,1,ART_H-2,0,fill_byte(INK_BOX)); pattern(ART_X+ART_W-1,ART_Y+1,1,ART_H-2,0,fill_byte(INK_BOX));
 }
-void cga_card(const MealView *v){
+void cga_card(const MealView *v, const uint8_t *picture){
     static const unsigned char outer[4]={4,2,1,1};
     char b[24]; int played=v->position!=0, blank=v->row==MEAL_BLANK;
     unsigned char edge=fill_byte(INK_EDGE);
-    if(drawn.valid && drawn.card==v->card && drawn.language==v->language && drawn.played==(uint8_t)played) return;
+    if(drawn.valid && drawn.card==v->card && drawn.language==v->language && drawn.played==(uint8_t)played && drawn.art==(picture!=0)) return;
     /* Border: solid, or yellow / colour 0 every other pixel when played. */
     if(played) rounded(CARD_X,CARD_Y,CARD_W,CARD_H,(unsigned char)(edge&0xCC),(unsigned char)(edge&0x33),outer,4);
     else rounded(CARD_X,CARD_Y,CARD_W,CARD_H,edge,edge,outer,4);
     fill(BODY_X,BODY_Y,BODY_W,BODY_H,0);
     if(played){ int n=(int)strlen(v->rowName); fill(CARD_X+(CARD_W/8-n)/2*8-4,CARD_Y+2,n*8+8,10,0); centred(CARD_Y+3,v->rowName,INK_EDGE,0); }
     else centred(CARD_Y+3,v->rowName,0,INK_EDGE);
-    art_box();
-    if(blank) centred(ART_Y+ART_H/2-(played?16:4),"~ Blank ~",INK_EDGE,0);
+    if(picture) art_picture(picture);
+    else art_box();
+    if(blank && !picture) centred(ART_Y+ART_H/2-(played?16:4),"~ Blank ~",INK_EDGE,0);
     else {
         int n=(int)strlen(v->portion), rw=n*8+24, rx, j;
         if(rw<96) rw=96;
@@ -143,5 +153,5 @@ void cga_card(const MealView *v){
         sprintf(b,v->language==LANG_FR?"JOUÉE #%u":"PLAYED #%u",(unsigned)v->position);
         centred(ART_Y+ART_H/2-4,b,INK_RIBBON,0);
     }
-    drawn.valid=1; drawn.card=v->card; drawn.language=v->language; drawn.played=(uint8_t)played;
+    drawn.valid=1; drawn.card=v->card; drawn.language=v->language; drawn.played=(uint8_t)played; drawn.art=(uint8_t)(picture!=0);
 }

@@ -5,9 +5,10 @@
  * Palette 0 high intensity: 1 light green, 2 light red, 3 yellow; colour 0
  * is the background (black, or blue for the Blue colour theme). Text is the
  * 8 x 8 font of cgafont.c on a 40 x 25 grid: the 80-column rows are folded
- * to 40 columns by lps_fold_row. Until LPS-DOS-115-CHG14/15 bring the dithered
- * pictures (MEALSCGA.DAT), the card is a placeholder frame: header band,
- * an empty picture box, name, portion ribbon, and PLAYED #n when played. */
+ * to 40 columns by lps_fold_row. The card: header band, the picture from
+ * MEALSCGA.DAT (LPS-DOS-115-CHG14; a dotted empty frame if the file is
+ * missing or damaged), name, portion ribbon, and PLAYED #n over the picture
+ * with a dithered border when played (a dithered played card is CHG15). */
 #ifndef CGA_H
 #define CGA_H
 #include "lps.h"
@@ -22,5 +23,5 @@ void cga_enter(unsigned char text, unsigned char background);
 void cga_text_row(int row, const char *cells, const unsigned char *rev);
 /* The placeholder card in text rows 5-21 (y 40-175). Redrawn only when the
  * card, its language or played state changed since the last call. */
-void cga_card(const MealView *v);
+void cga_card(const MealView *v, const uint8_t *picture); /* picture: MEALSCGA.DAT pixels, NULL = empty frame */
 #endif

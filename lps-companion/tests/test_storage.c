@@ -1212,6 +1212,65 @@ static void check_meals_dat(const char *tmpdir){
     assert(chdir(cwd)==0);
     meals_set_path(MEALS_DAT_NAME);
 }
+/* LPS-DOS-115-CHG14: MEALSCGA.DAT, the CGA pictures. */
+static int open_cga_variant(const char *path){ mealscga_close(); mealscga_set_path(path); return mealscga_open(); }
+static unsigned cga_pixel(const uint8_t *p, unsigned x, unsigned y){ return (p[y*MEALSCGA_ROW_BYTES+x/4u]>>(6u-2u*(x%4u)))&3u; }
+static void check_mealscga_dat(const char *tmpdir){
+    static unsigned char dat[MEALSCGA_DAT_SIZE+1], bad[MEALSCGA_DAT_SIZE+1];
+    char path[256], cwd[512]; long n; unsigned i, x, y; const uint8_t *pl, *first, *again, *ega;
+    const size_t pictures=MEALS_DAT_HEADER+(size_t)MEAL_PICTURE_COUNT*MEALSCGA_TABLE_ENTRY;
+    unsigned count[MEAL_PICTURE_COUNT][4];
+    n=read_file(MEALSCGA_DAT_NAME,dat,sizeof(dat));
+    if(n<0){ fprintf(stderr,"missing MEALSCGA.DAT (run `make mealscga` in lps-companion)\n"); assert(0); }
+    assert(n==MEALSCGA_DAT_SIZE && n==49996 && !memcmp(dat,MEALSCGA_DAT_MAGIC,8) && MEALSCGA_PICTURE_BYTES==3840);
+    assert(open_cga_variant(MEALSCGA_DAT_NAME)==MEALS_OK);
+    for(i=0;i<MEAL_PICTURE_COUNT;i++){
+        const uint8_t *t=dat+MEALS_DAT_HEADER+i*MEALSCGA_TABLE_ENTRY;
+        assert(mealscga_picture(i,&pl)==MEALS_OK && pl);
+        if(!i) first=pl;
+        assert(meals_checksum(pl,MEALSCGA_PICTURE_BYTES)==((uint32_t)t[0]|((uint32_t)t[1]<<8)|((uint32_t)t[2]<<16)|((uint32_t)t[3]<<24)));
+        /* The corners are the card background (colour 0, never dithered). */
+        assert(!cga_pixel(pl,0,0) && !cga_pixel(pl,159,0) && !cga_pixel(pl,0,95) && !cga_pixel(pl,159,95));
+        memset(count[i],0,sizeof(count[i]));
+        for(y=0;y<MEALSCGA_HEIGHT;y++) for(x=0;x<MEALSCGA_WIDTH;x++) count[i][cga_pixel(pl,x,y)]++;
+        assert(count[i][0]<MEALSCGA_WIDTH*MEALSCGA_HEIGHT*3u/4u && count[i][3]>0); /* a drawing, with yellow */
+    }
+    /* Colours land where the sheets have them: the apple is red, mint tea and
+     * salad have green, latte and black coffee none, the cheese mostly yellow. */
+    assert(count[MP_APPLE][2]>count[MP_APPLE][3] && count[MP_APPLE][2]>count[MP_APPLE][1]);
+    assert(count[MP_MINT_TEA][1]>500 && count[MP_SALAD][1]>500 && !count[MP_LATTE][1] && !count[MP_BLACK][1]);
+    assert(count[MP_CHEESE][3]>3u*count[MP_CHEESE][2]);
+    assert(mealscga_picture(0,&again)==MEALS_OK && again==first);
+    assert(mealscga_picture(MEAL_PICTURE_COUNT,&pl)==MEALS_CORRUPT && !pl);
+    /* EGA and CGA files are independent. */
+    assert(open_variant(MEALS_DAT_NAME)==MEALS_OK && meals_picture(0,&ega)==MEALS_OK);
+    meals_close(); assert(mealscga_picture(0,&again)==MEALS_OK && again==first);
+    mealscga_close(); assert(mealscga_picture(0,&pl)==MEALS_CORRUPT && !pl);
+    /* Damaged copies are refused when the planner opens. */
+    sprintf(path,"%s/MEALSCGA.DAT",tmpdir);
+    {   static const size_t at[]={0,7,8,10,12,14,16,20,MEALS_DAT_HEADER+1,MEALS_DAT_HEADER+4*MEALSCGA_TABLE_ENTRY+2};
+        for(i=0;i<sizeof(at)/sizeof(at[0]);i++){
+            memcpy(bad,dat,(size_t)n); bad[at[i]]^=0x01;
+            put_file(path,bad,(size_t)n); assert(open_cga_variant(path)==MEALS_CORRUPT);
+        }
+    }
+    put_file(path,dat,(size_t)n-1); assert(open_cga_variant(path)==MEALS_CORRUPT);
+    memcpy(bad,dat,(size_t)n); bad[n]=0; put_file(path,bad,(size_t)n+1); assert(open_cga_variant(path)==MEALS_CORRUPT);
+    /* The EGA file is not a CGA file. */
+    put_file(path,dat,(size_t)n); memcpy(bad,dat,8); memcpy(bad,MEALS_DAT_MAGIC,8); put_file(path,bad,(size_t)n);
+    assert(open_cga_variant(path)==MEALS_CORRUPT);
+    /* A damaged picture: refused, the others still load. */
+    memcpy(bad,dat,(size_t)n); bad[pictures+7u*MEALSCGA_PICTURE_BYTES+999]^=0x40;
+    put_file(path,bad,(size_t)n); assert(open_cga_variant(path)==MEALS_OK);
+    assert(mealscga_picture(7,&pl)==MEALS_CORRUPT && !pl && mealscga_picture(6,&pl)==MEALS_OK && mealscga_picture(8,&pl)==MEALS_OK);
+    mealscga_close(); remove(path);
+    /* Not next to the EXE: the current directory's copy; nowhere: missing. */
+    assert(open_cga_variant(path)==MEALS_OK && mealscga_picture(MP_SOUP,&pl)==MEALS_OK && pl); mealscga_close();
+    assert(getcwd(cwd,sizeof(cwd)) && chdir(tmpdir)==0);
+    assert(open_cga_variant(path)==MEALS_MISSING);
+    assert(chdir(cwd)==0);
+    mealscga_set_path(MEALSCGA_DAT_NAME);
+}
 static int fake_opens, fake_closes, fake_cards, fake_open_result, fake_card_result;
 static MealView fake_view;
 static int fake_meal_open(Platform *p){ (void)p; fake_opens++; return fake_open_result; }
@@ -1403,6 +1462,19 @@ static void check_cga_fold(const char *dir){
     fold_host_row(hw,4,o,orev); assert(!strcmp(o,"Boissons 1/6             15/16 restantes"));
     fold_host_row(hw,24,o,orev); assert(!strcmp(o,"  Entr\202e:Remettre  Espace/\220chap:Retour  "));
     app_key(app,' '); assert(app_screen(app)==SCR_HOME);
+    /* LPS-DOS-115-CHG14: no MEALSCGA.DAT on CGA: graphics card without picture,
+     * a message short enough for the 40-column row (FR here, then EN). */
+    fake_open_result=MEALS_OK; fake_card_result=MEALS_CGA_MISSING; app_key(app,' ');
+    assert(row_has(hw,23,"MEALSCGA.DAT absent : pas d'images"));
+    fold_host_row(hw,23,o,orev); assert(strstr(o,"MEALSCGA.DAT absent : pas d'images"));
+    fake_card_result=MEALS_CGA_CORRUPT; app_key(app,KEY_RIGHT);
+    fold_host_row(hw,23,o,orev); assert(strstr(o,"MEALSCGA.DAT ab\214m\202 : pas d'images"));
+    app_key(app,' '); choose_language(app,0); app_key(app,KEY_ESCAPE);
+    fake_card_result=MEALS_CGA_MISSING; app_key(app,' ');
+    fold_host_row(hw,23,o,orev); assert(strstr(o,"MEALSCGA.DAT missing: no pictures"));
+    fake_card_result=MEALS_CGA_CORRUPT; app_key(app,KEY_RIGHT);
+    fold_host_row(hw,23,o,orev); assert(strstr(o,"MEALSCGA.DAT damaged: no pictures"));
+    fake_card_result=MEALS_OK; app_key(app,' '); assert(app_screen(app)==SCR_HOME);
 }
 static void check_meal_csv(const char *dir){
     static unsigned char store[16384]; static State st; App *app=(App*)store; Platform *hw;
@@ -2011,6 +2083,7 @@ int main(void){
     check_accented_text(tmpdir);
     check_intl_interop(tmpdir);
     check_meals_dat(tmpdir);
+    check_mealscga_dat(tmpdir);
     check_meal_planner(tmpdir);
     check_meal_csv(tmpdir);
     check_cga_fold(tmpdir);
@@ -2021,8 +2094,8 @@ int main(void){
 
     printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, title v1.15, menu 0-8 without notepad or Config, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
     printf("%s", " unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture),");
-    printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical),");
-    printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR), fixture decode (%u captures)\n", 0);
+    printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), MEALSCGA.DAT (13 CGA pictures, colours, checksums, damaged/missing, EGA/CGA independent), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical),");
+    printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR, MEALSCGA.DAT messages), fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }
