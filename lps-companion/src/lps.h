@@ -92,8 +92,15 @@ enum Screen {
     SCR_DAILY_REVIEW, SCR_FINISH, SCR_REWARD, SCR_CONFIG, SCR_LANGUAGE, SCR_COLORS,
     SCR_ROSARY_MODE, SCR_ROSARY_SET, SCR_ROSARY_DECADE, SCR_ROSARY_PRAYER, SCR_ROSARY_COMPLETE,
     SCR_ACTIVITY_EDIT, /* LPS-DOS-115-CHG06 */
-    SCR_MEAL_PLANNER   /* LPS-DOS-115-CHG07 */
+    SCR_MEAL_PLANNER,  /* LPS-DOS-115-CHG07 */
+    SCR_HOME_ENTRIES   /* LPS-DOS-115-CHG10: Config > Activities */
 };
+/* Home menu entries 0-8 (LPS-DOS-115-CHG10, PicoCalc LPS-115-CHG01/CHG03):
+ * Date, Activities, Weight, Kanban, Rosary, Daily review, Reminders, Timer,
+ * Close the day. Date and Close the day are always shown. */
+#define HOME_ENTRY_COUNT 9
+#define HOME_LOCKED ((uint16_t)((1u<<0)|(1u<<(HOME_ENTRY_COUNT-1))))
+#define HOME_ALL ((uint16_t)((1u<<HOME_ENTRY_COUNT)-1))
 
 typedef struct { uint16_t year; uint8_t month, day; } Date;
 /* A screen and its cursor to return to (LPS-DOS-115-CHG09 overlays). */
@@ -134,6 +141,9 @@ typedef struct {
      * indices in order of play ("meals":{"played":[...]} in the save). */
     uint8_t mealCount;
     uint8_t meals[MEAL_CARD_COUNT];
+    /* Home entries hidden in Config (LPS-DOS-115-CHG10, PicoCalc LPS-115-CHG03/05):
+     * bit i = home entry i; locked bits never set. "homeHidden" in the save. */
+    uint16_t hiddenHome;
 } State;
 typedef struct { uint8_t bytes[BLOB_CAPACITY]; size_t size; } Blob;
 
@@ -266,10 +276,10 @@ int write_weight_csv(const char *weights_dir, const Day *day);
 
 /* JSON save file (jsave.c, LPS-DOS-115-CHG04): PicoCalc v1.15 schema 2. The
  * catalog is in the State and the day names in lps_day_names (CHG05); the
- * hidden home entries the DOS port does not use yet are kept inside jsave.c
- * and written back; the Meal Planner deck is in the State (CHG07). */
+ * Meal Planner deck (CHG07) and the hidden home entries (CHG10) are in the
+ * State too. */
 int jsave_init(void);   /* far-heap tables; 0 = out of memory. Idempotent. */
-void jsave_reset(void); /* forget kept data: no day names or hidden entries */
+void jsave_reset(void); /* forget kept data: no day names */
 enum SaveCheck jsave_read(const char *path, State *out, uint32_t *generation, uint32_t *checksum);
 int jsave_write(const char *path, const State *s, uint32_t generation, uint32_t *checksum);
 enum SaveCheck jsave_peek(const char *path, uint32_t *version, uint32_t *generation); /* first line only */

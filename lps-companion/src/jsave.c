@@ -19,9 +19,9 @@
  * lps_day_names (LPS-DOS-115-CHG05): a day's flags are resolved from its
  * names against the catalog after the read, as on the PicoCalc, and names the
  * catalog lacks stay as frozen extras. The Meal Planner deck ("meals") is in
- * the State (LPS-DOS-115-CHG07). The DOS port has no home menu settings yet,
- * so the hidden home entries ("homeHidden") are kept here and written back
- * as read.
+ * the State (LPS-DOS-115-CHG07), and so are the hidden home entries
+ * ("homeHidden", State.hiddenHome, LPS-DOS-115-CHG10; kept as read since
+ * CHG04): ids in menu order, locked ids never written, unknown ids ignored.
  * Unknown keys are skipped, as on the PicoCalc.
  *
  * Text in the file is UTF-8 and the State keeps those exact bytes for every
@@ -45,8 +45,6 @@
 #define DAY_NAMES ACTIVITY_CAPACITY /* stored names per day */
 #define TEXT_CAPACITY 128     /* PicoCalc SaveTextCapacity */
 #define SAVE_MAX_BYTES 65000L /* one far block; the PicoCalc accepts 65536 */
-#define HOME_ENTRIES 9
-#define HOME_LOCKED ((1u<<0)|(1u<<(HOME_ENTRIES-1))) /* Date, Close the day */
 #define WRITE_CHUNK 512
 /* Hot tables in DGROUP (near, zero-filled at start-up) rather than behind a far pointer. */
 #ifdef __WATCOMC__
@@ -55,28 +53,17 @@
 #define NEARDATA
 #endif
 
-typedef struct {
-    uint16_t homeHidden;
-} SaveExtras;
-
-static SaveExtras *X;
 static char NEARDATA wbuf[WRITE_CHUNK];
 
 static const char *const LANGUAGES[2]={"en","fr"};
 static const char *const PALETTES[5]={"red","green","blue","orange","pink"};
 static const char *const STATUSES[3]={"todo","doing","done"};
-static const char *const HOME_IDS[HOME_ENTRIES]={"date","activities","weight","kanban","rosary","daily_review","reminders","timer","close_day"};
+static const char *const HOME_IDS[HOME_ENTRY_COUNT]={"date","activities","weight","kanban","rosary","daily_review","reminders","timer","close_day"};
 void jsave_reset(void){
     if(!jsave_init()) return;
-    X->homeHidden=0;
     day_names_clear();
 }
-int jsave_init(void){
-    if(X) return 1;
-    if(!lps_buffers_init()) return 0;
-    X=(SaveExtras*)calloc(1,sizeof(SaveExtras));
-    return X!=0;
-}
+int jsave_init(void){ return lps_buffers_init(); }
 
 /* ---- Reader ------------------------------------------------------------ */
 enum { T_END, T_ERROR, T_OBJ, T_OBJ_END, T_ARR, T_ARR_END, T_COLON, T_COMMA, T_STRING, T_NUMBER, T_TRUE, T_FALSE, T_NULL };
@@ -377,12 +364,12 @@ static int read_state(State *s){
         else if(!strcmp(key,"homeHidden")){
             int ast=1;
             if(next()!=T_ARR) return 0;
-            X->homeHidden=0;
+            s->hiddenHome=0;
             while((r=element(&ast,&t))>0){
                 unsigned i;
                 if(t!=T_STRING) return 0;
-                for(i=0;i<HOME_ENTRIES;i++)
-                    if(!J.overflow&&!strcmp(J.text,HOME_IDS[i])) X->homeHidden|=(uint16_t)((1u<<i)&~HOME_LOCKED);
+                for(i=0;i<HOME_ENTRY_COUNT;i++)
+                    if(!J.overflow&&!strcmp(J.text,HOME_IDS[i])) s->hiddenHome|=(uint16_t)((1u<<i)&~HOME_LOCKED);
             }
             if(r<0) return 0;
         }
@@ -595,7 +582,7 @@ int jsave_write(const char *path, const State *s, uint32_t generation, uint32_t 
     raw("],\n"); key("meals"); put('{'); key("played"); put('[');
     for(i=0;i<s->mealCount;i++){ if(i) put(','); number(s->meals[i]); }
     raw("]},\n"); key("homeHidden"); put('[');
-    for(i=0,n=0;i<HOME_ENTRIES;i++) if(X->homeHidden&(1u<<i)&~HOME_LOCKED){ if(n++) put(','); text(HOME_IDS[i]); }
+    for(i=0,n=0;i<HOME_ENTRY_COUNT;i++) if(s->hiddenHome&(1u<<i)&~HOME_LOCKED){ if(n++) put(','); text(HOME_IDS[i]); }
     raw("]},\n");
     flush(); /* the CRC covers every byte before "crc32" */
     *checksum=~W.crc;

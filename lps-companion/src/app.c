@@ -17,6 +17,7 @@ struct App {
     int blocked;
     int pendingLanguage;
     int pendingPalette;
+    uint16_t pendingHidden; /* LPS-DOS-115-CHG10: home entries ticked off, saved with Config's Save */
     char dateDraft[11];
     char taskDraft[TASK_NAME_LENGTH+1];
     char weights[2][8];
@@ -62,12 +63,22 @@ struct App {
     int mealOpen;
 };
 
-static int in_config(int s){ return s==SCR_CONFIG||s==SCR_LANGUAGE||s==SCR_COLORS; }
+static int in_config(int s){ return s==SCR_CONFIG||s==SCR_LANGUAGE||s==SCR_COLORS||s==SCR_HOME_ENTRIES; }
 static int is_overlay(int s){ return in_config(s)||s==SCR_MEAL_PLANNER; }
 static const char *tr(const App *a, const char *en, const char *fr){
     return a->state.language==LANG_FR?fr:en;
 }
 static void say(App *a, const char *text){ sprintf(a->message, "%s", text); }
+/* Home entry name without its number, in the active language (PicoCalc
+ * homeLabel, LPS-115-CHG03): the home menu and Config > Activities share it. */
+static const char *home_label(const App *a, unsigned i){
+    static const char *const en[HOME_ENTRY_COUNT]={"Date","Activities","Weight tracker","Kanban","Christian Rosary","Daily review","Reminders","Timer","Close the day"};
+    static const char *const fr[HOME_ENTRY_COUNT]={"Date","Activités","Suivi du poids","Kanban","Rosaire chrétien","Revue journalière","Rappels","Minuteur","Terminer le jour"};
+    return a->state.language==LANG_FR?fr[i]:en[i];
+}
+/* Home menu entries 0-8 (LPS-DOS-115-CHG10, PicoCalc LPS-115-CHG01): Config
+ * left the menu, TAB opens it. */
+static const int HOME_SCREENS[HOME_ENTRY_COUNT]={SCR_DATE,SCR_ACTIVITIES,SCR_WEIGHT,SCR_KANBAN,SCR_ROSARY_MODE,SCR_DAILY_REVIEW,SCR_REMINDERS,SCR_TIMER_SELECT,SCR_FINISH};
 static void read_only(App *a){ say(a, tr(a,"Archived day: read-only","Jour archivé : lecture seule")); }
 static unsigned timer_seconds(const App *a){ return (unsigned)((a->timerRemaining+999)/1000); }
 /* LPS-DOS-115-CHG02b (PicoCalc LPS-112-CHG01/CHG02): 5, 30 or 60 minutes,
@@ -366,7 +377,7 @@ static void meal_release(App *a){
     if(a->mealOpen && a->hw->meal_close) a->hw->meal_close(a->hw);
     a->mealOpen=0;
 }
-static void reset_pending(App *a){ a->pendingLanguage=a->state.language; a->pendingPalette=a->state.palette; }
+static void reset_pending(App *a){ a->pendingLanguage=a->state.language; a->pendingPalette=a->state.palette; a->pendingHidden=a->state.hiddenHome; }
 /* LPS-DOS-115-CHG09 (PicoCalc returnTo): back to a screen without go(), so
  * its drafts, Kanban column, Activities cursor, review scroll and Rosary
  * position are untouched. A language saved meanwhile can shorten the Rosary
@@ -383,6 +394,13 @@ static void return_to(App *a, ReturnPoint r){
         unsigned rows=review_rows(a), maximum=rows>REVIEW_PAGE?rows-REVIEW_PAGE:0;
         if(a->reviewOffset>maximum) a->reviewOffset=maximum;
     }
+}
+/* LPS-DOS-115-CHG10 (PicoCalc commit, LPS-115-CHG03): when Config's write
+ * fails, the settings keep their old values, the pending choice stays and
+ * Config stays open. Other unsaved edits stay dirty for the next write. */
+static void config_write_failed(App *a, uint8_t language, uint8_t palette, uint16_t hidden){
+    a->state.language=language; a->state.palette=palette; a->state.hiddenHome=hidden;
+    say(a,tr(a,"Save failed: restart device","Échec sauvegarde : redémarrer"));
 }
 static ReturnPoint here(const App *a){ ReturnPoint r; r.screen=a->screen; r.selection=a->selection; return r; }
 static void open_config(App *a){ a->configReturn=here(a); reset_pending(a); go(a,SCR_CONFIG); }
@@ -658,7 +676,7 @@ void app_key(App *a, int k){
     if(k==KEY_ESCAPE){
         int target=SCR_HOME;
         int from=a->screen;
-        if(a->screen==SCR_LANGUAGE||a->screen==SCR_COLORS) target=SCR_CONFIG;
+        if(a->screen==SCR_LANGUAGE||a->screen==SCR_COLORS||a->screen==SCR_HOME_ENTRIES) target=SCR_CONFIG;
         else if(a->screen==SCR_REMINDER_EDIT) target=SCR_REMINDERS;
         else if(a->screen==SCR_TASK_EDIT) target=SCR_KANBAN;
         else if(a->screen==SCR_ROSARY_SET) target=SCR_ROSARY_MODE;
@@ -686,9 +704,10 @@ void app_key(App *a, int k){
     a->message[0]=0;
     if(a->screen==SCR_REMINDER_POPUP){ go(a,SCR_HOME);
     }else if(a->screen==SCR_HOME){
-        /* LPS-DOS-115-CHG02 (PicoCalc LPS-112-CHG05): no notepad; 0-9 today,
-         * 1-2 on an archived day. */
-        unsigned menuCount=a->daysBack?2u:10u;
+        /* LPS-DOS-115-CHG02 (PicoCalc LPS-112-CHG05): no notepad. LPS-DOS-115-CHG10
+         * (PicoCalc LPS-115-CHG01): no Config entry; 0-8 today, 1-2 on an
+         * archived day. */
+        unsigned menuCount=a->daysBack?2u:HOME_ENTRY_COUNT;
         if(k==KEY_LEFT){
             if(a->daysBack<a->state.count){ a->daysBack++; a->selection=0; a->page=0; }
             else say(a, a->state.count?tr(a,"Oldest saved day","Plus ancien jour conservé"):tr(a,"No archived days","Aucun jour archivé"));
@@ -698,16 +717,14 @@ void app_key(App *a, int k){
         if(k==KEY_DOWN) a->selection=(a->selection+1)%menuCount;
         if(!a->daysBack && k=='0'){ a->selection=0; k=KEY_ENTER; }
         else if(a->daysBack && k>='1' && k<='2'){ a->selection=(unsigned)(k-'1'); k=KEY_ENTER; }
-        else if(!a->daysBack && k>='1' && k<='9'){ a->selection=(unsigned)(k-'0'); k=KEY_ENTER; }
-        if((k=='0'||(k>='3'&&k<='9')) && a->daysBack) read_only(a);
+        else if(!a->daysBack && k>='1' && (unsigned)(k-'0')<menuCount){ a->selection=(unsigned)(k-'0'); k=KEY_ENTER; }
+        if((k=='0'||(k>='3'&&(unsigned)(k-'0')<HOME_ENTRY_COUNT)) && a->daysBack) read_only(a);
         if(k==KEY_ENTER){
-            static const int currentScreens[]={SCR_DATE,SCR_ACTIVITIES,SCR_WEIGHT,SCR_KANBAN,SCR_ROSARY_MODE,SCR_DAILY_REVIEW,SCR_CONFIG,SCR_REMINDERS,SCR_TIMER_SELECT,SCR_FINISH};
             static const int archiveScreens[]={SCR_ACTIVITIES,SCR_WEIGHT};
-            int target=a->daysBack?archiveScreens[a->selection]:currentScreens[a->selection];
+            int target=a->daysBack?archiveScreens[a->selection]:HOME_SCREENS[a->selection];
             if(target==SCR_KANBAN) a->kanbanColumn=TASK_TODO;
             if(target==SCR_REMINDERS) prune_reminders(a);
-            if(target==SCR_CONFIG) open_config(a); /* menu entry 6, as TAB */
-            else go(a,target);
+            go(a,target);
         }
     }else if(a->screen==SCR_TIMER_SELECT){
         if(k==KEY_UP) a->selection=(a->selection+2)%3;
@@ -848,14 +865,31 @@ void app_key(App *a, int k){
         else if(k==KEY_RIGHT) a->reviewOffset=(a->reviewOffset+REVIEW_PAGE<maximum)?a->reviewOffset+REVIEW_PAGE:maximum;
         else if(k==KEY_LEFT) a->reviewOffset=a->reviewOffset>REVIEW_PAGE?a->reviewOffset-REVIEW_PAGE:0;
     }else if(a->screen==SCR_CONFIG){
-        if(k==KEY_UP) a->selection=(a->selection+2)%3;
-        if(k==KEY_DOWN) a->selection=(a->selection+1)%3;
-        if(k>='1'&&k<='3'){ a->selection=(unsigned)(k-'1'); k=KEY_ENTER; }
+        /* LPS-DOS-115-CHG10 (PicoCalc LPS-115-CHG03): 1 Language, 2 Colors,
+         * 3 Activities (home entries), 4 Save. */
+        if(k==KEY_UP) a->selection=(a->selection+3)%4;
+        if(k==KEY_DOWN) a->selection=(a->selection+1)%4;
+        if(k>='1'&&k<='4'){ a->selection=(unsigned)(k-'1'); k=KEY_ENTER; }
         if(k==KEY_ENTER){
             if(a->selection==0) go(a,SCR_LANGUAGE);
             else if(a->selection==1) go(a,SCR_COLORS);
-            else { g_scratch=a->state; g_scratch.language=(uint8_t)a->pendingLanguage;
-                if(commit(a,&g_scratch)){ flush_save(a); close_config(a); say(a,tr(a,"Configuration saved","Configuration enregistrée")); }}
+            else if(a->selection==2) go(a,SCR_HOME_ENTRIES);
+            else { uint8_t language=a->state.language; uint16_t hidden=a->state.hiddenHome;
+                g_scratch=a->state; g_scratch.language=(uint8_t)a->pendingLanguage; g_scratch.hiddenHome=a->pendingHidden;
+                if(commit(a,&g_scratch)){
+                    if(flush_save(a)){ close_config(a); say(a,tr(a,"Configuration saved","Configuration enregistrée")); }
+                    else config_write_failed(a,language,a->state.palette,hidden);
+                }}
+        }
+    }else if(a->screen==SCR_HOME_ENTRIES){
+        /* LPS-DOS-115-CHG10 (PicoCalc LPS-115-CHG03): show/hide home entries;
+         * like Language, pending until Save in Configuration (Esc keeps it,
+         * Tab drops it). The home menu is not filtered yet (CHG11). */
+        if(k==KEY_UP) a->selection=(a->selection+HOME_ENTRY_COUNT-1)%HOME_ENTRY_COUNT;
+        if(k==KEY_DOWN) a->selection=(a->selection+1)%HOME_ENTRY_COUNT;
+        if(k==KEY_ENTER){
+            if(HOME_LOCKED&(1u<<a->selection)) say(a,tr(a,"Always shown","Toujours affiché"));
+            else a->pendingHidden=(uint16_t)((a->pendingHidden^(1u<<a->selection))&HOME_ALL&~HOME_LOCKED);
         }
     }else if(a->screen==SCR_LANGUAGE){
         if(k==KEY_UP||k==KEY_DOWN) a->selection=1-a->selection;
@@ -866,8 +900,12 @@ void app_key(App *a, int k){
         if(k==KEY_DOWN) a->selection=(a->selection+1)%5;
         if(k>='1'&&k<='5') a->selection=(unsigned)(k-'1');
         a->pendingPalette=(int)a->selection;
-        if(k==KEY_ENTER){ g_scratch=a->state; g_scratch.palette=(uint8_t)a->pendingPalette;
-            if(commit(a,&g_scratch)){ flush_save(a); close_config(a); say(a,tr(a,"Color saved","Couleur enregistrée")); }}
+        if(k==KEY_ENTER){ uint8_t palette=a->state.palette;
+            g_scratch=a->state; g_scratch.palette=(uint8_t)a->pendingPalette;
+            if(commit(a,&g_scratch)){
+                if(flush_save(a)){ close_config(a); say(a,tr(a,"Color saved","Couleur enregistrée")); }
+                else config_write_failed(a,a->state.language,palette,a->state.hiddenHome);
+            }}
     }else if(a->screen==SCR_ROSARY_MODE){
         if(k==KEY_UP) a->selection=(a->selection+3)%4;
         if(k==KEY_DOWN) a->selection=(a->selection+1)%4;
@@ -1000,24 +1038,15 @@ void app_render(App *a){
     if(a->daysBack) center_line(a,2,tr(a,"ARCHIVED DAY - READ ONLY","JOUR ARCHIVÉ - LECTURE SEULE"),0);
 
     if(a->screen==SCR_HOME){
-        const char *menu[10];
-        unsigned first=a->daysBack?1u:0u, total=a->daysBack?2u:10u;
+        unsigned first=a->daysBack?1u:0u, total=a->daysBack?2u:HOME_ENTRY_COUNT;
         char wexp[16], wact[16];
         int gutter;
-        menu[0]="0  Date";
-        menu[1]=tr(a,"1  Activities","1  Activités");
-        menu[2]=tr(a,"2  Weight tracker","2  Suivi du poids");
-        menu[3]="3  Kanban";
-        menu[4]=tr(a,"4  Christian Rosary","4  Rosaire chrétien");
-        menu[5]=tr(a,"5  Daily review","5  Revue journalière");
-        menu[6]="6  Config";
-        menu[7]=tr(a,"7  Reminders","7  Rappels");
-        menu[8]=tr(a,"8  Timer","8  Minuteur");
-        menu[9]=tr(a,"9  Close the day","9  Terminer le jour");
         field(a,4,1,37, a->daysBack?tr(a,"CLOSED DAY","JOUR TERMINÉ"):tr(a,"TODAY","AUJOURD'HUI"), 0);
         sprintf(b,tr(a,"%u/%u activities","%u/%u activités"), marked_activities(a,day), (unsigned)a->state.activityCount);
         field(a,5,1,37,b,0);
-        for(i=0;i<total;i++) field(a,7+(int)i,1,37, menu[first+i], i==a->selection);
+        /* LPS-DOS-115-CHG10 (PicoCalc LPS-115-CHG01): Config left the menu (TAB
+         * opens it); entries renumbered 0-8; the archive keeps 1 and 2. */
+        for(i=0;i<total;i++){ sprintf(b,"%u  %s",first+i,home_label(a,first+i)); field(a,7+(int)i,1,37,b,i==a->selection); }
         field(a,18,1,37,tr(a,"<- Previous day   -> Current day","<- Jour précédent   -> Jour actuel"),0);
         /* Right pane, tightened after the notepad left (LPS-DOS-115-CHG02):
          * blocks start on the menu's rows 4, 7, 11 and 16. */
@@ -1187,9 +1216,26 @@ void app_render(App *a){
         center_line(a,3,tr(a,"CONFIGURATION","CONFIGURATION"),0);
         sprintf(b,"%s: %s", tr(a,"1  Language","1  Langue"), a->pendingLanguage==LANG_EN?"English":"Français"); line(a,6,b,a->selection==0);
         sprintf(b,"%s: PAL%u", tr(a,"2  Colors","2  Couleurs"), (unsigned)a->state.palette+1); line(a,7,b,a->selection==1);
-        line(a,8,tr(a,"3  Save","3  Enregistrer"),a->selection==2);
-        line(a,11,tr(a,"Language: select, then Save.","Langue : choisir, puis enregistrer."),0);
+        { unsigned shown=0; for(i=0;i<HOME_ENTRY_COUNT;i++) if(!(a->pendingHidden&(1u<<i))) shown++;
+          sprintf(b,"%s: %u/%u", tr(a,"3  Activities","3  Activités"), shown, (unsigned)HOME_ENTRY_COUNT); line(a,8,b,a->selection==2); }
+        line(a,9,tr(a,"4  Save","4  Enregistrer"),a->selection==3);
+        line(a,11,tr(a,"Language, Activities: then Save.","Langue, Activités : puis enregistrer."),0);
         line(a,12,tr(a,"Esc: discard changes","Échap : annuler les modifications"),0);
+        line(a,13,tr(a,"Tab: close Config","Tab : fermer la configuration"),0);
+    }else if(a->screen==SCR_HOME_ENTRIES){
+        /* LPS-DOS-115-CHG10 (PicoCalc LPS-115-CHG03): the tag ends in column 39
+         * as on the PicoCalc. Screen strings are CP437 here, one byte a cell. */
+        center_line(a,3,tr(a,"ACTIVITIES","ACTIVITÉS"),0);
+        center_line(a,4,tr(a,"Home menu entries shown","Entrées affichées dans le menu"),0);
+        for(i=0;i<HOME_ENTRY_COUNT;i++){
+            int locked=(HOME_LOCKED&(1u<<i))!=0, hidden=(a->pendingHidden&(1u<<i))!=0;
+            const char *label=home_label(a,i), *tag=locked?tr(a,"(locked)","(verrouillé)"):"";
+            unsigned used=4+(unsigned)strlen(label)+(unsigned)strlen(tag);
+            sprintf(b,"[%c] %s%*s%s", hidden?' ':'x', label, (int)(used<39?39-used:1), "", tag);
+            line(a,6+(int)i,b,i==a->selection);
+        }
+        line(a,15,tr(a,"Enter: show/hide","Entrée : afficher/masquer"),0);
+        line(a,16,tr(a,"Then Save in Configuration.","Puis enregistrer dans Configuration."),0);
     }else if(a->screen==SCR_LANGUAGE){
         center_line(a,3,tr(a,"LANGUAGE","LANGUE"),0);
         line(a,6,"1  English",a->selection==0); line(a,7,"2  Français",a->selection==1);
@@ -1290,6 +1336,8 @@ void app_render(App *a){
     if(a->screen==SCR_MEAL_PLANNER)
         center_line(a,24,meal_play_position(&a->state,a->mealCursor)?tr(a,"Enter:Put back  Space/Esc:Back","Entrée:Remettre  Espace/Échap:Retour")
                                                               :tr(a,"Enter:Play  Space/Esc:Back","Entrée:Jouer  Espace/Échap:Retour"),1);
+    else if(a->screen==SCR_HOME) /* LPS-DOS-115-CHG10 (PicoCalc LPS-115-CHG01) */
+        center_line(a,24,tr(a,"Up/Down  Enter:OK  Tab:Config","Haut/Bas  Entrée:OK  Tab:Config"),1);
     else if(a->screen!=SCR_TIMER_RUNNING && a->screen!=SCR_TIMER_COMPLETE)
         center_line(a,24,tr(a,"Up/Down  Enter:OK  Esc:Back","Haut/Bas  Entrée:OK  Échap:Retour"),1);
     a->hw->present(a->hw);
