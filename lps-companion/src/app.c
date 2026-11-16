@@ -79,6 +79,27 @@ static const char *home_label(const App *a, unsigned i){
 /* Home menu entries 0-8 (LPS-DOS-115-CHG10, PicoCalc LPS-115-CHG01): Config
  * left the menu, TAB opens it. */
 static const int HOME_SCREENS[HOME_ENTRY_COUNT]={SCR_DATE,SCR_ACTIVITIES,SCR_WEIGHT,SCR_KANBAN,SCR_ROSARY_MODE,SCR_DAILY_REVIEW,SCR_REMINDERS,SCR_TIMER_SELECT,SCR_FINISH};
+/* LPS-DOS-115-CHG11 (PicoCalc LPS-115-CHG04): today's home menu lists the
+ * entries not hidden, in order, numbered 0..n-1 by position. Date (first)
+ * and Close the day (last) are locked, so the menu is never empty and always
+ * ends with Close the day. The archive menu (1-2) is not filtered. */
+static uint16_t hidden_home_mask(const App *a){ return (uint16_t)(a->state.hiddenHome&HOME_ALL&~HOME_LOCKED); }
+static unsigned home_visible_count(const App *a){
+    unsigned i, n=0; uint16_t m=hidden_home_mask(a);
+    for(i=0;i<HOME_ENTRY_COUNT;i++) if(!(m&(1u<<i))) n++;
+    return n;
+}
+static unsigned home_entry_at(const App *a, unsigned position){
+    unsigned i; uint16_t m=hidden_home_mask(a);
+    for(i=0;i<HOME_ENTRY_COUNT;i++) if(!(m&(1u<<i)) && position--==0) return i;
+    return HOME_ENTRY_COUNT-1;
+}
+/* Position of an entry; a hidden one gives the next visible entry below it. */
+static unsigned home_position_of(const App *a, unsigned entry){
+    unsigned i, position=0; uint16_t m=hidden_home_mask(a);
+    for(i=0;i<HOME_ENTRY_COUNT;i++) if(!(m&(1u<<i))){ if(i>=entry) return position; position++; }
+    return position?position-1:0;
+}
 static void read_only(App *a){ say(a, tr(a,"Archived day: read-only","Jour archivé : lecture seule")); }
 static unsigned timer_seconds(const App *a){ return (unsigned)((a->timerRemaining+999)/1000); }
 /* LPS-DOS-115-CHG02b (PicoCalc LPS-112-CHG01/CHG02): 5, 30 or 60 minutes,
@@ -386,6 +407,7 @@ static void reset_pending(App *a){ a->pendingLanguage=a->state.language; a->pend
 static void return_to(App *a, ReturnPoint r){
     if(r.screen!=SCR_MEAL_PLANNER && !in_config(r.screen)) meal_release(a);
     a->screen=r.screen; a->selection=r.selection; a->message[0]=0; a->confirmingDelete=0;
+    if(a->screen==SCR_HOME && !a->daysBack) a->selection=home_position_of(a,r.homeEntry);
     if(a->screen==SCR_ROSARY_PRAYER && rosary_loaded()){
         unsigned pages=rosary_pages(rosary_text(a->state.language,a->rosaryMode,a->rosarySet,a->rosaryDecade,a->rosaryStep));
         if(pages && a->rosaryPage>=pages) a->rosaryPage=pages-1;
@@ -402,7 +424,11 @@ static void config_write_failed(App *a, uint8_t language, uint8_t palette, uint1
     a->state.language=language; a->state.palette=palette; a->state.hiddenHome=hidden;
     say(a,tr(a,"Save failed: restart device","Échec sauvegarde : redémarrer"));
 }
-static ReturnPoint here(const App *a){ ReturnPoint r; r.screen=a->screen; r.selection=a->selection; return r; }
+static ReturnPoint here(const App *a){
+    ReturnPoint r; r.screen=a->screen; r.selection=a->selection;
+    r.homeEntry=a->screen==SCR_HOME&&!a->daysBack?home_entry_at(a,a->selection):0;
+    return r;
+}
 static void open_config(App *a){ a->configReturn=here(a); reset_pending(a); go(a,SCR_CONFIG); }
 /* Leaves Config and its sub-screens; pending, unsaved changes are dropped. */
 static void close_config(App *a){ reset_pending(a); return_to(a,a->configReturn); }
@@ -707,7 +733,7 @@ void app_key(App *a, int k){
         /* LPS-DOS-115-CHG02 (PicoCalc LPS-112-CHG05): no notepad. LPS-DOS-115-CHG10
          * (PicoCalc LPS-115-CHG01): no Config entry; 0-8 today, 1-2 on an
          * archived day. */
-        unsigned menuCount=a->daysBack?2u:HOME_ENTRY_COUNT;
+        unsigned menuCount=a->daysBack?2u:home_visible_count(a); /* CHG11: shown entries only */
         if(k==KEY_LEFT){
             if(a->daysBack<a->state.count){ a->daysBack++; a->selection=0; a->page=0; }
             else say(a, a->state.count?tr(a,"Oldest saved day","Plus ancien jour conservé"):tr(a,"No archived days","Aucun jour archivé"));
@@ -721,7 +747,7 @@ void app_key(App *a, int k){
         if((k=='0'||(k>='3'&&(unsigned)(k-'0')<HOME_ENTRY_COUNT)) && a->daysBack) read_only(a);
         if(k==KEY_ENTER){
             static const int archiveScreens[]={SCR_ACTIVITIES,SCR_WEIGHT};
-            int target=a->daysBack?archiveScreens[a->selection]:HOME_SCREENS[a->selection];
+            int target=a->daysBack?archiveScreens[a->selection]:HOME_SCREENS[home_entry_at(a,a->selection)];
             if(target==SCR_KANBAN) a->kanbanColumn=TASK_TODO;
             if(target==SCR_REMINDERS) prune_reminders(a);
             go(a,target);
@@ -1038,15 +1064,19 @@ void app_render(App *a){
     if(a->daysBack) center_line(a,2,tr(a,"ARCHIVED DAY - READ ONLY","JOUR ARCHIVÉ - LECTURE SEULE"),0);
 
     if(a->screen==SCR_HOME){
-        unsigned first=a->daysBack?1u:0u, total=a->daysBack?2u:HOME_ENTRY_COUNT;
+        unsigned total=a->daysBack?2u:home_visible_count(a);
         char wexp[16], wact[16];
         int gutter;
         field(a,4,1,37, a->daysBack?tr(a,"CLOSED DAY","JOUR TERMINÉ"):tr(a,"TODAY","AUJOURD'HUI"), 0);
         sprintf(b,tr(a,"%u/%u activities","%u/%u activités"), marked_activities(a,day), (unsigned)a->state.activityCount);
         field(a,5,1,37,b,0);
         /* LPS-DOS-115-CHG10 (PicoCalc LPS-115-CHG01): Config left the menu (TAB
-         * opens it); entries renumbered 0-8; the archive keeps 1 and 2. */
-        for(i=0;i<total;i++){ sprintf(b,"%u  %s",first+i,home_label(a,first+i)); field(a,7+(int)i,1,37,b,i==a->selection); }
+         * opens it). LPS-DOS-115-CHG11 (PicoCalc LPS-115-CHG04): only the entries
+         * shown, renumbered without gaps; the archive keeps 1 and 2. */
+        for(i=0;i<total;i++){
+            unsigned entry=a->daysBack?1u+i:home_entry_at(a,i);
+            sprintf(b,"%u  %s",a->daysBack?entry:i,home_label(a,entry)); field(a,7+(int)i,1,37,b,i==a->selection);
+        }
         field(a,18,1,37,tr(a,"<- Previous day   -> Current day","<- Jour précédent   -> Jour actuel"),0);
         /* Right pane, tightened after the notepad left (LPS-DOS-115-CHG02):
          * blocks start on the menu's rows 4, 7, 11 and 16. */

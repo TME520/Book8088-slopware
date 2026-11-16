@@ -521,7 +521,8 @@ static void check_json_saves(const char *dir){
     assert(app_screen(app)==SCR_HOME);
     /* 24 entries: 3 columns of 8; Marche (16th) heads the third column. */
     app_key(app,'1'); app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); app_key(app,'1'); app_key(app,KEY_ESCAPE); /* tick Marche */
-    app_key(app,'8'); assert(app_screen(app)==SCR_FINISH); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD);
+    /* Kanban and Rosary are hidden in this save: Close the day is 6 (LPS-DOS-115-CHG11). */
+    app_key(app,'6'); assert(app_screen(app)==SCR_FINISH); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD);
     n=slurp(pb,jbuf,sizeof(jbuf)); /* the tick, saved when leaving Activities */
     assert(strstr(jbuf,"\"generation\":8,") && strstr(jbuf,"\"meals\":{\"played\":[3,0,15]},"));
     n=slurp(pa,jbuf,sizeof(jbuf)); /* the closed day */
@@ -741,7 +742,7 @@ static void check_activities(const char *dir){
     app_key(app,KEY_RIGHT);
     /* ICS of a custom catalog: the export language's name, the other one when empty. */
     app_key(app,'1'); app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); app_key(app,'1'); app_key(app,KEY_ESCAPE);
-    app_key(app,'8'); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD);
+    app_key(app,'6'); /* Kanban, Rosary hidden: Close the day is 6 */ app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD);
     read_ics(dir,"20261114",got,sizeof(got));
     assert(strstr(got,"DESCRIPTION:Activit\xc3\xa9s: Sport, Messe, Projet perso, Marche, V\xc3\xa9lo, Chess\\NXP:"));
 
@@ -1619,6 +1620,83 @@ static Platform *he_start(App *app, const char *dir, int fresh){
     he_real_save=hw->save; hw->save=he_save; he_fail=0; he_saves=0;
     return hw;
 }
+/* A Home menu row (columns 1-37) holds exactly text. */
+static int menu_is(Platform *hw, int row, const char *text){
+    const char *r=plat_host_row(hw,row); size_t n=strlen(text), i;
+    if(strncmp(r+1,text,n)) return 0;
+    for(i=1+n;i<38;i++) if(r[i]!=' ') return 0;
+    return 1;
+}
+static void he_hide(App *app, const unsigned *entries, unsigned count){ /* toggle entries and save */
+    unsigned e, i;
+    app_key(app,KEY_TAB); app_key(app,'3');
+    for(e=0;e<count;e++){ for(i=0;i<entries[e];i++) app_key(app,KEY_DOWN); app_key(app,KEY_ENTER); for(i=0;i<entries[e];i++) app_key(app,KEY_UP); }
+    app_key(app,KEY_ESCAPE); app_key(app,'4');
+}
+/* LPS-DOS-115-CHG11 (PicoCalc v1.15 LPS-115-CHG04): today's home menu lists
+ * only the checked entries, renumbered 0..n-1; digits, arrows and Enter work
+ * on positions; return points keep the entry. */
+static void check_home_filtered(const char *dir){
+    static unsigned char store[16384]; App *app=(App*)store; Platform *hw; int r;
+    static const char *const expected[7]={"0  Date","1  Weight tracker","2  Kanban","3  Christian Rosary","4  Reminders","5  Timer","6  Close the day"};
+    static const unsigned act_daily[2]={1,5}, kanban[1]={3}, timer[1]={7}, all5[5]={1,2,3,5,7}, act_weight[2]={1,2};
+    hw=he_start(app,dir,1);
+    app_key(app,'1'); app_key(app,'1'); app_key(app,KEY_ESCAPE); /* tick an activity first: hidden entries keep their data */
+    he_hide(app,act_daily,2); /* Activities and Daily review */
+    assert(app_state(app)->hiddenHome==0x022);
+    for(r=0;r<7;r++) assert(menu_is(hw,7+r,expected[r]));
+    assert(menu_is(hw,14,"") && row_has(hw,18,"<- Previous day") && row_has(hw,24,"Tab:Config") && row_has(hw,5,"1/22 activities") && plat_host_rev(hw,7,1));
+    /* Digits map to positions; keys past the end do nothing. */
+    app_key(app,'1'); assert(app_screen(app)==SCR_WEIGHT); app_key(app,KEY_ESCAPE);
+    app_key(app,'5'); assert(app_screen(app)==SCR_TIMER_SELECT); app_key(app,KEY_ESCAPE);
+    app_key(app,'6'); assert(app_screen(app)==SCR_FINISH); app_key(app,KEY_ESCAPE);
+    app_key(app,'7'); app_key(app,'8'); app_key(app,'9'); assert(app_screen(app)==SCR_HOME && plat_host_rev(hw,7,1));
+    /* The AZERTY top row by scan code (CHG06b) maps to positions too: é is 2, ( is 5. */
+    app_key(app,plat_host_key(1,'\202')); assert(app_screen(app)==SCR_KANBAN); app_key(app,KEY_ESCAPE);
+    app_key(app,plat_host_key(1,'(')); assert(app_screen(app)==SCR_TIMER_SELECT); app_key(app,KEY_ESCAPE);
+    app_key(app,plat_host_key(1,'\212')); assert(app_screen(app)==SCR_HOME); /* è is 7: past the end */
+    /* Up/Down move over visible entries only and wrap. */
+    app_key(app,KEY_UP); assert(plat_host_rev(hw,13,1)); app_key(app,KEY_DOWN); assert(plat_host_rev(hw,7,1));
+    app_key(app,KEY_DOWN); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_WEIGHT); app_key(app,KEY_ESCAPE);
+    /* Cursor kept on the same entry after a Config save... */
+    app_key(app,KEY_DOWN); app_key(app,KEY_DOWN); assert(plat_host_rev(hw,9,1) && menu_is(hw,9,"2  Kanban"));
+    app_key(app,KEY_TAB); app_key(app,'3'); app_key(app,KEY_DOWN); app_key(app,KEY_DOWN); app_key(app,KEY_ENTER); app_key(app,KEY_ESCAPE); app_key(app,'4'); /* hide Weight tracker */
+    assert(app_screen(app)==SCR_HOME && plat_host_rev(hw,8,1) && menu_is(hw,8,"1  Kanban") && menu_is(hw,12,"5  Close the day"));
+    /* ...and after Config closed from a sub-screen (TAB) or by Esc. */
+    app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,KEY_TAB); assert(app_screen(app)==SCR_HOME && plat_host_rev(hw,8,1));
+    app_key(app,KEY_TAB); app_key(app,'2'); app_key(app,KEY_ESCAPE); app_key(app,KEY_ESCAPE); assert(app_screen(app)==SCR_HOME && plat_host_rev(hw,8,1));
+    /* ...or moved to the next visible entry when its own entry is hidden. */
+    he_hide(app,kanban,1); assert(plat_host_rev(hw,8,1) && menu_is(hw,8,"1  Christian Rosary"));
+    app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_ROSARY_MODE); app_key(app,KEY_ESCAPE); /* Esc from a screen returns to Home on Date */
+    assert(plat_host_rev(hw,7,1));
+    app_key(app,KEY_DOWN); app_key(app,KEY_DOWN); app_key(app,KEY_DOWN); assert(menu_is(hw,10,"3  Timer") && plat_host_rev(hw,10,1));
+    he_hide(app,timer,1); assert(menu_is(hw,10,"3  Close the day") && plat_host_rev(hw,10,1)); /* hiding the last hideable entry lands on Close the day */
+    he_hide(app,all5,5); assert(app_state(app)->hiddenHome==0 && plat_host_rev(hw,15,1) && menu_is(hw,14,"7  Timer") && menu_is(hw,15,"8  Close the day")); /* all shown, cursor kept on Close the day */
+    /* Meal Planner return point: the entry hidden while in Config over the planner. */
+    app_key(app,KEY_UP); app_key(app,KEY_UP); assert(menu_is(hw,13,"6  Reminders") && plat_host_rev(hw,13,1));
+    app_key(app,' '); app_key(app,KEY_TAB); app_key(app,'3'); for(r=0;r<6;r++) app_key(app,KEY_DOWN); app_key(app,KEY_ENTER); app_key(app,KEY_ESCAPE); app_key(app,'4');
+    assert(app_screen(app)==SCR_MEAL_PLANNER); app_key(app,' ');
+    assert(app_screen(app)==SCR_HOME && plat_host_rev(hw,13,1) && menu_is(hw,13,"6  Timer"));
+    /* Archive day menu unchanged; hidden entries keep working behind the scenes. */
+    he_hide(app,act_weight,2); assert(menu_is(hw,7,"0  Date") && menu_is(hw,8,"1  Kanban"));
+    app_key(app,'0'); app_key(app,KEY_ENTER); app_key(app,KEY_ESCAPE); /* keep the date */
+    app_key(app,KEY_UP); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_FINISH); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD); app_key(app,KEY_ENTER);
+    app_key(app,KEY_LEFT); assert(menu_is(hw,7,"1  Activities") && menu_is(hw,8,"2  Weight tracker") && menu_is(hw,9,""));
+    app_key(app,'3'); assert(row_has(hw,23,"Archived day: read-only"));
+    app_key(app,'1'); assert(app_screen(app)==SCR_ACTIVITIES && any_row(hw,"[x]")); app_key(app,KEY_ESCAPE); app_key(app,KEY_RIGHT);
+    assert(menu_is(hw,8,"1  Kanban"));
+    /* The timer keeps running while its entry is hidden. */
+    assert(menu_is(hw,11,"4  Timer")); app_tick(app,1000); app_key(app,'4'); assert(app_screen(app)==SCR_TIMER_SELECT); app_key(app,'1');
+    he_hide(app,timer,1); assert(app_screen(app)==SCR_TIMER_RUNNING); app_tick(app,1000+300000); assert(app_screen(app)==SCR_TIMER_COMPLETE);
+    app_key(app,KEY_ESCAPE); assert(app_screen(app)==SCR_HOME && menu_is(hw,11,"4  Close the day") && !any_row(hw,"Timer"));
+    /* French, Timer hidden: 7 is nothing, 6 is Close the day; the save holds the PicoCalc ids. */
+    app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'2'); app_key(app,'4');
+    assert(menu_is(hw,10,"3  Revue journali\212re") && menu_is(hw,11,"4  Terminer le jour"));
+    newest_save(dir); assert(strstr(jbuf,"\"homeHidden\":[\"activities\",\"weight\",\"reminders\",\"timer\"]},\n\"crc32\":\""));
+    /* Restart keeps the filtered menu. */
+    hw=he_start(app,dir,0); assert(app_state(app)->hiddenHome==0x0c6 && menu_is(hw,8,"1  Kanban") && menu_is(hw,11,"4  Terminer le jour") && menu_is(hw,12,""));
+    app_key(app,'5'); assert(app_screen(app)==SCR_HOME);
+}
 static void check_home_entries(const char *dir){
     static unsigned char store[16384]; static char home[OV_FRAME], kanban[OV_FRAME], file[65536];
     App *app=(App*)store; Platform *hw; State out; uint32_t gen; int active, r; size_t n;
@@ -1649,10 +1727,10 @@ static void check_home_entries(const char *dir){
     app_key(app,'4'); assert(app_screen(app)==SCR_HOME && row_has(hw,23,"Configuration saved") && he_saves==1);
     assert(app_state(app)->hiddenHome==0x002);
     n=newest_save(dir); assert(strstr(jbuf,"],\n\"meals\":{\"played\":[]},\n\"homeHidden\":[\"activities\"]},\n\"crc32\":\"") && jbuf[n-1]=='\n');
-    /* CHG10 does not filter the home menu yet (CHG11): all nine entries. */
-    assert(row_has(hw,8,"1  Activities") && row_has(hw,15,"8  Close the day"));
+    /* LPS-DOS-115-CHG11: the home menu shows the checked entries only. */
+    assert(menu_is(hw,8,"1  Weight tracker") && menu_is(hw,14,"7  Close the day") && menu_is(hw,15,""));
     /* Reopening starts from the saved choice; Tab drops a pending change, from the sub-screen too. */
-    app_key(app,'3'); frame_of(hw,kanban);
+    app_key(app,'2'); assert(app_screen(app)==SCR_KANBAN); frame_of(hw,kanban);
     app_key(app,KEY_TAB); app_key(app,'3'); assert(row_has(hw,7,"[ ] Activities")); app_key(app,KEY_DOWN); app_key(app,KEY_ENTER); assert(row_has(hw,7,"[x] Activities"));
     app_key(app,KEY_TAB); assert(app_screen(app)==SCR_KANBAN && frame_is(hw,kanban) && app_state(app)->hiddenHome==0x002);
     app_key(app,KEY_TAB); app_key(app,'3'); assert(row_has(hw,7,"[ ] Activities")); app_key(app,KEY_ESCAPE); app_key(app,KEY_ESCAPE); assert(app_screen(app)==SCR_KANBAN);
@@ -1885,6 +1963,7 @@ int main(void){
     check_meal_csv(tmpdir);
     check_overlay_keys(tmpdir);
     check_home_entries(tmpdir);
+    check_home_filtered(tmpdir);
     assert(orphan_hits>0); /* some edit took a name history had stored */
 
     printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-8 without notepad or Config, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");

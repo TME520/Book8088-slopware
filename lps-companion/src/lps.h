@@ -103,8 +103,10 @@ enum Screen {
 #define HOME_ALL ((uint16_t)((1u<<HOME_ENTRY_COUNT)-1))
 
 typedef struct { uint16_t year; uint8_t month, day; } Date;
-/* A screen and its cursor to return to (LPS-DOS-115-CHG09 overlays). */
-typedef struct { int screen; unsigned selection; } ReturnPoint;
+/* A screen and its cursor to return to (LPS-DOS-115-CHG09 overlays). On
+ * today's Home the cursor is also kept as the entry (LPS-DOS-115-CHG11,
+ * PicoCalc LPS-115-CHG04), so it survives entries being hidden or shown. */
+typedef struct { int screen; unsigned selection; unsigned homeEntry; } ReturnPoint;
 typedef struct {
     Date date;
     uint32_t number;

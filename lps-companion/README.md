@@ -17,7 +17,7 @@ Long texts (the rosary prayers) wrap at spaces, never inside a word; a word long
 
 As in PicoCalc v1.12, XP and keepsakes no longer appear on any screen (LPS-DOS-115-CHG01). The line under the title bar shows the long date and ISO week of the viewed day, for example **Sunday 8 November 2026 (week 45)** / **Dimanche 8 Novembre 2026 (semaine 45)**; it stays blank for an undated day. XP is still banked in `SAVE_A`/`SAVE_B` so old and new saves stay compatible, and the ICS description keeps an empty `XP:` line, byte for byte like the PicoCalc.
 
-As in PicoCalc v1.12, the notepad is gone (LPS-DOS-115-CHG02) and the Home menu is renumbered **0 Date, 1 Activities, 2 Weight tracker, 3 Kanban, 4 Christian Rosary, 5 Daily review, 6 Config, 7 Reminders, 8 Timer, 9 Close the day**; an archived day offers **1 Activities, 2 Weight tracker**. Since LPS-DOS-115-CHG10 Config has left the menu (TAB opens it) and the entries are **0–8**, as on the PicoCalc v1.15.
+As in PicoCalc v1.12, the notepad is gone (LPS-DOS-115-CHG02) and the Home menu is renumbered **0 Date, 1 Activities, 2 Weight tracker, 3 Kanban, 4 Christian Rosary, 5 Daily review, 6 Config, 7 Reminders, 8 Timer, 9 Close the day**; an archived day offers **1 Activities, 2 Weight tracker**. Since LPS-DOS-115-CHG10 Config has left the menu (TAB opens it) and the entries are **0–8**, and since LPS-DOS-115-CHG11 only the entries checked in Config > Activities are shown, as on the PicoCalc v1.15.
 
 **Activities** (LPS-DOS-115-CHG05, as PicoCalc v1.13 CHG08/08b/08c) come from the activity catalog in the save, not from a fixed list. A new save starts with the PicoCalc's **22 default activities**, with the same ids, names and order: the 16 earlier ones plus **Sport, Cooking, Chores, Family, Friends, Meditation** / **Sport, Cuisine, Ménage, Famille, Amis, Méditation**. A catalog customised on the PicoCalc (up to 30 entries, renamed or reordered) shows on DOS as it is.
 - The screen has **three columns** of up to 10 rows, filled top to bottom: 22 activities are 8 + 8 + 6, and 30 fit in 10 + 10 + 10, so the whole list is on one page. Names longer than 20 characters are cut in the grid; the selected one is shown whole under the grid.
@@ -118,8 +118,20 @@ As on the PicoCalc v1.15 (LPS-115-CHG01, CHG03, CHG05), same code paths and text
 - Like the language, the choice is **pending until 4 Save**, which writes the language and the entries in one save and goes back to the screen Config was opened from. A finished timer that takes over drops it, and so does reopening Config.
 - **If the save cannot be written**, Config stays open with the choice still pending, the old settings stay in force and the old file is untouched, as on the PicoCalc (*Save failed: restart device*). Colors does the same. Earlier DOS builds kept the new settings in memory, closed Config and said *Configuration saved*.
 - **In the save** the choice is the PicoCalc's `"homeHidden"` key, byte for byte: ids in menu order after `"meals"`, for example `"homeHidden":["activities","daily_review"]`, `[]` when everything is shown, `date` and `close_day` never written, unknown ids ignored. DOS has read and written the key unchanged since CHG04; it is now `State.hiddenHome` (the separate far-heap block is gone). Checked: a save DOS wrote under DOSBox goes through the PicoCalc's own reader and writer (`tools/picocalc_fixture.cpp resave`) and comes out byte-identical; a PicoCalc save with Kanban and Rosary hidden shows `7/9` and `[ ]` on those two in DOS Config.
-- **Not yet:** Home still lists all nine entries; showing only the checked ones (PicoCalc LPS-115-CHG04) is LPS-DOS-115-CHG11. The hidden entries' data are kept either way.
+- Home shows only the checked entries since LPS-DOS-115-CHG11 (below).
 - **Speed on an 8088** (DOSBox, `cputype=8086`, `cycles=fixed 300`): TAB to Config 0.11 s; 3 to the list 0.17 s; Up/Down 0.14 s; Enter (toggle) 0.13 s; Esc to Configuration 0.11 s; a Down on Home 0.17 s. 4 Save is the usual save write and read-back: 0.6 s for a small save, 3.2 s for a 31-day, 9.8 KB save (unchanged by this change).
+
+### Home shows the checked entries only (LPS-DOS-115-CHG11)
+
+As on the PicoCalc v1.15 (LPS-115-CHG04), same code paths:
+
+- Today's Home lists **only the entries ticked in Config > Activities**, in their usual order, **numbered 0 to n−1 without gaps**. With Activities and Daily review hidden it reads `0  Date`, `1  Weight tracker`, `2  Kanban`, `3  Christian Rosary`, `4  Reminders`, `5  Timer`, `6  Close the day`. Date is always first and Close the day always last, so the menu is never empty.
+- **Digits** open the entry at that position; digits past the end do nothing. The AZERTY top row works the same way by scan code (CHG06b): `é` is 2, `(` is 5. **Up/Down** move over the shown entries only and wrap.
+- **The cursor stays on its entry**: after Config (closed by Save, TAB or Esc, from any of its screens) and after the Meal Planner, also when Config was opened over the planner, Home comes back with the cursor on the same entry at its new number. If that entry was just hidden, the cursor goes to the next shown entry below it (Close the day at the latest). Every other way back to Home starts on Date, as before.
+- **Hidden entries keep working**: their data stay, a ticked activity still closes the day and shows in the archive, and a timer started before its entry was hidden runs to the end.
+- **The archived-day menu is not filtered**: `1  Activities`, `2  Weight tracker`, as before.
+- The save does not change: `"homeHidden"` as in CHG10, byte for byte as the PicoCalc. Saves written by DOS under DOSBox with entries hidden go through the PicoCalc's reader and writer unchanged.
+- **Speed on an 8088** (DOSBox `machine=ega`, `cputype=8086`, `cycles=fixed 300`): Down on Home 0.19 s with 9 entries, 0.17 s with 7; a digit and Esc back 0.45 s; TAB/TAB with the cursor kept 0.39 s for the pair; SPACE/SPACE through the planner 0.84 s for the pair; Config's Save back to the filtered Home 0.88 s with the write and read-back of a small save.
 
 The **Timer / Minuteur** offers **5, 30 or 60 minutes** (LPS-DOS-115-CHG02b, as PicoCalc v1.12 CHG01/CHG02). Keys **1**, **2** and **3** start a duration directly, without Enter. On the completion screen they start a new countdown at once and Enter returns to the duration menu; while a countdown runs they are ignored, and Enter pauses or resumes. Timing still comes from the BIOS tick (about 55 ms).
 
@@ -419,7 +431,7 @@ DOSBox 0.74 cannot set `cputype=8086`; use DOSBox-X or DOSBox Staging.
 
 Global: **Up/Down** select, **Enter** confirm, **Esc** back. **Q** quits on Home.
 
-Home digits, as in PicoCalc v1.15 (LPS-DOS-115-CHG10):
+Home digits, as in PicoCalc v1.15 (LPS-DOS-115-CHG10), with every entry shown; since LPS-DOS-115-CHG11 hidden entries are left out and the others renumbered without gaps:
 
 | Key | Today | Archived day |
 |---|---|---|
@@ -526,7 +538,7 @@ Les textes longs (prières du rosaire) passent à la ligne entre les mots, jamai
 
 Comme sur la PicoCalc v1.12, l'XP et les souvenirs n'apparaissent plus sur aucun ecran (LPS-DOS-115-CHG01). La ligne sous la barre de titre affiche la date longue et la semaine ISO du jour affiche, par exemple **Dimanche 8 Novembre 2026 (semaine 45)** ; elle reste vide pour un jour sans date. L'XP reste enregistree dans `SAVE_A`/`SAVE_B` pour la compatibilite, et la description ICS garde une ligne `XP:` vide, comme sur la PicoCalc.
 
-Comme sur la PicoCalc v1.12, le bloc notes disparait (LPS-DOS-115-CHG02) et le menu d'accueil est renumerote : **0 Date, 1 Activites, 2 Suivi du poids, 3 Kanban, 4 Rosaire chretien, 5 Revue journaliere, 6 Config, 7 Rappels, 8 Minuteur, 9 Terminer le jour**. Un jour archive propose **1 Activites, 2 Suivi du poids**. Depuis LPS-DOS-115-CHG10, Config a quitte le menu (TAB l'ouvre) et les entrees vont de **0 a 8**, comme sur la PicoCalc v1.15.
+Comme sur la PicoCalc v1.12, le bloc notes disparait (LPS-DOS-115-CHG02) et le menu d'accueil est renumerote : **0 Date, 1 Activites, 2 Suivi du poids, 3 Kanban, 4 Rosaire chretien, 5 Revue journaliere, 6 Config, 7 Rappels, 8 Minuteur, 9 Terminer le jour**. Un jour archive propose **1 Activites, 2 Suivi du poids**. Depuis LPS-DOS-115-CHG10, Config a quitte le menu (TAB l'ouvre) et les entrees vont de **0 a 8**, et depuis LPS-DOS-115-CHG11 seules les entrees cochees dans Config > Activites sont affichees, comme sur la PicoCalc v1.15.
 
 Le français s'affiche avec ses accents (LPS-DOS-115-CHG03) : **Activités, Journée, Rosaire chrétien, Revue journalière, Février, Août, Décembre…**, avec le texte exact de la PicoCalc, dans la police du PC (page de code 437). La CP437 a é è ê ë à â ä ç î ï ô û ù ü et É, mais pas les autres capitales accentuées : À, È, Ê, Ô et Â s'affichent sans accent (À FAIRE → A FAIRE, NOTRE PÈRE → NOTRE PERE, TÂCHE → TACHE). Les sources restent en UTF-8 comme celles de la PicoCalc ; `tools/cp437` convertit les chaînes en CP437 à la compilation (voir *Text encoding*). Les fichiers restent en UTF-8 : un ICS en français écrit désormais `Activités:` et les noms d'activités accentués, octet pour octet comme la PicoCalc (les versions DOS précédentes écrivaient `Activites:`). `ROSARY.DAT` passe en version 2 : un ancien fichier est refusé avec *ROSARY.DAT endommagé : recopiez-le* ; copiez toujours `LPSCOMP.EXE` et `ROSARY.DAT` ensemble.
 
@@ -624,8 +636,20 @@ Comme sur la PicoCalc v1.15 (LPS-115-CHG01, CHG03, CHG05), avec la même logique
 - Comme la langue, le choix **attend 4 Enregistrer**, qui écrit la langue et les entrées en une seule sauvegarde et revient à l'écran d'où Config a été ouvert. Un minuteur qui se termine l'abandonne, de même que rouvrir Config.
 - **Si la sauvegarde ne peut pas être écrite**, Config reste ouvert avec le choix en attente, les anciens réglages restent en vigueur et l'ancien fichier n'est pas touché, comme sur la PicoCalc (*Échec sauvegarde : redémarrer*). Couleurs fait de même. Les versions DOS précédentes gardaient les nouveaux réglages en mémoire, fermaient Config et affichaient *Configuration enregistrée*.
 - **Dans la sauvegarde**, le choix est la clé `"homeHidden"` de la PicoCalc, octet pour octet : identifiants dans l'ordre du menu après `"meals"`, par exemple `"homeHidden":["activities","daily_review"]`, `[]` quand tout est affiché, `date` et `close_day` jamais écrits, identifiants inconnus ignorés. DOS lit et réécrit cette clé telle quelle depuis CHG04 ; elle est maintenant dans `State.hiddenHome` (le petit bloc à part en mémoire lointaine disparaît). Vérifié : une sauvegarde écrite par DOS sous DOSBox passe par le lecteur et l'écrivain de la PicoCalc (`tools/picocalc_fixture.cpp resave`) et ressort identique à l'octet près ; une sauvegarde PicoCalc avec Kanban et Rosaire masqués affiche `7/9` et `[ ]` sur ces deux entrées dans la Config DOS.
-- **Pas encore :** l'accueil liste toujours les neuf entrées ; n'afficher que les entrées cochées (LPS-115-CHG04 de la PicoCalc) viendra avec LPS-DOS-115-CHG11. Les données des entrées masquées sont conservées dans tous les cas.
+- L'accueil n'affiche que les entrées cochées depuis LPS-DOS-115-CHG11 (plus bas).
 - **Vitesse sur 8088** (DOSBox, `cputype=8086`, `cycles=fixed 300`) : TAB vers Config 0,11 s ; 3 vers la liste 0,17 s ; Haut/Bas 0,14 s ; Entrée (cocher) 0,13 s ; Échap vers Configuration 0,11 s ; Bas sur l'accueil 0,17 s. 4 Enregistrer est l'écriture habituelle avec relecture : 0,6 s pour une petite sauvegarde, 3,2 s pour une sauvegarde de 31 jours (9,8 Ko), sans changement.
+
+### L'accueil n'affiche que les entrées cochées (LPS-DOS-115-CHG11)
+
+Comme sur la PicoCalc v1.15 (LPS-115-CHG04), avec la même logique :
+
+- L'accueil du jour ne liste **que les entrées cochées dans Config > Activités**, dans leur ordre habituel, **numérotées de 0 à n−1 sans trou**. Avec Activités et Revue journalière masquées : `0  Date`, `1  Suivi du poids`, `2  Kanban`, `3  Rosaire chrétien`, `4  Rappels`, `5  Minuteur`, `6  Terminer le jour`. Date est toujours la première et Terminer le jour la dernière : le menu n'est jamais vide.
+- **Les chiffres** ouvrent l'entrée à cette position ; au-delà de la dernière, ils ne font rien. La rangée du haut AZERTY marche de même par code de touche (CHG06b) : `é` vaut 2, `(` vaut 5. **Haut/Bas** ne passent que par les entrées affichées et bouclent.
+- **Le curseur reste sur son entrée** : après Config (fermé par Enregistrer, TAB ou Échap, depuis n'importe lequel de ses écrans) et après le planificateur de repas, y compris quand Config a été ouvert par-dessus le planificateur, l'accueil revient avec le curseur sur la même entrée, à son nouveau numéro. Si cette entrée vient d'être masquée, le curseur passe à l'entrée affichée suivante en dessous (au plus tard Terminer le jour). Les autres retours à l'accueil partent de Date, comme avant.
+- **Les entrées masquées continuent de fonctionner** : leurs données restent, une activité cochée compte toujours à la clôture du jour et apparaît dans l'archive, et un minuteur lancé avant de masquer son entrée va jusqu'au bout.
+- **Le menu d'un jour archivé n'est pas filtré** : `1  Activités`, `2  Suivi du poids`, comme avant.
+- La sauvegarde ne change pas : `"homeHidden"` comme pour CHG10, octet pour octet comme la PicoCalc. Les sauvegardes écrites par DOS sous DOSBox avec des entrées masquées passent par le lecteur et l'écrivain de la PicoCalc sans changer.
+- **Vitesse sur 8088** (DOSBox `machine=ega`, `cputype=8086`, `cycles=fixed 300`) : Bas sur l'accueil 0,19 s avec 9 entrées, 0,17 s avec 7 ; un chiffre puis Échap 0,45 s ; TAB/TAB avec le curseur gardé 0,39 s pour la paire ; ESPACE/ESPACE par le planificateur 0,84 s pour la paire ; Enregistrer dans Config jusqu'à l'accueil filtré 0,88 s, écriture et relecture d'une petite sauvegarde comprises.
 
 Le **Minuteur** propose **5, 30 ou 60 minutes** (LPS-DOS-115-CHG02b, comme les CHG01/CHG02 de la PicoCalc v1.12). Les touches **1**, **2** et **3** lancent directement une duree, sans Entree. Sur l'ecran de fin, elles relancent aussitot un compte a rebours et Entree revient au choix de la duree ; pendant un compte a rebours, elles sont ignorees et Entree met en pause ou reprend. Le temps vient toujours du tic BIOS (environ 55 ms). Une note deja enregistree par une ancienne version reste dans la sauvegarde et part toujours dans l'ICS (`\NNote: ...`) a la cloture du jour ; elle n'est plus affichee ni modifiable.
 
@@ -724,9 +748,6 @@ Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) p
   a pas (LPS-DOS-115-CHG03).
 - Pas d'avertissement batterie (pas de materiel equivalent).
 - Config n'a pas d'entree « import SD » : le disque DOS **est** le stockage.
-- Masquage des entrees de l'accueil : choisi dans Config > Activites et
-  enregistre comme sur la PicoCalc (LPS-DOS-115-CHG10), mais l'accueil liste
-  encore les neuf entrees (filtrage avec LPS-DOS-115-CHG11).
 - Planificateur de repas (LPS-DOS-115-CHG07) : la sauvegarde est ecrite
   en quittant le planificateur, pas a chaque carte ; les images sont controlees
   par une somme 32 bits au lieu d'un CRC-32 (vitesse sur 8088).
