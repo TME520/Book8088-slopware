@@ -1,4 +1,4 @@
-/* app.c - LPS Companion UI state machine (v1.11 feature parity). C89. */
+/* app.c - LPS Companion UI state machine (v1.15 feature parity). C89. */
 #include "lps.h"
 #include "rosary.h"
 #include "meals.h"

@@ -1,4 +1,4 @@
-/* state.c - dates, banked XP, encode/decode (Companion v1.11 wire formats 1-6). */
+/* state.c - dates, banked XP, encode/decode of the old binary saves (formats 1-6, migration). */
 #include "lps.h"
 #include <stdio.h>
 #include <stdlib.h>

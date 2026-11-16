@@ -25,9 +25,9 @@ int main(void){
     app_key(app,'1'); snap(hw,"02-activities");
     app_key(app,KEY_ESCAPE); app_key(app,'3'); snap(hw,"03-kanban");
     app_key(app,KEY_ESCAPE); app_key(app,'4'); snap(hw,"04-rosary-mode");
-    app_key(app,KEY_ESCAPE); app_key(app,'8'); snap(hw,"05-timer");
-    /* Config 6: 1 Language, 2 Francais, 3 Save */
-    app_key(app,KEY_ESCAPE); app_key(app,'6'); app_key(app,'1'); app_key(app,'2');
-    app_key(app,'3'); /* save FR */ snap(hw,"06-home-fr");
+    app_key(app,KEY_ESCAPE); app_key(app,'7'); snap(hw,"05-timer");
+    /* Config (TAB, LPS-DOS-115-CHG10): 1 Language, 2 Francais, 4 Save */
+    app_key(app,KEY_ESCAPE); app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'2');
+    app_key(app,'4'); /* save FR */ snap(hw,"06-home-fr");
     return 0;
 }

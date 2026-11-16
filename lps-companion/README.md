@@ -2,7 +2,7 @@
 
 **English** | [Francais](#lps-companion-pour-ms-dos)
 
-A full port of [LPS Companion v1.11](https://github.com/TME520/LPS-Companion-PicoCalc) (PicoCalc) to real-mode 16-bit MS-DOS
+A full port of [LPS Companion v1.15](https://github.com/TME520/LPS-Companion-PicoCalc) (PicoCalc) to real-mode 16-bit MS-DOS
 for Intel **8088**-class PCs with **640 KB** conventional memory. Keyboard only
 (no mouse). Text mode **80×25** (content laid out in 40 columns, same as the
 Companion). Data lives under `C:\LPS\` by default and uses the **same**
@@ -133,6 +133,10 @@ As on the PicoCalc v1.15 (LPS-115-CHG04), same code paths:
 - The save does not change: `"homeHidden"` as in CHG10, byte for byte as the PicoCalc. Saves written by DOS under DOSBox with entries hidden go through the PicoCalc's reader and writer unchanged.
 - **Speed on an 8088** (DOSBox `machine=ega`, `cputype=8086`, `cycles=fixed 300`): Down on Home 0.19 s with 9 entries, 0.17 s with 7; a digit and Esc back 0.45 s; TAB/TAB with the cursor kept 0.39 s for the pair; SPACE/SPACE through the planner 0.84 s for the pair; Config's Save back to the filtered Home 0.88 s with the write and read-back of a small save.
 
+### Version 1.15 (LPS-DOS-115-CHG12)
+
+The title bar and the start-up banner read **LPS COMPANION v1.15**, as on the PicoCalc v1.15 (LPS-115-CHG06). With LPS-DOS-115-CHG01 to CHG11 the DOS port now has the PicoCalc v1.15 features and files: JSON saves, ICS, weight CSV and Meal Planner CSV are byte-compatible; the differences left are listed under *Known differences*. The screenshots in `captures/` were taken again under DOSBox (`machine=ega`, `cputype=8086`, `cycles=fixed 300`) with v1.15. A test list for the real Book 8088 is in [`BOOK8088-TEST.md`](BOOK8088-TEST.md).
+
 The **Timer / Minuteur** offers **5, 30 or 60 minutes** (LPS-DOS-115-CHG02b, as PicoCalc v1.12 CHG01/CHG02). Keys **1**, **2** and **3** start a duration directly, without Enter. On the completion screen they start a new countdown at once and Enter returns to the duration menu; while a countdown runs they are ignored, and Enter pauses or resumes. Timing still comes from the BIOS tick (about 55 ms).
 
 French is shown with its accents (LPS-DOS-115-CHG03): **Activités, Journée, Rosaire chrétien, Revue journalière, Février, Août, Décembre…**, with the PicoCalc's wording, in the PC's own code page 437 font. CP437 has é è ê ë à â ä ç î ï ô û ù ü and É, but no other accented capitals, so À, È, Ê, Ô and Â show without their accent (À FAIRE → A FAIRE, NOTRE PÈRE → NOTRE PERE, TÂCHE → TACHE). Files stay UTF-8 like the PicoCalc's: a French ICS now writes `Activités:` and accented activity names exactly as the PicoCalc does (earlier DOS builds wrote `Activites:`). See *Text encoding* below. A note already saved by an older version is kept in the save and still exported to the ICS (`\NNote: ...`) when its day is closed; it is no longer shown or editable.
@@ -153,13 +157,13 @@ Saves are JSON files, `SAVE_A.JSN` and `SAVE_B.JSN`, exactly as on the PicoCalc 
 
 - MS-DOS 3.3+ / FreeDOS / MS-DOS 7.x (FAT12/16)
 - Intel 8088 or compatible (EXE built with Open Watcom `-0`)
-- ~300 KB free disk for `LPSCOMP.EXE` (~94 KB), `ROSARY.DAT` (~10 KB) and `MEALS.DAT` (~196 KB); the data folder grows with history (each JSON save is up to about 10 KB)
+- ~300 KB free disk for `LPSCOMP.EXE` (~97 KB), `ROSARY.DAT` (~10 KB) and `MEALS.DAT` (~196 KB); the data folder grows with history (each JSON save is up to about 10 KB)
 - Colour text (CGA/EGA/VGA) for palettes; mono still readable
 - EGA (128 KB or more) or VGA in colour for the Meal Planner pictures; otherwise the planner runs in text mode
 - Python 3 to build `MEALS.DAT` (`make meals`, `make test`)
 - Open Watcom C/C++ (v2) to build; gcc to run the host tests
 
-## Feature parity (Companion v1.11)
+## Feature parity (Companion v1.15)
 
 | Feature | Status |
 |---|---|
@@ -171,7 +175,9 @@ Saves are JSON files, `SAVE_A.JSN` and `SAVE_B.JSN`, exactly as on the PicoCalc 
 | Kanban 24 tasks TODO/DOING/DONE | Yes |
 | Christian Rosary (4 modes, FR/EN) | Yes (French accents in CP437) |
 | Daily review | Yes |
-| Config language EN/FR + 5 palettes | Yes (text attributes) |
+| Config language EN/FR + 5 palettes, opened with TAB | Yes (text attributes; LPS-DOS-115-CHG10) |
+| Home entries shown/hidden (Config > Activities, `"homeHidden"`) | Yes (LPS-DOS-115-CHG10/CHG11) |
+| TAB/SPACE from every screen (Config, Meal Planner) | Yes (LPS-DOS-115-CHG09) |
 | 3 reminders | Yes |
 | Timer 5/30/60, keys 1-3 (BIOS tick) | Yes |
 | Close day (XP and keepsakes hidden, as in v1.12) | Yes |
@@ -179,7 +185,7 @@ Saves are JSON files, `SAVE_A.JSN` and `SAVE_B.JSN`, exactly as on the PicoCalc 
 | Dual A/B JSON save (`SAVE_A/B.JSN`, schema 2) + CRC | Yes (read **and** write, PicoCalc-compatible) |
 | `SAVE_A/B.BIN` v1–v6 migration | Yes (read once; `.BIN` files left untouched) |
 | ICS + weights CSV byte-compatible | Yes |
-| Meal Planner (16 cards, Space on Home, card pictures) | Yes (LPS-DOS-115-CHG07, EGA graphics; text mode without EGA) |
+| Meal Planner (16 cards, Space, card pictures) | Yes (LPS-DOS-115-CHG07, EGA graphics; text mode without EGA) |
 | Meal Planner CSV `EXPORT\MPYYMMDD.CSV` byte-compatible | Yes (LPS-DOS-115-CHG08, same name as the PicoCalc) |
 
 ## Build
@@ -345,7 +351,7 @@ Fixes kept in this tree:
   (`-k4096`), which is what `make dos` passes
 - Video: detect MDA vs CGA via BIOS equipment word + mode `0Fh`; use **B000**
   or **B800** accordingly; only set mode `03h`/`07h` if not already text
-- Early BIOS teletype banner (`LPS COMPANION v1.11`) before dirs / UI
+- Early BIOS teletype banner (`LPS COMPANION v1.15` since LPS-DOS-115-CHG12) before dirs / UI
 - Soft FP (`-fpc`) — no 8087 required
 - **`HELLO.EXE`** (built with `make hello`): tiny BIOS-only smoke test (prints mode / equipment)
 
@@ -514,17 +520,24 @@ byte-compatible with the firmware.
 | `tests/fixtures/mealcsv/MP*.CSV` | Meal Planner CSV files written by the PicoCalc's own code |
 | `tools/picocalc_fixture.cpp` | Builds the PicoCalc save code on the host: fixtures and checks |
 
+## Known differences
+
+- Capitals À, È, Ê, Ô and Â show without their accent: code page 437 does not have them (LPS-DOS-115-CHG03).
+- ICS files are named `EXPORT\YYYYMMDD.ICS` (8.3) instead of `YYYY-MM-DD_LPS-Companion.ics`; the content is the same (LPS-DOS-115-CHG02c).
+- Saves are written when leaving a screen, confirming Date/Weight/Config, closing the day or quitting (**Q**), not after every change; the Meal Planner saves when it closes, not after each card. After a write DOS checks the CRC-32 only, not a full re-parse (8088 speed).
+- Meal Planner pictures are checked with a 32-bit sum instead of a CRC-32 (8088 speed); without colour EGA the planner is in text mode.
+- No low-battery warning (no such hardware). Config has no "SD import" entry: the DOS disk **is** the storage.
+
 ## Captures
 
-PNG screenshots under `captures/` (home EN/FR, a few feature screens, a
-DOSBox 8086 home grab, and two DOSBox EGA grabs of the Meal Planner). Text dumps are not stored; `make captures` rewrites
+PNG screenshots under `captures/`, all raw 640×350 DOSBox grabs of v1.15 at 8088 speed (`machine=ega`, `cputype=8086`, `cycles=fixed 300`, LPS-DOS-115-CHG12): Home EN/FR, Activities, Kanban, Rosary mode, Timer, a DOSBox Home grab and the EGA Meal Planner (EN, and FR with a played card). Text dumps are not stored; `make captures` rewrites
 `captures/*.txt` from the host UI driver.
 
 ---
 
 # LPS Companion pour MS-DOS
 
-Port complet de [LPS Companion v1.11](https://github.com/TME520/LPS-Companion-PicoCalc)
+Port complet de [LPS Companion v1.15](https://github.com/TME520/LPS-Companion-PicoCalc)
 vers MS-DOS 16 bits (8088, 640 Ko), clavier uniquement, mode texte 80×25.
 Memes formats `SAVE_A/B.JSN` (sauvegarde JSON, schema 2), ICS et CSV que le firmware PicoCalc v1.13 et suivants.
 
@@ -651,6 +664,10 @@ Comme sur la PicoCalc v1.15 (LPS-115-CHG04), avec la même logique :
 - La sauvegarde ne change pas : `"homeHidden"` comme pour CHG10, octet pour octet comme la PicoCalc. Les sauvegardes écrites par DOS sous DOSBox avec des entrées masquées passent par le lecteur et l'écrivain de la PicoCalc sans changer.
 - **Vitesse sur 8088** (DOSBox `machine=ega`, `cputype=8086`, `cycles=fixed 300`) : Bas sur l'accueil 0,19 s avec 9 entrées, 0,17 s avec 7 ; un chiffre puis Échap 0,45 s ; TAB/TAB avec le curseur gardé 0,39 s pour la paire ; ESPACE/ESPACE par le planificateur 0,84 s pour la paire ; Enregistrer dans Config jusqu'à l'accueil filtré 0,88 s, écriture et relecture d'une petite sauvegarde comprises.
 
+### Version 1.15 (LPS-DOS-115-CHG12)
+
+La barre de titre et la bannière de démarrage affichent **LPS COMPANION v1.15**, comme la PicoCalc v1.15 (LPS-115-CHG06). Avec LPS-DOS-115-CHG01 à CHG11, le portage DOS a les fonctions et les fichiers de la PicoCalc v1.15 : sauvegardes JSON, ICS, CSV des poids et CSV du planificateur de repas sont compatibles à l'octet près ; les écarts restants sont listés sous *Ecarts connus*. Les captures de `captures/` ont été refaites sous DOSBox (`machine=ega`, `cputype=8086`, `cycles=fixed 300`) avec la v1.15. Une liste de tests pour le vrai Book 8088 est dans [`BOOK8088-TEST.md`](BOOK8088-TEST.md).
+
 Le **Minuteur** propose **5, 30 ou 60 minutes** (LPS-DOS-115-CHG02b, comme les CHG01/CHG02 de la PicoCalc v1.12). Les touches **1**, **2** et **3** lancent directement une duree, sans Entree. Sur l'ecran de fin, elles relancent aussitot un compte a rebours et Entree revient au choix de la duree ; pendant un compte a rebours, elles sont ignorees et Entree met en pause ou reprend. Le temps vient toujours du tic BIOS (environ 55 ms). Une note deja enregistree par une ancienne version reste dans la sauvegarde et part toujours dans l'ICS (`\NNote: ...`) a la cloture du jour ; elle n'est plus affichee ni modifiable.
 
 ## Book 8088 / materiel reel
@@ -750,4 +767,10 @@ Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) p
 - Config n'a pas d'entree « import SD » : le disque DOS **est** le stockage.
 - Planificateur de repas (LPS-DOS-115-CHG07) : la sauvegarde est ecrite
   en quittant le planificateur, pas a chaque carte ; les images sont controlees
-  par une somme 32 bits au lieu d'un CRC-32 (vitesse sur 8088).
+  par une somme 32 bits au lieu d'un CRC-32 (vitesse sur 8088) ; sans EGA
+  couleur, le planificateur passe en mode texte.
+- Fichiers ICS nommes `EXPORT\YYYYMMDD.ICS` (8.3) au lieu de
+  `YYYY-MM-DD_LPS-Companion.ics` ; contenu identique (LPS-DOS-115-CHG02c).
+- Sauvegarde ecrite en quittant un ecran, en confirmant Date/Poids/Config, en
+  cloturant le jour ou en quittant (**Q**), pas a chaque modification ; apres
+  l'ecriture, DOS verifie le CRC-32 seulement, sans tout relire (vitesse 8088).
