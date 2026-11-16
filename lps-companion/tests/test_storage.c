@@ -1230,7 +1230,7 @@ static void check_meal_planner(const char *dir){
     app_key(app,' '); assert(app_screen(app)==SCR_MEAL_PLANNER);
     assert(row_has(hw,3,"MEAL PLANNER") && row_has(hw,4,"Drinks 1/6") && row_has(hw,4,"16/16 left"));
     assert(row_has(hw,7,"Drinks") && plat_host_rev(hw,7,38) && !plat_host_rev(hw,7,20) && text_card_shows(hw,"Coffee (Latte)","1 mug"));
-    assert(row_has(hw,21,"No EGA screen: Meal Planner in text mode") && row_has(hw,22,"<- -> Card   Up/Down Row"));
+    assert(row_has(hw,21,"No EGA/CGA colour screen: Meal Planner in text mode") && row_has(hw,22,"<- -> Card   Up/Down Row"));
     assert(row_has(hw,24,"Enter:Play  Space/Esc:Back") && !row_has(hw,3,"PLAYED"));
     /* Arrows wrap in the row; Up/Down keep the column or take the row's last. */
     app_key(app,KEY_LEFT); assert(row_has(hw,4,"Drinks 6/6") && text_card_shows(hw,"Light Juice","1 glass"));
@@ -1301,7 +1301,7 @@ static void check_meal_planner(const char *dir){
     choose_language(app,1); app_key(app,KEY_ESCAPE); assert(app_state(app)->language==LANG_FR);
     fake_open_result=MEALS_NO_EGA; app_key(app,' ');
     assert(row_has(hw,3,"PLANIFICATEUR DE REPAS") && row_has(hw,4,"Boissons 2/6") && row_has(hw,4,"15/16 restantes"));
-    assert(text_card_shows(hw,"Caf\202 (Noir)","1 tasse") && row_has(hw,21,"Pas d'\202cran EGA : planificateur en mode texte"));
+    assert(text_card_shows(hw,"Caf\202 (Noir)","1 tasse") && row_has(hw,21,"Pas d'\202cran couleur EGA/CGA : planificateur en mode texte"));
     assert(row_has(hw,24,"Entr\202e:Jouer  Espace/\220chap:Retour") && row_has(hw,22,"<- -> Carte   Haut/Bas Rang\202e"));
     app_key(app,KEY_DOWN); assert(text_card_shows(hw,"Wrap fromage l\202ger","1 wrap"));
     app_key(app,KEY_RIGHT); assert(text_card_shows(hw,"Salade de tomates","1 bol"));
@@ -1352,6 +1352,57 @@ static int field_is(const char *value, const char *want){
 }
 static int csv_is(const State *st, const char *want){
     char b[1024]; size_t n=meal_csv_text(st,b,sizeof(b)); return n && n==strlen(want) && !strcmp(b,want);
+}
+/* LPS-DOS-115-CHG13: 80-cell rows folded to the CGA's 40 cells. */
+static void fold_text(const char *row80, const unsigned char *rev, char *out41, unsigned char *orev){
+    lps_fold_row(row80,rev,40,out41,orev); out41[40]=0;
+}
+static void fold_host_row(Platform *hw, int row, char *out41, unsigned char *orev){
+    unsigned char rev[COLUMNS]; char cells[COLUMNS+1]; int c; const char *t=plat_host_row(hw,row);
+    for(c=0;c<COLUMNS;c++){ cells[c]=t[c]?t[c]:' '; rev[c]=(unsigned char)plat_host_rev(hw,row,c); if(!t[c]) break; }
+    for(;c<COLUMNS;c++){ cells[c]=' '; rev[c]=(unsigned char)plat_host_rev(hw,row,c); }
+    cells[COLUMNS]=0; fold_text(cells,rev,out41,orev);
+}
+static void row80(char *b, unsigned char *rev, int revAll){ memset(b,' ',COLUMNS); b[COLUMNS]=0; memset(rev,revAll,COLUMNS); }
+static void check_cga_fold(const char *dir){
+    static unsigned char store[16384]; App *app=(App*)store; Platform *hw;
+    char b[COLUMNS+1], o[41]; unsigned char rev[COLUMNS], orev[40]; int i;
+    /* Centred title + date at the right edge, reversed end to end. */
+    row80(b,rev,1); memcpy(b+30,"LPS COMPANION v1.15",19); memcpy(b+70,"2026-11-16",10);
+    fold_text(b,rev,o,orev);
+    assert(!strcmp(o,"          LPS COMPANION v1.15 2026-11-16"));
+    for(i=0;i<40;i++) assert(orev[i]==1);
+    /* Label on the left (indent halved), counter at the right edge, not reversed. */
+    row80(b,rev,0); memcpy(b+1,"MEAL PLANNER",12); memcpy(b+79-9,"PLAYED #1",9);
+    fold_text(b,rev,o,orev); assert(!strcmp(o,"MEAL PLANNER                   PLAYED #1") && !orev[0] && !orev[39]);
+    /* One block with inner runs of up to 5 spaces stays whole and centred. */
+    row80(b,rev,0); memcpy(b+28,"<- -> Card   Up/Down Row",24);
+    fold_text(b,rev,o,orev); assert(!strncmp(o+8,"<- -> Card   Up/Down Row",24) && o[7]==' ' && o[32]==' ');
+    /* Too wide: the left block gives way, then the right one is cut. */
+    row80(b,rev,0); memcpy(b+1,"PLANIFICATEUR DE REPAS",22); memcpy(b+50,"15/16 restantes",15); memcpy(b+79-8,"JOU\220E #2",8);
+    fold_text(b,rev,o,orev); assert(!strcmp(o,"PLANIFICATEUR DE REPAS 15/16 restantes J"));
+    /* A reversed word inside a plain row keeps its own flag. */
+    row80(b,rev,0); memcpy(b+4,"Date",4); rev[4]=rev[5]=rev[6]=rev[7]=1; memcpy(b+12,"Weight",6);
+    fold_text(b,rev,o,orev); assert(!strncmp(o+2,"Date    Weight",14) && orev[2] && orev[5] && !orev[6] && !orev[10]);
+    /* Empty row: 40 spaces. */
+    row80(b,rev,0); fold_text(b,rev,o,orev); for(i=0;i<40;i++) assert(o[i]==' ' && !orev[i]);
+    /* The planner's own rows in graphics, as the CGA draws them (EN, then FR played). */
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    hw->meal_open=fake_meal_open; hw->meal_card=fake_meal_card; hw->meal_close=fake_meal_close;
+    fake_open_result=MEALS_OK; fake_card_result=MEALS_OK;
+    app_key(app,' '); assert(app_screen(app)==SCR_MEAL_PLANNER);
+    fold_host_row(hw,0,o,orev); assert(!strncmp(o+10,"LPS COMPANION v1.15",19) && orev[0] && orev[39]);
+    fold_host_row(hw,3,o,orev); assert(!strcmp(o,"MEAL PLANNER                            "));
+    fold_host_row(hw,4,o,orev); assert(!strcmp(o,"Drinks 1/6                    16/16 left"));
+    fold_host_row(hw,22,o,orev); assert(!strcmp(o,"        <- -> Card   Up/Down Row        "));
+    fold_host_row(hw,24,o,orev); assert(!strcmp(o,"       Enter:Play  Space/Esc:Back       ") && orev[0] && orev[39]);
+    app_key(app,KEY_ENTER); fold_host_row(hw,3,o,orev); assert(!strcmp(o,"MEAL PLANNER                   PLAYED #1"));
+    app_key(app,' '); choose_language(app,1); app_key(app,KEY_ESCAPE); assert(app_state(app)->language==LANG_FR);
+    app_key(app,' '); app_key(app,KEY_LEFT); /* opens on the first unplayed card */
+    fold_host_row(hw,3,o,orev); assert(!strcmp(o,"PLANIFICATEUR DE REPAS          JOU\220E #1"));
+    fold_host_row(hw,4,o,orev); assert(!strcmp(o,"Boissons 1/6             15/16 restantes"));
+    fold_host_row(hw,24,o,orev); assert(!strcmp(o,"  Entr\202e:Remettre  Espace/\220chap:Retour  "));
+    app_key(app,' '); assert(app_screen(app)==SCR_HOME);
 }
 static void check_meal_csv(const char *dir){
     static unsigned char store[16384]; static State st; App *app=(App*)store; Platform *hw;
@@ -1962,6 +2013,7 @@ int main(void){
     check_meals_dat(tmpdir);
     check_meal_planner(tmpdir);
     check_meal_csv(tmpdir);
+    check_cga_fold(tmpdir);
     check_overlay_keys(tmpdir);
     check_home_entries(tmpdir);
     check_home_filtered(tmpdir);
@@ -1970,7 +2022,7 @@ int main(void){
     printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, title v1.15, menu 0-8 without notepad or Config, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
     printf("%s", " unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture),");
     printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical),");
-    printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), fixture decode (%u captures)\n", 0);
+    printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR), fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

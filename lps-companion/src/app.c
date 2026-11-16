@@ -384,7 +384,7 @@ static const char *meals_problem(const App *a, int r){
     if(r==MEALS_MISSING) return tr(a,"MEALS.DAT not found: copy it next to LPSCOMP.EXE","MEALS.DAT introuvable : copiez-le à côté de LPSCOMP.EXE");
     if(r==MEALS_CORRUPT) return tr(a,"MEALS.DAT is damaged: copy it again","MEALS.DAT endommagé : recopiez-le");
     if(r==MEALS_NO_MEMORY) return tr(a,"Not enough memory for the pictures","Mémoire insuffisante pour les images");
-    return tr(a,"No EGA screen: Meal Planner in text mode","Pas d'écran EGA : planificateur en mode texte");
+    return tr(a,"No EGA/CGA colour screen: Meal Planner in text mode","Pas d'écran couleur EGA/CGA : planificateur en mode texte");
 }
 /* LPS-DOS-115-CHG08 (PicoCalc LPS-114-CHG02 / LPS-115-CHG02 exportMeals):
  * leaving the planner rewrites the day's EXPORT\MPYYMMDD.CSV; a failure is
@@ -1005,7 +1005,7 @@ static void right_text(App *a, int row, const char *text){
     int n=(int)strlen(text); if(n>COLUMNS-1) n=COLUMNS-1;
     a->hw->text(a->hw,row,COLUMNS-1-n,text,0);
 }
-/* The card in text mode (no EGA, no MEALS.DAT, host tests): a framed card
+/* The card in text mode (no EGA/CGA colour, no MEALS.DAT, host tests): a framed card
  * with the row on its header band, the name and the portion. */
 #define CARD_LEFT 20
 #define CARD_WIDTH 40

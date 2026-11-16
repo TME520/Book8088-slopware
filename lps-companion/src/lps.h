@@ -150,7 +150,8 @@ typedef struct {
 typedef struct { uint8_t bytes[BLOB_CAPACITY]; size_t size; } Blob;
 
 /* Meal Planner pictures (LPS-DOS-115-CHG07). MEALS_NO_EGA: the platform
- * has no EGA colour screen; the app then shows the planner in text mode. */
+ * has no EGA or CGA colour screen (CHG13); the app then shows the planner
+ * in text mode. */
 enum MealsLoad { MEALS_OK = 0, MEALS_MISSING = 1, MEALS_CORRUPT = 2, MEALS_NO_MEMORY = 3, MEALS_NO_EGA = 4 };
 /* The card the planner shows. Texts are screen text (CP437). */
 typedef struct {
@@ -216,6 +217,9 @@ int cp437_text_byte(unsigned char c);              /* printable ASCII or CP437 l
  * starts; wrap_count returns the number of lines. */
 const char *wrap_line(const char *text, unsigned width, unsigned *len);
 unsigned wrap_count(const char *text, unsigned width);
+/* wrap.c (LPS-DOS-115-CHG13): an 80-cell row folded to `width` cells for the
+ * CGA 40-column screen; out and outRev get exactly width cells (no NUL). */
+void lps_fold_row(const char *cells, const unsigned char *rev, unsigned width, char *out, unsigned char *outRev);
 #ifndef LPS_DOS
 void encode_state(const State *s, Blob *b); /* binary format 6: only the tests still write it */
 #endif

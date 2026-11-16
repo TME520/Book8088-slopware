@@ -2,6 +2,7 @@
 #include "lps.h"
 #include "meals.h"
 #include "ega.h"
+#include "cga.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -30,7 +31,8 @@ typedef struct {
     /* LPS-DOS-115-CHG07: Meal Planner in EGA 640 x 350 x 16. */
     int ega_colour;     /* an EGA/VGA colour display with 128 KB or more */
     unsigned char text_mode; /* BIOS text mode to come back to (2, 3 or 7) */
-    int in_gfx;         /* mode 10h is on */
+    int cga_colour;     /* LPS-DOS-115-CHG13: a colour CGA and no EGA: mode 04h */
+    int in_gfx;         /* mode 10h (or 04h on CGA) is on */
     int want_card;      /* this frame shows a card (meal_card since clear) */
     MealView card;
     const uint8_t *card_planes;
@@ -119,6 +121,16 @@ static void set_blink(DosPlat *d, int on){
         *bios_mode_ctl()=v;
     }
 }
+/* The CGA's 6845 at 3D4h/3D5h: the cursor address low (register 0Fh) can
+ * be written and read back; with no card the bus reads FFh. Restored. */
+static int cga_crtc_present(void){
+    unsigned char old, a, b;
+    outp(0x3D4,0x0F); old=(unsigned char)inp(0x3D5);
+    outp(0x3D5,0x5A); a=(unsigned char)inp(0x3D5);
+    outp(0x3D5,0xA5); b=(unsigned char)inp(0x3D5);
+    outp(0x3D5,old);
+    return a==0x5A && b==0xA5;
+}
 static void detect_adapter(DosPlat *d){
     union REGS r; unsigned char v;
     r.h.ah=0x12; r.h.bl=0x10; r.h.bh=0xFF; r.x.cx=0xFFFF;
@@ -127,6 +139,9 @@ static void detect_adapter(DosPlat *d){
     /* LPS-DOS-115-CHG07: mode 10h needs a colour display (BH 0) and 128 KB
      * of video memory (BL 1+; 64 KB gives 4 colours only). VGA answers too. */
     d->ega_colour = d->ega && !d->mono && r.h.bh==0 && r.h.bl>=1 && r.h.bl<=3;
+    /* LPS-DOS-115-CHG13: no EGA/VGA BIOS, the equipment word says colour
+     * (not MDA/Hercules mono) and a 6845 answers at 3D4h: a colour CGA. */
+    d->cga_colour = !d->ega && !d->mono && cga_crtc_present();
     v=*bios_mode_ctl();
     d->blink_was_on = !(v&0x08) || (v&0x20); /* unknown -> DOS default: on */
     r.h.ah=0x03; r.h.bh=0; int86(0x10,&r,&r);
@@ -265,27 +280,47 @@ static void leave_graphics(DosPlat *d){
     r.h.ah=0x01; r.h.ch=0x20; r.h.cl=0x00; int86(0x10,&r,&r);
     d->in_gfx=0; d->painted=0;
 }
+/* LPS-DOS-115-CHG13: CGA palette 0 has green, red and yellow; the colour
+ * theme picks the nearest as text colour. Blue has none: yellow text on a
+ * blue background (colour 0). Pink takes light red. */
+static unsigned char cga_text_colour(const DosPlat *d){
+    switch(d->palette){
+    case PAL_RED: case PAL_PINK: return 2;
+    case PAL_ORANGE: case PAL_BLUE: return 3;
+    default: return 1;
+    }
+}
 static void present_graphics(DosPlat *d){
     int r;
-    if(!d->in_gfx){ ega_enter(ega_value(attr_for(d,0))); d->in_gfx=1; d->painted=0; }
+    if(!d->in_gfx){
+        if(d->cga_colour) cga_enter(cga_text_colour(d),(unsigned char)(d->palette==PAL_BLUE?1:0));
+        else ega_enter(ega_value(attr_for(d,0)));
+        d->in_gfx=1; d->painted=0;
+    }
     for(r=0;r<ROWS;r++){
         if(r>=5 && r<=21) continue; /* the card's rows */
         if(d->painted && memcmp(d->sh_ch[r],d->cells[r],COLUMNS)==0 && memcmp(d->sh_rev[r],d->rev[r],COLUMNS)==0) continue;
-        ega_text_row(r,d->cells[r],d->rev[r]);
+        if(d->cga_colour) cga_text_row(r,d->cells[r],d->rev[r]);
+        else ega_text_row(r,d->cells[r],d->rev[r]);
         memcpy(d->sh_ch[r],d->cells[r],COLUMNS);
         memcpy(d->sh_rev[r],d->rev[r],COLUMNS);
     }
     d->painted=1;
-    ega_card(&d->card,d->card_planes,meals_palette(d->card.picture));
+    if(d->cga_colour) cga_card(&d->card);
+    else ega_card(&d->card,d->card_planes,meals_palette(d->card.picture));
 }
 static int dos_meal_open(Platform *p){
     DosPlat *d=self_of(p);
-    if(!d->ega_colour || d->use_bios) return MEALS_NO_EGA;
-    return meals_open();
+    if(d->use_bios) return MEALS_NO_EGA;
+    if(d->ega_colour) return meals_open();
+    /* CHG13: the CGA card has no pictures yet (MEALSCGA.DAT, CHG14). */
+    if(d->cga_colour) return MEALS_OK;
+    return MEALS_NO_EGA;
 }
 static int dos_meal_card(Platform *p, const MealView *v){
     DosPlat *d=self_of(p);
     d->card=*v; d->want_card=1;
+    if(!d->ega_colour){ d->card_planes=0; return MEALS_OK; }
     return meals_picture(v->picture,&d->card_planes);
 }
 static void dos_meal_close(Platform *p){ (void)p; meals_close(); }

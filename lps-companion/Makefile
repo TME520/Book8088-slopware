@@ -17,11 +17,11 @@ GEN = build/cp437
 HOST_CFLAGS = $(HOST_WARN) -I$(GEN)
 
 SRC_COMMON = state.c ics.c save.c jsave.c paths.c rosary.c meals.c app.c cp437.c wrap.c
-HEADERS = $(GEN)/lps.h $(GEN)/rosary.h $(GEN)/meals.h $(GEN)/ega.h
+HEADERS = $(GEN)/lps.h $(GEN)/rosary.h $(GEN)/meals.h $(GEN)/ega.h $(GEN)/cga.h
 # rosary_text.c is the single source of the prayer texts. It is NOT linked into
 # LPSCOMP.EXE: tools/mkrosary turns it into ROSARY.DAT (LPS-DOS-115-CHG03b).
 ROSARY_SRC = $(GEN)/rosary_text.c
-DOS_OBJS = $(addprefix $(GEN)/,$(SRC_COMMON) ega.c plat_dos.c main.c)
+DOS_OBJS = $(addprefix $(GEN)/,$(SRC_COMMON) ega.c cga.c cgafont.c plat_dos.c main.c)
 HOST_OBJS = $(addprefix $(GEN)/,$(SRC_COMMON) plat_host.c main.c)
 COMMON_OBJS = $(addprefix $(GEN)/,$(SRC_COMMON))
 
