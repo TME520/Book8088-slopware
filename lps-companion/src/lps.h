@@ -101,6 +101,8 @@ typedef struct {
     int32_t expected, actual; /* grams; -1 missing */
     char note[NOTE_LENGTH + 1];
 } Day;
+/* User texts (task names, reminder texts, notes, activity names) are the
+ * files' UTF-8 bytes, unchanged (LPS-DOS-115-CHG06d); limits are UTF-8 bytes. */
 typedef struct { uint8_t status; char name[TASK_NAME_LENGTH + 1]; } Task;
 /* One catalog entry. Names are UTF-8, as in the save; the screen shows them
  * through utf8_to_cp437. The French name (or the English one when French is

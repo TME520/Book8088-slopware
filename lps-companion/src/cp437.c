@@ -35,9 +35,23 @@ size_t cp437_to_utf8(unsigned char c, char *out){
     out[0]=(char)(0xE0|(cp>>12)); out[1]=(char)(0x80|((cp>>6)&0x3F)); out[2]=(char)(0x80|(cp&0x3F)); return 3;
 }
 
+/* LPS-DOS-115-CHG06d: the screen converts user text at each redraw, so the
+ * common cases are quick on the 8088: Latin-1 through a table built once, and
+ * code points CP437 cannot have (U+0100-U+0191, above U+25A0: œ, emoji) are
+ * refused without a scan. */
+static unsigned char latin1[96]; /* U+00A0-U+00FF -> CP437, 0 if missing */
+static int latin1_ready;
 int unicode_to_cp437(unsigned long cp){
     unsigned i;
     if(cp<0x80) return (int)cp;
+    if(cp>=0xA0 && cp<=0xFF){
+        if(!latin1_ready){
+            for(i=0;i<128;i++) if(CP437_HIGH[i]>=0xA0 && CP437_HIGH[i]<=0xFF) latin1[CP437_HIGH[i]-0xA0]=(unsigned char)(0x80+i);
+            latin1_ready=1;
+        }
+        return latin1[cp-0xA0] ? (int)latin1[cp-0xA0] : -1;
+    }
+    if(cp<0x0192 || cp>0x25A0) return -1;
     for(i=0;i<128;i++) if(CP437_HIGH[i]==cp) return (int)(0x80+i);
     return -1;
 }

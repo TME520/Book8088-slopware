@@ -1,0 +1,12 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//LPS Companion//EN
+CALSCALE:GREGORIAN
+BEGIN:VEVENT
+UID:lps-companion-20261115@picocalc
+DTSTART;VALUE=DATE:20261115
+DTEND;VALUE=DATE:20261116
+SUMMARY:LPS Companion
+DESCRIPTION:Activités: Marche € 🙂, Messe, Œufs\; cœur\, À 🍳\NXP:\NPoids attendu: 80.250 kg\NPoids effectif: 80.125 kg\NNote: Œuvre du jour\, À 10 € 😀\; « bien »\\N fin
+END:VEVENT
+END:VCALENDAR

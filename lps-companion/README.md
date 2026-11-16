@@ -30,7 +30,7 @@ As in PicoCalc v1.12, the notepad is gone (LPS-DOS-115-CHG02) and the Home menu 
 **Custom activities** (LPS-DOS-115-CHG06, as PicoCalc v1.13 CHG07/07b), from the Activities screen, keyboard only:
 - **E** renames the activity under the cursor, **N** adds one at the end (30 at most: *Limit: 30 activities*), **Del** deletes it after a confirmation (*Delete Walk?*, **Enter** yes, **Esc** no), **F4** / **F5** move it up or down and wrap from the first to the last place and back, as in the Kanban. Today's tick and the cursor follow the moved entry.
 - A name is saved **in the current language only** (`"fr"` or `"en"` of the catalog entry); if the other language has no name, the same name shows in both. Up to 24 characters; spaces at the ends are trimmed; an empty name cancels; a name already in the list (any case) is refused with *That name already exists*.
-- Names are typed in CP437 on screen and saved in UTF-8, so **é, è, ç, à** and the other CP437 letters work, from a French keyboard (`KEYB FR`) as well. The save allows 24 bytes, and an accented letter takes two of them: a longer name gets *Name is too long*. Text fields keep the characters; every screen keyed by digits reads the top row by key position (see *Keyboard* below).
+- Names are typed in CP437 on screen and saved in UTF-8, so **é, è, ç, à** and the other CP437 letters work, from a French keyboard (`KEYB FR`) as well. The save allows 24 bytes and an accented letter takes two of them; since LPS-DOS-115-CHG06d the counter shows these bytes (*15/24 characters*) and a letter that would not fit is not typed, as for tasks. Text fields keep the characters; every screen keyed by digits reads the top row by key position (see *Keyboard* below).
 - **Past days keep the names they were closed with.** Renaming an activity in French (the name a day stores) or deleting it leaves the old name in history: the archive shows it after the catalog, ticked and read-only. In an archived day, E, N, Del, F4 and F5 say *Archived day: read-only*.
 - Edits are written to the save on Esc back to Home, like the other DOS edits. The save and the ICS stay byte-compatible with the PicoCalc for the same list.
 
@@ -44,11 +44,20 @@ On every screen keyed by digits (Home, the archived-day menu, Config, Language, 
 
 ### Accented task names and reminders (LPS-DOS-115-CHG06c)
 
-Kanban task names and reminder texts take the CP437 letters, like activity names: é è ê ë à â ä å ç î ï ì ô ö ò û ù ü ÿ É Ç Ä Å Æ Ö Ü æ ñ Ñ á í ó ú, and ¢ £ ¥ ₧ ƒ. With `KEYB FR`, é è ç à ù are on their keys and ê â ô û î, ë ï ü come from the ^ and ¨ dead keys.
+Kanban task names and reminder texts take the CP437 letters, like activity names: é è ê ë à â ä å ç î ï ì ô ö ò û ù ü ÿ É Ç Ä Å Æ Ö Ü æ ñ Ñ á í ó ú, and ¢ £ ¥ (₧ and ƒ are refused since CHG06d: the PicoCalc cannot show them). With `KEYB FR`, é è ç à ù are on their keys and ê â ô û î, ë ï ü come from the ^ and ¨ dead keys.
 
-- On screen and in memory they are CP437; the JSON save holds UTF-8, as on the PicoCalc, which reads these saves and writes them back byte for byte (`tests/fixtures/picocalc_accents.jsn`). PicoCalc saves with accented tasks and reminders load and show on DOS.
-- The limit is the PicoCalc's: **32 bytes of UTF-8**. An accented letter takes 2 bytes (₧ takes 3), so a name holds 32 plain letters or 16 accented ones; a letter that would not fit is not typed. The task counter counts these bytes, as on the PicoCalc (*32/32 characters*).
+- On screen they are CP437; in memory and in the files they are UTF-8 (see *Same files everywhere* below). The PicoCalc reads these saves and writes them back byte for byte (`tests/fixtures/picocalc_accents.jsn`).
+- The limit is the PicoCalc's: **32 bytes of UTF-8**. An accented letter takes 2 bytes, so a name holds 32 plain letters or 16 accented ones; a letter that would not fit is not typed. The task counter counts these bytes, as on the PicoCalc (*32/32 characters*).
 - Tasks and reminders are not in the ICS (as on the PicoCalc); the note and activity names there are UTF-8. The old `.BIN` saves never held accents (both writers were ASCII-only); after the migration, accents go to the JSON save.
+
+### Same files everywhere (LPS-DOS-115-CHG06d)
+
+The JSON saves, the ICS files and the weight CSV are the same bytes on the PicoCalc, DOS and the console version: a file written by one is read and written back unchanged by the others.
+
+- Every text read from a save stays in memory as its exact UTF-8 bytes: task names, reminder texts, notes, catalog names and the names a past day keeps. Only the screen converts to CP437, so a character CP437 lacks (œ, À, €, an emoji) shows as `?` but is never changed in the files, even when its task or activity is opened and saved.
+- A typed letter is turned into UTF-8 at once; Backspace removes one whole character (an emoji's 4 bytes at a time). Limits are UTF-8 bytes, as on the PicoCalc: 32 for a task or a reminder, 24 for an activity name, and the counters show bytes.
+- Tested with PicoCalc-written fixtures (`tests/fixtures/picocalc_intl.*`, from `tools/picocalc_fixture.cpp intl` and `close`): DOS reads and writes the JSON byte for byte; closing that day on DOS writes the same ICS, weight CSV and next save as the PicoCalc's Finish screen (only the ICS file name differs, CHG02c); the PicoCalc reads DOS's saves and writes them back unchanged. The old `.BIN` migration is unchanged (those files only hold ASCII).
+- Speed on an 8088 (DOSBox `cputype=8086`, `cycles=fixed 300`): a Kanban key with 24 tasks takes about 295 ms (was 281 ms), with emoji and € in the tasks 110–123 ms (was 96–103 ms); other screens are within a few ms. Plain ASCII text is drawn without a copy.
 
 
 ![Activities](captures/02-activities.png)
@@ -183,10 +192,10 @@ g++ -std=c++17 -I$P/src -I$P/tests -o /tmp/pcfix tools/picocalc_fixture.cpp
   Ô → O, œ → oe, curly quotes and dashes → ASCII). Any other character stops
   the build with its file and line, so nothing is lost silently.
 - **Files are UTF-8**, byte for byte like the PicoCalc: `ics.c` turns CP437
-  bytes back into UTF-8 (`cp437_to_utf8`, same table as the tool). The JSON
-  save (LPS-DOS-115-CHG04) converts user text (notes, tasks, reminders) from
-  UTF-8 to CP437 on read and back on write with the same table; a character
-  CP437 lacks becomes `?`.
+  program text back into UTF-8 (`cp437_to_utf8`, same table as the tool).
+  User text (notes, tasks, reminders, activity names) is kept as the file's
+  UTF-8 bytes in memory (LPS-DOS-115-CHG06d) and converted to CP437 only when
+  drawn; a character CP437 lacks shows as `?` and stays intact in the files.
 - This was chosen over hand-written `\x82` escapes: those are hard to read,
   easy to get wrong (`"\x82e"` is one byte, not two) and cannot be compared
   with the PicoCalc's sources.
@@ -448,7 +457,7 @@ Les **Activités** (LPS-DOS-115-CHG05, comme les CHG08/08b/08c de la PicoCalc v1
 **Activités personnalisées** (LPS-DOS-115-CHG06, comme les CHG07/07b de la PicoCalc v1.13), depuis l'écran Activités, au clavier seulement :
 - **E** renomme l'activité sous le curseur, **N** en ajoute une à la fin (30 au plus : *Limite : 30 activités*), **Suppr** la supprime après confirmation (*Supprimer Marche ?*, **Entrée** oui, **Échap** non), **F4** / **F5** la montent ou la descendent et bouclent de la première à la dernière place, comme dans le Kanban. La coche du jour et le curseur suivent l'entrée déplacée.
 - Un nom s'enregistre **dans la langue courante seulement** (`"fr"` ou `"en"` de l'entrée du catalogue) ; si l'autre langue n'a pas de nom, le même nom s'affiche dans les deux. 24 caractères au plus ; les espaces aux bouts sont retirés ; un nom vide annule ; un nom déjà dans la liste (majuscules ou non) est refusé : *Ce nom existe déjà*.
-- Les noms se tapent en CP437 à l'écran et s'enregistrent en UTF-8 : **é, è, ç, à** et les autres lettres CP437 marchent, y compris depuis un clavier français (`KEYB FR`). La sauvegarde permet 24 octets et une lettre accentuée en prend deux : un nom plus long donne *Nom trop long*. Les champs de texte gardent les caractères ; les écrans à chiffres lisent la rangée du haut par position de touche (voir *Clavier* plus bas).
+- Les noms se tapent en CP437 à l'écran et s'enregistrent en UTF-8 : **é, è, ç, à** et les autres lettres CP437 marchent, y compris depuis un clavier français (`KEYB FR`). La sauvegarde permet 24 octets et une lettre accentuée en prend deux ; depuis LPS-DOS-115-CHG06d le compteur montre ces octets (*15/24 caractères*) et une lettre qui ne tient plus n'est pas tapée, comme pour les tâches. Les champs de texte gardent les caractères ; les écrans à chiffres lisent la rangée du haut par position de touche (voir *Clavier* plus bas).
 - **Les jours passés gardent les noms avec lesquels ils ont été clos.** Renommer une activité en français (le nom que le jour enregistre) ou la supprimer laisse l'ancien nom dans l'historique : l'archive l'affiche après le catalogue, coché, en lecture seule. Dans un jour archivé, E, N, Suppr, F4 et F5 affichent *Jour archivé : lecture seule*.
 - Les modifications s'écrivent dans la sauvegarde en revenant à l'accueil avec Échap, comme les autres modifications DOS. Sauvegarde et ICS restent identiques octet pour octet à ceux de la PicoCalc pour la même liste.
 
@@ -462,11 +471,20 @@ Sur tous les écrans à chiffres (Accueil, menu d'un jour archivé, Config, Lang
 
 ### Tâches et rappels accentués (LPS-DOS-115-CHG06c)
 
-Les noms de tâches Kanban et les textes des rappels acceptent les lettres CP437, comme les noms d'activités : é è ê ë à â ä å ç î ï ì ô ö ò û ù ü ÿ É Ç Ä Å Æ Ö Ü æ ñ Ñ á í ó ú, et ¢ £ ¥ ₧ ƒ. Avec `KEYB FR`, é è ç à ù sont sur leurs touches, et ê â ô û î, ë ï ü viennent des touches mortes ^ et ¨.
+Les noms de tâches Kanban et les textes des rappels acceptent les lettres CP437, comme les noms d'activités : é è ê ë à â ä å ç î ï ì ô ö ò û ù ü ÿ É Ç Ä Å Æ Ö Ü æ ñ Ñ á í ó ú, et ¢ £ ¥ (₧ et ƒ sont refusés depuis CHG06d : la PicoCalc ne sait pas les afficher). Avec `KEYB FR`, é è ç à ù sont sur leurs touches, et ê â ô û î, ë ï ü viennent des touches mortes ^ et ¨.
 
-- À l'écran et en mémoire, ils sont en CP437 ; la sauvegarde JSON les garde en UTF-8, comme la PicoCalc, qui relit ces sauvegardes et les réécrit octet pour octet (`tests/fixtures/picocalc_accents.jsn`). Les sauvegardes PicoCalc avec tâches et rappels accentués se chargent et s'affichent sous DOS.
-- La limite est celle de la PicoCalc : **32 octets d'UTF-8**. Une lettre accentuée prend 2 octets (₧ en prend 3) : un nom tient 32 lettres simples ou 16 accentuées ; une lettre qui ne tient plus n'est pas tapée. Le compteur des tâches compte ces octets, comme sur la PicoCalc (*32/32 caractères*).
+- À l'écran ils sont en CP437 ; en mémoire et dans les fichiers, en UTF-8 (voir *Mêmes fichiers partout* plus bas). La PicoCalc relit ces sauvegardes et les réécrit octet pour octet (`tests/fixtures/picocalc_accents.jsn`).
+- La limite est celle de la PicoCalc : **32 octets d'UTF-8**. Une lettre accentuée prend 2 octets : un nom tient 32 lettres simples ou 16 accentuées ; une lettre qui ne tient plus n'est pas tapée. Le compteur des tâches compte ces octets, comme sur la PicoCalc (*32/32 caractères*).
 - Tâches et rappels ne sont pas dans l'ICS (comme sur la PicoCalc) ; la note et les noms d'activités y sont en UTF-8. Les anciennes sauvegardes `.BIN` n'ont jamais contenu d'accents (les deux programmes n'écrivaient que de l'ASCII) ; après la migration, les accents vont dans la sauvegarde JSON.
+
+### Mêmes fichiers partout (LPS-DOS-115-CHG06d)
+
+Les sauvegardes JSON, les ICS et le CSV des poids sont les mêmes octets sur la PicoCalc, sous DOS et dans la version console : un fichier écrit par l'une est relu et réécrit tel quel par les autres.
+
+- Tout texte lu dans une sauvegarde reste en mémoire avec ses octets UTF-8 exacts : tâches, rappels, notes, noms du catalogue et noms gardés par les jours passés. Seul l'écran convertit en CP437 : un caractère absent de la CP437 (œ, À, €, un émoji) s'affiche `?` mais n'est jamais modifié dans les fichiers, même quand sa tâche ou son activité est ouverte puis enregistrée.
+- Une lettre tapée passe en UTF-8 tout de suite ; Retour efface un caractère entier (les 4 octets d'un émoji d'un coup). Les limites sont en octets UTF-8, comme sur la PicoCalc : 32 pour une tâche ou un rappel, 24 pour un nom d'activité, et les compteurs montrent des octets.
+- Testé avec des fichiers écrits par le code de la PicoCalc (`tests/fixtures/picocalc_intl.*`, par `tools/picocalc_fixture.cpp intl` et `close`) : DOS relit et réécrit le JSON octet pour octet ; terminer ce jour sous DOS écrit le même ICS, le même CSV des poids et la même sauvegarde suivante que l'écran Terminer de la PicoCalc (seul le nom du fichier ICS diffère, CHG02c) ; la PicoCalc relit les sauvegardes DOS et les réécrit à l'identique. La migration des anciens `.BIN` ne change pas (ils ne contiennent que de l'ASCII).
+- Vitesse sur 8088 (DOSBox `cputype=8086`, `cycles=fixed 300`) : une touche dans le Kanban avec 24 tâches prend environ 295 ms (281 ms avant), avec émojis et € dans les tâches 110 à 123 ms (96 à 103 ms avant) ; les autres écrans varient de quelques ms. Le texte ASCII s'affiche sans copie.
 
 
 Le **Minuteur** propose **5, 30 ou 60 minutes** (LPS-DOS-115-CHG02b, comme les CHG01/CHG02 de la PicoCalc v1.12). Les touches **1**, **2** et **3** lancent directement une duree, sans Entree. Sur l'ecran de fin, elles relancent aussitot un compte a rebours et Entree revient au choix de la duree ; pendant un compte a rebours, elles sont ignorees et Entree met en pause ou reprend. Le temps vient toujours du tic BIOS (environ 55 ms). Une note deja enregistree par une ancienne version reste dans la sauvegarde et part toujours dans l'ICS (`\NNote: ...`) a la cloture du jour ; elle n'est plus affichee ni modifiable.

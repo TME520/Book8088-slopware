@@ -201,10 +201,8 @@ static void catalog_changed(App *a, int unique, unsigned entry){
 static void begin_activity_edit(App *a, unsigned index){
     a->editingActivity=index; memset(a->activityDraft,0,sizeof(a->activityDraft));
     if(index<a->state.activityCount){
-        char shown[ACTIVITY_NAME_LENGTH*3+1];
         const char *n=activity_display_name(&a->state.activities[index],a->state.language);
-        utf8_to_cp437(n,strlen(n),shown);
-        { size_t n=strlen(shown); memcpy(a->activityDraft,shown,n<ACTIVITY_NAME_LENGTH?n:ACTIVITY_NAME_LENGTH); }
+        size_t len=strlen(n); memcpy(a->activityDraft,n,len<ACTIVITY_NAME_LENGTH?len:ACTIVITY_NAME_LENGTH); /* UTF-8, as stored */
     }
     a->screen=SCR_ACTIVITY_EDIT; a->message[0]=0;
 }
@@ -215,18 +213,9 @@ static void trim_spaces(char *text){
     start[n]=0; if(start!=text) memmove(text,start,n+1);
 }
 static void save_activity_edit(App *a){
-    char utf8[ACTIVITY_NAME_LENGTH*3+1]; unsigned destination=a->editingActivity; size_t n=0; const char *p;
+    const char *utf8=a->activityDraft; unsigned destination=a->editingActivity; /* UTF-8 since CHG06d */
     trim_spaces(a->activityDraft);
     if(!a->activityDraft[0]){ a->screen=SCR_ACTIVITIES; memset(a->activityDraft,0,sizeof(a->activityDraft)); return; } /* empty = cancel */
-    for(p=a->activityDraft;*p;p++) n+=cp437_to_utf8((unsigned char)*p,utf8+n);
-    utf8[n]=0;
-    if(destination<a->state.activityCount){
-        /* Unchanged text keeps the exact name, even with characters CP437 lacks. */
-        char shown[ACTIVITY_NAME_LENGTH*3+1];
-        const char *old=activity_display_name(&a->state.activities[destination],a->state.language);
-        utf8_to_cp437(old,strlen(old),shown);
-        if(strcmp(shown,a->activityDraft)==0) strcpy(utf8,old);
-    }
     if(!activity_valid_name(utf8)) say(a,tr(a,"Name is too long","Nom trop long"));
     else if(activity_duplicate(&a->state,utf8,destination,a->state.language)) say(a,tr(a,"That name already exists","Ce nom existe déjà"));
     else if(catalog_editable(a)){
@@ -303,6 +292,7 @@ static unsigned review_rows(const App *a){
     return 3+count_flags(a->state.today.flags)+tasks_in(a,TASK_TODO)+tasks_in(a,TASK_DOING)
         +(count_flags(a->state.today.flags)==0)+(tasks_in(a,TASK_TODO)==0)+(tasks_in(a,TASK_DOING)==0);
 }
+static const char *shown(const char *utf8); /* CHG06d: UTF-8 user text to CP437 */
 static void review_line(App *a, unsigned index, char *out, size_t size){
     unsigned activities=count_flags(a->state.today.flags); unsigned i; int status;
     if(index==0){ sprintf(out, tr(a,"ACTIVITIES (%u)","ACTIVITÉS (%u)"), activities); return; }
@@ -315,7 +305,7 @@ static void review_line(App *a, unsigned index, char *out, size_t size){
         unsigned n=tasks_in(a,status);
         if(index--==0){ sprintf(out,"%s (%u)", task_status_name(a,status), n); return; }
         for(i=0;i<a->state.taskCount;i++) if(a->state.tasks[i].status==status){
-            if(index--==0){ sprintf(out,"  %s", a->state.tasks[i].name); return; }
+            if(index--==0){ sprintf(out,"  %s", shown(a->state.tasks[i].name)); return; }
         }
         if(!n && index--==0){ sprintf(out,"  %s", tr(a,"None","Aucune")); return; }
     }
@@ -372,21 +362,34 @@ static void edit_buf(char *value, size_t cap, int key){
     if(key==KEY_BACKSPACE||key==127){ if(len) value[len-1]=0; }
     else if(key>=32 && key<=126 && len+1<cap){ value[len]=(char)key; value[len+1]=0; }
 }
-/* LPS-DOS-115-CHG06c: bytes a CP437 text takes in UTF-8 (the save and the
- * PicoCalc count these). */
-static unsigned utf8_length(const char *cp437){
-    char u[3]; unsigned n=0;
-    while(*cp437) n+=(unsigned)cp437_to_utf8((unsigned char)*cp437++,u);
-    return n;
+/* LPS-DOS-115-CHG06d: user text (task names, reminders, notes, activity
+ * names) stays in memory as the exact UTF-8 bytes of the files, so the
+ * PicoCalc, DOS and console versions read and write the same bytes. The
+ * screen gets a CP437 copy; a character CP437 lacks shows as '?' but is never
+ * changed. Two buffers: a line may show two texts. */
+#define SHOWN_BYTES 33 /* user texts on screen are at most 32 bytes */
+static char g_shown[2][SHOWN_BYTES];
+static const char *shown(const char *utf8){
+    static unsigned which; char *o; size_t n; const unsigned char *p=(const unsigned char*)utf8;
+    while(*p && *p<0x80) p++;
+    if(!*p) return utf8; /* plain ASCII: shown as it is, no copy */
+    o=g_shown[which^=1u]; n=(size_t)((const char*)p-utf8)+strlen((const char*)p);
+    if(n>=SHOWN_BYTES) n=SHOWN_BYTES-1;
+    utf8_to_cp437(utf8,n,o); return o;
 }
-/* Task name and reminder text: printable ASCII and the CP437 letters, as an
- * activity name, while the UTF-8 form fits the PicoCalc field (utf8cap
- * bytes); a letter that would not fit is not typed. */
-static void edit_text(char *value, unsigned utf8cap, int key){
-    size_t len=strlen(value); char u[3];
-    if(key==KEY_BACKSPACE||key==127){ if(len) value[len-1]=0; }
-    else if(key>=0 && key<=255 && cp437_text_byte((unsigned char)key)
-        && utf8_length(value)+(unsigned)cp437_to_utf8((unsigned char)key,u)<=utf8cap){ value[len]=(char)key; value[len+1]=0; }
+/* A typed key into a UTF-8 field: printable ASCII and the CP437 letters,
+ * converted at once, while the field's UTF-8 bytes stay within cap (the
+ * PicoCalc limit); a letter that would not fit is not typed. ₧ and ƒ are
+ * refused: the PicoCalc screen cannot show them. Backspace removes one whole
+ * UTF-8 character. */
+static void edit_text(char *value, unsigned cap, int key){
+    size_t len=strlen(value), n; char u[3];
+    if(key==KEY_BACKSPACE||key==127){
+        if(len){ len--; while(len && ((unsigned char)value[len]&0xC0)==0x80) len--; value[len]=0; }
+    }else if(key>=0 && key<=255 && cp437_text_byte((unsigned char)key) && key!=0x9E && key!=0x9F){
+        n=cp437_to_utf8((unsigned char)key,u);
+        if(len+n<=cap){ memcpy(value+len,u,n); value[len+n]=0; }
+    }
 }
 static void begin_reminder_edit(App *a, unsigned index){
     Reminder r; memset(&r,0,sizeof(r));
@@ -694,12 +697,8 @@ void app_key(App *a, int k){
             }
         }
     }else if(a->screen==SCR_ACTIVITY_EDIT){
-        size_t len=strlen(a->activityDraft);
         if(k==KEY_ENTER) save_activity_edit(a);
-        else if(k==KEY_BACKSPACE||k==127){ if(len) a->activityDraft[len-1]=0; }
-        else if(k>=32 && k<=255 && cp437_text_byte((unsigned char)k) && len<ACTIVITY_NAME_LENGTH){
-            a->activityDraft[len]=(char)k; a->activityDraft[len+1]=0;
-        }
+        else edit_text(a->activityDraft,ACTIVITY_NAME_LENGTH,k); /* 24 UTF-8 bytes, as the PicoCalc */
     }else if(a->screen==SCR_WEIGHT){
         if(a->daysBack){ if(k==KEY_ENTER) go(a,SCR_HOME); else read_only(a); }
         else if(k==KEY_UP||k==KEY_DOWN||k==KEY_TAB) a->field=1-a->field;
@@ -884,7 +883,7 @@ void app_render(App *a){
         sprintf(b,tr(a,"Actual   : %s","Effectif : %s"), wact); field(a,9,41,38,b,0);
         field(a,11,41,38, tr(a,"REMINDERS","RAPPELS"), 0);
         if(!a->state.reminderCount) field(a,12,41,38, tr(a,"No reminders","Aucun rappel"), 0);
-        else for(i=0;i<a->state.reminderCount && i<3;i++) field(a,12+(int)i,41,38, a->state.reminders[i].text, 0);
+        else for(i=0;i<a->state.reminderCount && i<3;i++) field(a,12+(int)i,41,38, shown(a->state.reminders[i].text), 0);
         sprintf(b,"KANBAN  %s %u  %s %u  %s %u",
             task_status_name(a,TASK_TODO), tasks_in(a,TASK_TODO),
             task_status_name(a,TASK_DOING), tasks_in(a,TASK_DOING),
@@ -907,7 +906,7 @@ void app_render(App *a){
         unsigned row=6;
         center_line(a,3,tr(a,"REMINDERS","RAPPELS"),0);
         for(i=0;i<a->state.reminderCount;i++) if(rem_active(a,&a->state.reminders[i])){
-            sprintf(b,"%u. %s", row-5, a->state.reminders[i].text); line(a,(int)row,b,0); row+=2;
+            sprintf(b,"%u. %s", row-5, shown(a->state.reminders[i].text)); line(a,(int)row,b,0); row+=2;
         }
         line(a,15,tr(a,"Press any key to continue","Appuyez sur une touche"),0);
     }else if(a->screen==SCR_REMINDERS){
@@ -915,14 +914,14 @@ void app_render(App *a){
         if(!a->state.reminderCount) line(a,6,tr(a,"No reminders","Aucun rappel"),0);
         for(i=0;i<a->state.reminderCount;i++){ char from[11]; date_text(a->state.reminders[i].from,from,sizeof(from));
             sprintf(b,"%s  %u %s",from,(unsigned)a->state.reminders[i].duration,tr(a,"days","jours"));
-            line(a,6+(int)i*3,b,i==a->selection); line(a,7+(int)i*3,a->state.reminders[i].text,0);
+            line(a,6+(int)i*3,b,i==a->selection); line(a,7+(int)i*3,shown(a->state.reminders[i].text),0);
         }
         line(a,16,tr(a,"N New  Enter Edit  Del Delete","N Nouveau Entrée Modifier Suppr Effacer"),0);
     }else if(a->screen==SCR_REMINDER_EDIT){
         center_line(a,3,tr(a,"EDIT REMINDER","MODIFIER LE RAPPEL"),0);
         sprintf(b,tr(a,"From: %s","Début : %s"),a->reminderDate); line(a,6,b,a->reminderField==0);
         sprintf(b,tr(a,"Days: %s","Jours : %s"),a->reminderDuration); line(a,8,b,a->reminderField==1);
-        line(a,10,tr(a,"Text:","Texte :"),0); line(a,11,a->reminderText,a->reminderField==2);
+        line(a,10,tr(a,"Text:","Texte :"),0); line(a,11,shown(a->reminderText),a->reminderField==2);
         line(a,15,tr(a,"Up/Down fields  Enter save","Haut/Bas champs  Entrée valider"),0);
     }else if(a->screen==SCR_DATE){
         center_line(a,3,"DATE",0); line(a,6,a->dateDraft,1);
@@ -967,8 +966,8 @@ void app_render(App *a){
         }
     }else if(a->screen==SCR_ACTIVITY_EDIT){
         center_line(a,3, a->editingActivity<ACTIVITY_CAPACITY?tr(a,"RENAME ACTIVITY","RENOMMER L'ACTIVITÉ"):tr(a,"NEW ACTIVITY","NOUVELLE ACTIVITÉ"),0);
-        line(a,6,a->activityDraft,1);
-        sprintf(b,tr(a,"%u/24 characters","%u/24 caractères"),(unsigned)strlen(a->activityDraft)); line(a,9,b,0);
+        line(a,6,shown(a->activityDraft),1);
+        sprintf(b,tr(a,"%u/24 characters","%u/24 caractères"),(unsigned)strlen(a->activityDraft)); line(a,9,b,0); /* UTF-8 bytes (CHG06d) */
         line(a,11,tr(a,"Saved in English; the French name, if any, stays.","Enregistré en français ; le nom anglais, s'il existe, reste."),0);
         line(a,13,tr(a,"Enter: save  (empty cancels)","Entrée : enregistrer  (vide = annuler)"),0);
         line(a,15,tr(a,"Backspace: erase  Esc: cancel","Retour : effacer  Échap : annuler"),0);
@@ -1013,7 +1012,7 @@ void app_render(App *a){
                 end=first+visible<n?first+visible:n;
                 for(position=first; position<end; position++){
                     unsigned index=task_at(a,col,position);
-                    sprintf(b,"%2u %-22s", position+1, a->state.tasks[index].name);
+                    sprintf(b,"%2u %-22s", position+1, shown(a->state.tasks[index].name));
                     field(a,7+(int)(position-first), starts[col], 26, b, active && position==a->selection);
                 }
             }
@@ -1023,9 +1022,9 @@ void app_render(App *a){
         line(a,22,tr(a,"F4 Up F5 Down  <- -> Columns","F4 Monter F5 Descendre <- -> Colonnes"),0);
     }else if(a->screen==SCR_TASK_EDIT){
         center_line(a,3, a->editedTask<TASK_CAPACITY?tr(a,"EDIT TASK","MODIFIER LA TÂCHE"):tr(a,"NEW TASK","NOUVELLE TÂCHE"),0);
-        line(a,6,a->taskDraft,1);
+        line(a,6,shown(a->taskDraft),1);
         /* As the PicoCalc: the count is the name's bytes in UTF-8 (CHG06c). */
-        sprintf(b,tr(a,"%u/32 characters","%u/32 caractères"),utf8_length(a->taskDraft)); line(a,9,b,0);
+        sprintf(b,tr(a,"%u/32 characters","%u/32 caractères"),(unsigned)strlen(a->taskDraft)); line(a,9,b,0);
         line(a,13,tr(a,"Enter: save task","Entrée : enregistrer la tâche"),0);
         line(a,15,tr(a,"Backspace: erase  Esc: cancel","Retour: effacer  Échap: annuler"),0);
     }else if(a->screen==SCR_DAILY_REVIEW){

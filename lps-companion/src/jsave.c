@@ -23,9 +23,9 @@
  * home entries ("homeHidden") are kept here and written back as read.
  * Unknown keys are skipped, as on the PicoCalc.
  *
- * Text in the file is UTF-8; the State holds CP437 for notes, task names and
- * reminder texts (LPS-DOS-115-CHG03), converted at this boundary; a character
- * CP437 lacks becomes '?'. Activity names stay UTF-8 in the State.
+ * Text in the file is UTF-8 and the State keeps those exact bytes for every
+ * text (LPS-DOS-115-CHG06d; CHG03 held CP437 and turned what CP437 lacks
+ * into '?'): only the screen converts to CP437.
  *
  * 8088: the whole file is read into one far block, ended by a NUL, and
  * parsed in one pass by a small pull tokenizer (no tree, no recursion, a few
@@ -236,7 +236,8 @@ static int read_text(unsigned cap, int required){
     return 1;
 }
 /* J.text (UTF-8) to CP437; the result is never longer. */
-static void text_to_cp437(char *out){ utf8_to_cp437(J.text,J.len,out); }
+/* LPS-DOS-115-CHG06d: J.text kept as read, byte for byte (read_text bounds it). */
+static void text_copy(char *out){ memcpy(out,J.text,J.len+1); }
 static int read_date(Date *d, int allow_null){
     int t=next();
     if(t==T_NULL&&allow_null){ d->year=0; d->month=0; d->day=0; return 1; }
@@ -274,7 +275,7 @@ static int read_day(int first, Day *d, DayNames *e){
         }
         else if(!strcmp(key,"expected")){ if(!read_weight(&d->expected)) return 0; }
         else if(!strcmp(key,"actual")){ if(!read_weight(&d->actual)) return 0; }
-        else if(!strcmp(key,"note")){ if(!read_text(NOTE_LENGTH+1,0)) return 0; text_to_cp437(d->note); }
+        else if(!strcmp(key,"note")){ if(!read_text(NOTE_LENGTH+1,0)) return 0; text_copy(d->note); }
         else if(!skip(next())) return 0;
     }
     return r==0;
@@ -331,7 +332,7 @@ static int read_state(State *s){
                 task=&s->tasks[s->taskCount]; memset(task,0,sizeof(*task));
                 while((r=member(&ms,key))>0){
                     if(!strcmp(key,"status")){ if(!read_choice(STATUSES,3,&task->status)) return 0; }
-                    else if(!strcmp(key,"name")){ if(!read_text(TASK_NAME_LENGTH+1,1)) return 0; text_to_cp437(task->name); named=1; }
+                    else if(!strcmp(key,"name")){ if(!read_text(TASK_NAME_LENGTH+1,1)) return 0; text_copy(task->name); named=1; }
                     else if(!skip(next())) return 0;
                 }
                 if(r<0||!named) return 0;
@@ -350,7 +351,7 @@ static int read_state(State *s){
                 while((r=member(&ms,key))>0){
                     if(!strcmp(key,"from")){ if(!read_date(&rem->from,0)) return 0; dated=1; }
                     else if(!strcmp(key,"days")){ if(!read_number(1,365)) return 0; rem->duration=(uint16_t)J.number; }
-                    else if(!strcmp(key,"text")){ if(!read_text(REMINDER_TEXT_LENGTH+1,1)) return 0; text_to_cp437(rem->text); texted=1; }
+                    else if(!strcmp(key,"text")){ if(!read_text(REMINDER_TEXT_LENGTH+1,1)) return 0; text_copy(rem->text); texted=1; }
                     else if(!skip(next())) return 0;
                 }
                 if(r<0||!dated||!texted) return 0;
@@ -523,19 +524,6 @@ static void text(const char *s){
     while((c=(unsigned char)*s++)!=0){ if(c>=0x20&&c!='"'&&c!='\\') PUT(c); else escaped(c); }
     PUT('"');
 }
-/* CP437 State text as UTF-8, at most cap bytes (the PicoCalc field size). */
-static void text_cp437(const char *s, unsigned cap){
-    char u[3]; unsigned used=0, k, i; unsigned char c;
-    PUT('"');
-    while((c=(unsigned char)*s++)!=0){
-        if(c<0x80){ if(used+1>cap) break; used++; escaped(c); continue; }
-        k=(unsigned)cp437_to_utf8(c,u);
-        if(used+k>cap) break;
-        used+=k;
-        for(i=0;i<k;i++) PUT(u[i]);
-    }
-    PUT('"');
-}
 static void key(const char *k){ text(k); PUT(':'); }
 /* Decimal with 16-bit division once the value fits. */
 static void number(uint32_t v){
@@ -569,7 +557,7 @@ static void write_day(const State *s, const Day *d, unsigned slot){
     for(i=0;i<s->activityCount;i++) if(FLAG_BIT(d->flags,i)) emit_name(activity_stored_name(&s->activities[i]),&n);
     for(i=0;i<e->count;i++) if(activity_index(s,e->names[i])>=s->activityCount) emit_name(e->names[i],&n);
     raw("],"); key("expected"); weight(d->expected); put(','); key("actual"); weight(d->actual);
-    put(','); key("note"); text_cp437(d->note,NOTE_LENGTH); put('}');
+    put(','); key("note"); text(d->note); put('}');
 }
 int jsave_write(const char *path, const State *s, uint32_t generation, uint32_t *checksum){
     unsigned i, n; char hex[12]; int closed;
@@ -599,14 +587,14 @@ int jsave_write(const char *path, const State *s, uint32_t generation, uint32_t 
     for(i=0;i<s->taskCount;i++){
         if(i) put(',');
         raw("\n{"); key("status"); text(STATUSES[s->tasks[i].status<3?s->tasks[i].status:0]);
-        put(','); key("name"); text_cp437(s->tasks[i].name,TASK_NAME_LENGTH); put('}');
+        put(','); key("name"); text(s->tasks[i].name); put('}');
     }
     raw("],\n"); key("reminders"); put('[');
     for(i=0;i<s->reminderCount;i++){
         const Reminder *r=&s->reminders[i];
         if(i) put(',');
         raw("\n{"); key("from"); date(r->from); put(','); key("days"); number(r->duration);
-        put(','); key("text"); text_cp437(r->text,REMINDER_TEXT_LENGTH); put('}');
+        put(','); key("text"); text(r->text); put('}');
     }
     raw("],\n"); key("meals"); put('{'); key("played"); put('[');
     for(i=0;i<X->mealCount;i++){ if(i) put(','); number(X->meals[i]); }

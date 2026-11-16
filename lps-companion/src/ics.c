@@ -2,10 +2,11 @@
 #include <stdio.h>
 #include <string.h>
 
-/* LPS-DOS-115-CHG03: program text and notes are CP437 (screen), but the ICS
- * file stays UTF-8 like the PicoCalc's, so bytes 0x80-0xFF are written back
- * as UTF-8. Activity names are UTF-8 already (LPS-DOS-115-CHG05) and go
- * through ics_escape_append_utf8 unchanged. Same escapes as the PicoCalc. */
+/* LPS-DOS-115-CHG03: program text is CP437 (screen), but the ICS file stays
+ * UTF-8 like the PicoCalc's, so its bytes 0x80-0xFF are written back as
+ * UTF-8. User text (activity names, the note) is UTF-8 in memory (CHG05,
+ * CHG06d) and goes through ics_escape_append_utf8 unchanged. Same escapes as
+ * the PicoCalc. */
 static int escape_append(char *dst, size_t cap, size_t *used, const char *text, int utf8){
     size_t u=*used;
     while(*text){
@@ -63,7 +64,7 @@ int build_ics(const Day *day, const State *s, uint32_t totalXp, uint32_t dayXp, 
         if(u+2>=cap) return 0;
         out[u++]='\\'; out[u++]='N'; out[u]=0;
         if(!ics_escape_append(out,cap,&u,"Note: ")) return 0;
-        if(!ics_escape_append(out,cap,&u,day->note)) return 0;
+        if(!ics_escape_append_utf8(out,cap,&u,day->note)) return 0; /* UTF-8 as read (CHG06d) */
     }
     if(u+40>=cap) return 0;
     u+=sprintf(out+u,"\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");

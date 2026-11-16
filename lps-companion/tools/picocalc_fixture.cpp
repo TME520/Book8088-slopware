@@ -10,6 +10,11 @@
 //   ./picocalc_fixture custom tests/fixtures/picocalc_custom.jsn
 //   ./picocalc_fixture resave SAVE_B.JSN OUT.JSN   (read with readSave, write back)
 //   ./picocalc_fixture check A.JSN B.JSN ...       (one verdict per file)
+//   ./picocalc_fixture intl tests/fixtures/picocalc_intl.jsn   (LPS-DOS-115-CHG06d)
+//   ./picocalc_fixture close IN.JSN OUT.ICS OUT.CSV OUT.JSN
+//       closes today as the PicoCalc's Finish screen does: the weight CSV row
+//       (into an empty year file), the ICS (main.cpp exportIcs, written to a
+//       file instead of FatFs) and the save committed afterwards.
 #include "lps_companion.cpp"
 #include "save_helpers.h"
 #include <cstdio>
@@ -61,6 +66,97 @@ static State custom(){
     s.hiddenHome=uint16_t((1u<<3)|(1u<<4)); // kanban, rosary
     return s;
 }
+// LPS-DOS-115-CHG06d: text that CP437 lacks (œ, À, €, an emoji) in every
+// text a save holds: catalog names, frozen day names, notes, tasks, reminders.
+static State intl(){
+    State s;s.language=Language::French;s.palette=Palette::Green;s.xp=777;
+    copyActivityName(s.activities[0].french,"Marche € 🙂");      // 14 bytes
+    copyActivityName(s.activities[1].english,"Œuvre À faire");
+    Activity& oeuf=s.activities[s.activityCount++];oeuf.id=s.nextActivityId++;copyActivityName(oeuf.french,"Œufs; cœur, À 🍳");copyActivityName(oeuf.english,"Eggs 🍳");
+    auto day=[&](Day& d,Date date,uint32_t number){d=Day{};d.date=date;d.number=number;};
+    for(unsigned i=0;i<3;++i){
+        Day& d=s.history[i];day(d,{2026,11,uint8_t(12+i)},20+i);
+        tick(s,d,"Marche € 🙂");tick(s,d,"Œufs; cœur, À 🍳");
+        if(i==1){tick(s,d,"Pâtes 🍝 À l'œil");d.expected=80500;text(d.note.data(),d.note.size(),"Cœur: À 5 € 🙂, \"ok\" \\ fin; oui");}
+    }
+    s.count=3;s.next=3;
+    day(s.today,{2026,11,15},23);
+    tick(s,s.today,"Marche € 🙂");tick(s,s.today,"Œufs; cœur, À 🍳");tick(s,s.today,"Messe");
+    s.today.expected=80250;s.today.actual=80125;
+    text(s.today.note.data(),s.today.note.size(),"Œuvre du jour, À 10 € 😀; « bien »\\N fin");
+    s.taskCount=3;
+    s.tasks[0].status=TaskStatus::Todo;text(s.tasks[0].name.data(),s.tasks[0].name.size(),"Acheter œufs À 3 € 🙂");
+    s.tasks[1].status=TaskStatus::Doing;text(s.tasks[1].name.data(),s.tasks[1].name.size(),"Œuvre, 😀 \"x\" \\ y");
+    s.tasks[2].status=TaskStatus::Done;text(s.tasks[2].name.data(),s.tasks[2].name.size(),"À l'œil: 2 €");
+    s.reminderCount=2;
+    s.reminders[0].from={2026,11,15};s.reminders[0].duration=10;text(s.reminders[0].text.data(),s.reminders[0].text.size(),"Fête 🎉 À 20h, 15 €");
+    s.reminders[1].from={2026,11,1};s.reminders[1].duration=60;text(s.reminders[1].text.data(),s.reminders[1].text.size(),"Cœur œuvre ŒÀ€");
+    return s;
+}
+static bool readFile(const char* path,State& s,uint32_t& generation){
+    FILE* f=std::fopen(path,"rb");if(!f)return false;
+    static std::array<char,lps_test::MemoryCapacity> bytes{};const std::size_t n=std::fread(bytes.data(),1,bytes.size(),f);std::fclose(f);
+    lps_test::MemorySource source(bytes.data(),n);SaveInfo info;
+    if(readSave(source,s,info)!=SaveCheck::Valid)return false;
+    generation=info.generation;return true;
+}
+// main.cpp PicoCalc::put / escaped / exportIcs / exportWeightCsv, FILE* for FIL.
+static bool put(FILE* f,const char* text){const auto n=std::strlen(text);return std::fwrite(text,1,n,f)==n;}
+static bool escaped(FILE* f,const char* text){
+    char b[3]{};
+    for(;*text;++text){char c=*text;
+        if(c=='\\'||c==';'||c==','){b[0]='\\';b[1]=c;b[2]=0;}
+        else if(c=='\n'){std::strcpy(b,"\\n");}
+        else {b[0]=c;b[1]=0;}
+        if(!put(f,b))return false;
+    }
+    return true;
+}
+static bool exportIcs(const char* path,const Day& day,Language language,const State& state){
+    if(!validDate(day.date))return false;
+    char ymd[13],next[13],line[160];
+    std::snprintf(ymd,sizeof ymd,"%04u%02u%02u",day.date.year,day.date.month,day.date.day);
+    auto tomorrow=day.date;if(!nextDate(tomorrow))return false;
+    std::snprintf(next,sizeof next,"%04u%02u%02u",tomorrow.year,tomorrow.month,tomorrow.day);
+    FILE* f=std::fopen(path,"wb");if(!f)return false;
+    bool ok=put(f,"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//LPS Companion//EN\r\nCALSCALE:GREGORIAN\r\nBEGIN:VEVENT\r\n");
+    std::snprintf(line,sizeof line,"UID:lps-companion-%s@picocalc\r\nDTSTART;VALUE=DATE:%s\r\nDTEND;VALUE=DATE:%s\r\n",ymd,ymd,next);ok=ok&&put(f,line);
+    ok=ok&&put(f,"SUMMARY:LPS Companion\r\nDESCRIPTION:");
+    const char* names=language==Language::English?"Activities: ":"Activités: ";ok=ok&&escaped(f,names);
+    bool first=true;eachExportedActivity(state,day,language,[&](const char* name){
+        if(!first)ok=ok&&put(f,", ");
+        ok=ok&&escaped(f,name);first=false;});
+    if(first)ok=ok&&put(f,"none");
+    ok=ok&&put(f,"\\NXP:");
+    if(day.expected>=0){ok=ok&&put(f,"\\N");std::snprintf(line,sizeof line,"%s: %ld.%03ld kg",language==Language::English?"Expected weight":"Poids attendu",long(day.expected/1000),long(day.expected%1000));ok=ok&&escaped(f,line);}
+    if(day.actual>=0){ok=ok&&put(f,"\\N");std::snprintf(line,sizeof line,"%s: %ld.%03ld kg",language==Language::English?"Actual weight":"Poids effectif",long(day.actual/1000),long(day.actual%1000));ok=ok&&escaped(f,line);}
+    if(day.note[0]){ok=ok&&put(f,"\\NNote: ");ok=ok&&escaped(f,day.note.data());}
+    ok=ok&&put(f,"\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+    return std::fclose(f)==0&&ok;
+}
+static bool exportWeightCsv(const char* path,const Day& day){ // a new year file
+    char date[16],expected[16]{},actual[16]{},line[64];
+    std::snprintf(date,sizeof date,"%04u-%02u-%02u",day.date.year,day.date.month,day.date.day);
+    if(day.expected>=0)std::snprintf(expected,sizeof expected,"%ld.%03ld",long(day.expected/1000),long(day.expected%1000));
+    if(day.actual>=0)std::snprintf(actual,sizeof actual,"%ld.%03ld",long(day.actual/1000),long(day.actual%1000));
+    std::snprintf(line,sizeof line,"%s,%s,%s\r\n",date,expected,actual);
+    FILE* f=std::fopen(path,"wb");if(!f)return false;
+    const bool ok=put(f,"date,expected_kg,measured_kg\r\n")&&put(f,line);
+    return std::fclose(f)==0&&ok;
+}
+// lps_companion.cpp App::key, Screen::Finish + Enter (without the UI).
+static int closeDay(const char* in,const char* ics,const char* csv,const char* out){
+    State state;uint32_t generation=0;if(!readFile(in,state,generation))return 3;
+    const uint32_t gain=points(state.today);
+    State next=state;const unsigned slot=next.next;next.history[slot]=next.today;freezeDayNames(next,next.history[slot]);
+    next.next=uint8_t((next.next+1)%HistoryLength);if(next.count<HistoryLength)++next.count;
+    Date tomorrow=state.today.date;if(!nextDate(tomorrow))return 4;
+    if(!exportWeightCsv(csv,state.today))return 5;
+    if(!exportIcs(ics,next.history[slot],state.language,next))return 6;
+    next.xp+=gain;next.today=Day{};next.today.number=state.today.number+1;next.today.date=tomorrow;
+    next.meals=MealDeckState{};
+    return writeFile(out,next,generation+1)?0:1;
+}
 int main(int argc,char** argv){
     const std::string mode=argc>1?argv[1]:"";
     if(mode=="full"&&argc==3){
@@ -69,6 +165,8 @@ int main(int argc,char** argv){
         return writeFile(argv[2],s,41)?0:1;
     }
     if(mode=="custom"&&argc==3)return writeFile(argv[2],custom(),7)?0:1;
+    if(mode=="intl"&&argc==3)return writeFile(argv[2],intl(),12)?0:1;
+    if(mode=="close"&&argc==6)return closeDay(argv[2],argv[3],argv[4],argv[5]);
     if(mode=="resave"&&argc==4){
         FILE* f=std::fopen(argv[2],"rb");if(!f)return 2;
         static std::array<char,lps_test::MemoryCapacity> bytes{};const std::size_t n=std::fread(bytes.data(),1,bytes.size(),f);std::fclose(f);
@@ -87,6 +185,6 @@ int main(int argc,char** argv){
         }
         return 0;
     }
-    std::fprintf(stderr,"usage: %s full|custom OUT.JSN | resave IN.JSN OUT.JSN | check FILE...\n",argv[0]);
+    std::fprintf(stderr,"usage: %s full|custom|intl OUT.JSN | resave IN.JSN OUT.JSN | check FILE... | close IN.JSN OUT.ICS OUT.CSV OUT.JSN\n",argv[0]);
     return 2;
 }

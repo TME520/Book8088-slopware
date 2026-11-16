@@ -35,6 +35,14 @@ not user data.
   brûlée à 20h, `), passed through the PicoCalc writer with
   `/tmp/pcfix resave`: the PicoCalc accepted it and wrote the same bytes.
 
+- `picocalc_intl.jsn` (generation 12, LPS-DOS-115-CHG06d): text CP437 lacks
+  (œ, À, €, emoji) in catalog names, a frozen day name, notes, tasks and
+  reminders, written by `tools/picocalc_fixture.cpp intl`.
+  `picocalc_intl.ics`, `picocalc_intl.csv` and `picocalc_intl_closed.jsn` are
+  what the PicoCalc writes when that day is closed (`close`: the Finish
+  screen's weight CSV row, `exportIcs` from `main.cpp`, and the committed
+  save). DOS must load, show and write all of them byte for byte.
+
 `tests/test_storage.c` loads them and checks that DOS writes them back byte
 for byte, then edits one through the app. Regenerate them with
 `/tmp/pcfix full|custom FILE` (see the main README).

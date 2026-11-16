@@ -458,10 +458,10 @@ static void sample_state(State *s, unsigned days){
         sprintf(d->note,"Jour %u : \"bien\" \\ fin",i);
         s->next=(uint8_t)((s->next+1)%HISTORY_LENGTH); if(s->count<HISTORY_LENGTH) s->count++;
     }
-    s->today.number=1+days; s->today.flags=0x8001; strcpy(s->today.note,"Café à l'église, très tôt");
-    s->taskCount=2; s->tasks[0].status=TASK_DOING; strcpy(s->tasks[0].name,"Réparer le vélo");
+    s->today.number=1+days; s->today.flags=0x8001; strcpy(s->today.note,"Caf\xc3\xa9 \xc3\xa0 l'\xc3\xa9glise, tr\xc3\xa8s t\xc3\xb4t");
+    s->taskCount=2; s->tasks[0].status=TASK_DOING; strcpy(s->tasks[0].name,"R\xc3\xa9parer le v\xc3\xa9lo");
     s->tasks[1].status=TASK_DONE; strcpy(s->tasks[1].name,"Plan \\ \"B\"");
-    s->reminderCount=1; s->reminders[0].from=DEFAULT_DATE; s->reminders[0].duration=365; strcpy(s->reminders[0].text,"Fête de Noël");
+    s->reminderCount=1; s->reminders[0].from=DEFAULT_DATE; s->reminders[0].duration=365; strcpy(s->reminders[0].text,"F\xc3\xaate de No\xc3\xabl");
 }
 static void check_json_saves(const char *dir){
     static State s, s2, out; static unsigned char store[16384];
@@ -495,16 +495,16 @@ static void check_json_saves(const char *dir){
      * Projet perso 5, Marche 16, Vélo 22, Chess 23). */
     assert(out.activityCount==24 && out.nextActivityId==25 && out.activities[0].id==17 && !strcmp(out.activities[22].fr,"V\xc3\xa9lo"));
     assert(out.today.number==40 && out.today.flags==((1ul<<0)|(1ul<<3)|(1ul<<5)|(1ul<<22)|(1ul<<23)));
-    assert(!strcmp(out.today.note,"Noël en famille, gâteau à l'orange") && out.today.expected==82500 && out.today.actual==-1);
+    assert(!strcmp(out.today.note,"No\xc3\xabl en famille, g\xc3\xa2teau \xc3\xa0 l'orange") && out.today.expected==82500 && out.today.actual==-1);
     assert(out.count==5 && out.next==5);
-    assert(ring(&out,1)->number==36 && ring(&out,1)->flags==((1ul<<0)|(1ul<<16)|(1ul<<22)) && !strcmp(ring(&out,1)->note,"Séance à la piscine, très bien"));
+    assert(ring(&out,1)->number==36 && ring(&out,1)->flags==((1ul<<0)|(1ul<<16)|(1ul<<22)) && !strcmp(ring(&out,1)->note,"S\xc3\xa9" "ance \xc3\xa0 la piscine, tr\xc3\xa8s bien"));
     assert(day_orphan_count(&out,2)==1 && !strcmp(day_orphan(&out,2,0),"Tai-chi") && day_names(2)->count==4);
     assert(ring(&out,2)->flags==((1ul<<2)|(1ul<<16)|(1ul<<23))); /* the frozen "Projet" is no catalog entry now */
     assert(day_orphan_count(&out,3)==1 && !strcmp(day_orphan(&out,3,0),"Projet"));
     assert(ring(&out,3)->flags==((1ul<<0)|(1ul<<9)|(1ul<<16)|(1ul<<21)) && day_orphan_count(&out,4)==0);
-    assert(out.taskCount==3 && out.tasks[0].status==TASK_DOING && !strcmp(out.tasks[0].name,"Réparer le vélo"));
-    assert(!strcmp(out.tasks[1].name,"Écrire à Hélène") && !strcmp(out.tasks[2].name,"Plan \\ \"B\""));
-    assert(out.reminderCount==2 && !strcmp(out.reminders[0].text,"Anniversaire de François") && out.reminders[0].duration==30);
+    assert(out.taskCount==3 && out.tasks[0].status==TASK_DOING && !strcmp(out.tasks[0].name,"R\xc3\xa9parer le v\xc3\xa9lo"));
+    assert(!strcmp(out.tasks[1].name,"\xc3\x89" "crire \xc3\xa0 H\xc3\xa9l\xc3\xa8ne") && !strcmp(out.tasks[2].name,"Plan \\ \"B\""));
+    assert(out.reminderCount==2 && !strcmp(out.reminders[0].text,"Anniversaire de Fran\xc3\xa7ois") && out.reminders[0].duration==30);
     jpath(path,dir,"OUT.JSN");
     assert(jsave_write(path,&out,7,&check));
     n=slurp("tests/fixtures/picocalc_custom.jsn",jbuf,sizeof(jbuf)); n2=slurp(path,jbuf2,sizeof(jbuf2));
@@ -626,13 +626,14 @@ static void check_json_saves(const char *dir){
     assert(save_load(dir,&out,&gen,&active)==LOAD_OK && same_state(&out,&s));
     assert(jsave_write(path,&out,1,&check)); slurp(path,jbuf,sizeof(jbuf));
     assert(strstr(jbuf,"{\"id\":17,\"fr\":\"Sport\",\"en\":\"Sport\"}") && strstr(jbuf,"\"version\":2,"));
-    /* Text CP437 lacks becomes '?'; \u escapes are decoded. */
+    /* Text is kept byte for byte, even what CP437 lacks (CHG06d); \u escapes are decoded to UTF-8. */
     n=slurp(path,jbuf,sizeof(jbuf));
     { char *note=strstr(jbuf,"\"note\":\"Caf"); assert(note);
       insert_after(note,"\"note\":\"","\\u00e9t\xc3\xa9 \xe2\x80\x93 \xe2\x82\xac \xc5\x93 \\ud83d\\ude00 "); }
     resign(jbuf); spit(pa,jbuf,strlen(jbuf));
     assert(save_load(dir,&out,&gen,&active)==LOAD_OK);
-    assert(!strncmp(out.today.note,"été ? ? ? ? Café",strlen("été ? ? ? ? Café")));
+    { static const char want[]="\xc3\xa9t\xc3\xa9 \xe2\x80\x93 \xe2\x82\xac \xc5\x93 \xf0\x9f\x98\x80 Caf\xc3\xa9";
+      assert(!strncmp(out.today.note,want,strlen(want))); }
     /* Field limits as on the PicoCalc: a 33-byte task name is damage. */
     n=slurp(path,jbuf,sizeof(jbuf));
     { char *name=strstr(jbuf,"\"name\":\"R"); assert(name); insert_after(name,"\"name\":\"","0123456789abcdef0123"); }
@@ -857,8 +858,10 @@ static void check_custom_activities(const char *dir){
     /* Too long: 24 characters at most, and 24 UTF-8 bytes (an accent counts twice). */
     app_key(app,'e'); erase(app,4); for(i=0;i<30;i++) app_key(app,'a');
     assert(row_has(hw,9,"24/24 characters")); erase(app,24);
+    /* CHG06d: the count is UTF-8 bytes and typing stops at 24, as for tasks. */
     for(i=0;i<13;i++) app_key(app,plat_host_key(1,130));
-    app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_ACTIVITY_EDIT && any_row(hw,"Name is too long"));
+    assert(row_has(hw,9,"24/24 characters") && row_has(hw,6,"\202\202\202\202\202\202\202\202\202\202\202\202") && !row_has(hw,6,"\202\202\202\202\202\202\202\202\202\202\202\202\202"));
+    app_key(app,'a'); assert(row_has(hw,9,"24/24")); erase(app,1); assert(row_has(hw,9,"22/24"));
     app_key(app,KEY_ESCAPE);
     /* Create in French only, typing an accent: English shows the same name. */
     app_key(app,KEY_ESCAPE); choose_language(app,1);
@@ -997,7 +1000,7 @@ static void check_bios_keys(const char *dir){
     assert(!strcmp(app_state(app)->activities[22].fr,"\xc3\xa9t\xc3\xa9 & \xc3\xa0"));
     app_key(app,KEY_ESCAPE);
     fr_type(app,"\""); assert(app_screen(app)==SCR_KANBAN); app_key(app,'n'); fr_type(app,"a&(_'\"-\202"); app_key(app,KEY_ENTER); /* é is a letter here too (CHG06c) */
-    assert(app_state(app)->taskCount==1 && !strcmp(app_state(app)->tasks[0].name,"a&(_'\"-\202") && app_screen(app)==SCR_KANBAN);
+    assert(app_state(app)->taskCount==1 && !strcmp(app_state(app)->tasks[0].name,"a&(_'\"-\xc3\xa9") && app_screen(app)==SCR_KANBAN);
     app_key(app,KEY_ESCAPE);
     fr_type(app,"\212"); assert(app_screen(app)==SCR_REMINDERS); app_key(app,'n'); assert(app_screen(app)==SCR_REMINDER_EDIT);
     app_key(app,KEY_DOWN); fr_type(app,"&"); /* days field: & is 1 */
@@ -1024,37 +1027,36 @@ static void check_accented_text(const char *dir){
     app_key(app,'3'); app_key(app,'n'); fr_type(app,"\220crire \205 H\202l\212ne, c\223t\202 ma\213s");
     assert(row_has(hw,6,"\220crire \205 H\202l\212ne, c\223t\202 ma\213") && !row_has(hw,6,"ma\213s") && row_has(hw,9,"32/32 caract\212res"));
     app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_KANBAN && any_row(hw,"\220crire \205 H\202l\212ne")); /* the column cuts long names */
-    assert(!strcmp(app_state(app)->tasks[0].name,"\220crire \205 H\202l\212ne, c\223t\202 ma\213"));
-    /* 16 é = 32 bytes; ₧ takes 3 (10 of them and "ab" = 32); a 2-byte letter does not fit in 1 byte. */
+    assert(!strcmp(app_state(app)->tasks[0].name,"\xc3\x89" "crire \xc3\xa0 H\xc3\xa9l\xc3\xa8ne, c\xc3\xb4t\xc3\xa9 ma\xc3\xaf")); /* UTF-8 in memory (CHG06d) */
+    /* 16 é = 32 bytes; ₧ and ƒ are refused (the PicoCalc cannot show them, CHG06d); a 2-byte letter does not fit in 1 byte. */
     app_key(app,'n'); for(i=0;i<17;i++) app_key(app,plat_host_key(1,130));
     assert(strlen(plat_host_row(hw,6))>=16 && row_has(hw,9,"32/32") && !row_has(hw,6,"\202\202\202\202\202\202\202\202\202\202\202\202\202\202\202\202\202"));
     app_key(app,'a'); assert(row_has(hw,9,"32/32")); app_key(app,KEY_ENTER);
-    app_key(app,'n'); for(i=0;i<11;i++) app_key(app,0x9E); type_text(app,"abc"); assert(row_has(hw,9,"32/32")); app_key(app,KEY_ENTER);
+    app_key(app,'n'); app_key(app,0x9E); app_key(app,0x9F); type_text(app,"ab"); app_key(app,0x9E); assert(row_has(hw,9,"2/32") && row_has(hw,6,"ab")); app_key(app,KEY_ENTER);
     app_key(app,'n'); for(i=0;i<30;i++) app_key(app,'x'); app_key(app,0x97); app_key(app,0x88); app_key(app,'y'); assert(row_has(hw,9,"32/32")); app_key(app,KEY_ENTER);
-    app_key(app,'n'); fr_type(app,"\226\203\214\210\211\201\230 \227\207\205\212 \237"); assert(row_has(hw,9,"26/32")); app_key(app,KEY_ENTER);
+    app_key(app,'n'); fr_type(app,"\226\203\214\210\211\201\230 \227\207\205\212 \237"); assert(row_has(hw,9,"24/32")); app_key(app,KEY_ENTER);
     assert(app_state(app)->taskCount==5);
-    for(i=0;i<16;i++){ name[i]=(char)130; } name[16]=0;
+    for(i=0;i<16;i++){ name[2*i]='\xc3'; name[2*i+1]='\xa9'; } name[32]=0;
     assert(!strcmp(app_state(app)->tasks[1].name,name));
-    for(i=0;i<10;i++){ name[i]=(char)0x9E; } strcpy(name+10,"ab");
-    assert(!strcmp(app_state(app)->tasks[2].name,name));
+    assert(!strcmp(app_state(app)->tasks[2].name,"ab"));
     /* Editing an accented name: Backspace takes one letter. */
     app_key(app,KEY_UP); app_key(app,KEY_UP); app_key(app,KEY_UP); app_key(app,KEY_UP); app_key(app,KEY_ENTER);
     assert(app_screen(app)==SCR_TASK_EDIT && row_has(hw,9,"32/32")); erase(app,1); assert(row_has(hw,9,"30/32")); /* ï */
-    fr_type(app,"s"); app_key(app,KEY_ENTER); assert(!strcmp(app_state(app)->tasks[0].name,"\220crire \205 H\202l\212ne, c\223t\202 mas"));
+    fr_type(app,"s"); app_key(app,KEY_ENTER); assert(!strcmp(app_state(app)->tasks[0].name,"\xc3\x89" "crire \xc3\xa0 H\xc3\xa9l\xc3\xa8ne, c\xc3\xb4t\xc3\xa9 mas"));
     app_key(app,KEY_ESCAPE);
     /* Reminder text, same 32-byte limit. */
     app_key(app,'7'); app_key(app,'n'); app_key(app,KEY_DOWN); app_key(app,KEY_DOWN);
     fr_type(app,"F\210te : cr\212me br\226l\202e \205 20h, d\202j\205 !");
     assert(row_has(hw,11,"F\210te : cr\212me br\226l\202e \205 20h, ") && !row_has(hw,11,", d")); /* 32 bytes: the rest does not fit */
-    app_key(app,KEY_ENTER); assert(app_state(app)->reminderCount==1 && !strcmp(app_state(app)->reminders[0].text,"F\210te : cr\212me br\226l\202e \205 20h, "));
+    app_key(app,KEY_ENTER); assert(app_state(app)->reminderCount==1 && !strcmp(app_state(app)->reminders[0].text,"F\xc3\xaate : cr\xc3\xa8me br\xc3\xbbl\xc3\xa9" "e \xc3\xa0 20h, "));
     assert(any_row(hw,"F\210te : cr\212me br\226l\202e"));
     app_key(app,KEY_ESCAPE); app_flush_save(app);
     /* The save holds UTF-8, every byte of it (no cut at 32 bytes). */
     both_saves(dir,jbuf,sizeof(jbuf));
     assert(strstr(jbuf,"\"name\":\"\xc3\x89" "crire \xc3\xa0 H\xc3\xa9l\xc3\xa8ne, c\xc3\xb4t\xc3\xa9 mas\"}"));
     assert(strstr(jbuf,"\"name\":\"\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\"}"));
-    assert(strstr(jbuf,"\"name\":\"\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7" "ab\"}"));
-    assert(strstr(jbuf,"xxxxxxx\xc3\xb9\"}") && strstr(jbuf,"\"name\":\"\xc3\xbb\xc3\xa2\xc3\xae\xc3\xaa\xc3\xab\xc3\xbc\xc3\xbf \xc3\xb9\xc3\xa7\xc3\xa0\xc3\xa8 \xc6\x92\"}"));
+    assert(strstr(jbuf,"\"name\":\"ab\"}"));
+    assert(strstr(jbuf,"xxxxxxx\xc3\xb9\"}") && strstr(jbuf,"\"name\":\"\xc3\xbb\xc3\xa2\xc3\xae\xc3\xaa\xc3\xab\xc3\xbc\xc3\xbf \xc3\xb9\xc3\xa7\xc3\xa0\xc3\xa8 \"}"));
     assert(strstr(jbuf,"\"text\":\"F\xc3\xaate : cr\xc3\xa8me br\xc3\xbbl\xc3\xa9" "e \xc3\xa0 20h, \"}"));
     assert(save_load(dir,&out,&gen,&active)==LOAD_OK && out.taskCount==5 && !strcmp(out.tasks[1].name,app_state(app)->tasks[1].name)
         && !strcmp(out.reminders[0].text,app_state(app)->reminders[0].text));
@@ -1063,12 +1065,13 @@ static void check_accented_text(const char *dir){
      * it, shows the letters, and writes the same bytes. */
     fresh_dir(dir); jpath(path,dir,"SAVE_A.JSN"); copy_file("tests/fixtures/picocalc_accents.jsn",path);
     assert(save_load(dir,&out,&gen,&active)==LOAD_OK && out.taskCount==5 && out.reminderCount==1);
-    assert(!strcmp(out.tasks[0].name,"\220crire \205 H\202l\212ne, c\223t\202 mas") && !strcmp(out.tasks[2].name,name));
+    assert(!strcmp(out.tasks[0].name,"\xc3\x89" "crire \xc3\xa0 H\xc3\xa9l\xc3\xa8ne, c\xc3\xb4t\xc3\xa9 mas") && !strcmp(out.tasks[1].name,name));
+    assert(!strcmp(out.tasks[2].name,"\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7\xe2\x82\xa7" "ab")); /* PicoCalc text: kept even if typing refuses it now */
     jpath(path,dir,"OUT.JSN"); assert(jsave_write(path,&out,gen,&check));
     { size_t n=slurp("tests/fixtures/picocalc_accents.jsn",jbuf,sizeof(jbuf)), n2=slurp(path,jbuf2,sizeof(jbuf2)); assert(n==n2 && !memcmp(jbuf,jbuf2,n)); }
     /* ICS: as on the PicoCalc, tasks and reminders are not exported; the
      * note and activity names are UTF-8. */
-    { static char ics[2048]; strcpy(out.today.note,"No\211l \205 la for\210t");
+    { static char ics[2048]; strcpy(out.today.note,"No\xc3\xabl \xc3\xa0 la for\xc3\xaat");
       assert(build_ics(&out.today,&out,0,0,LANG_FR,ics,sizeof(ics)));
       assert(strstr(ics,"\\NNote: No\xc3\xabl \xc3\xa0 la for\xc3\xaat\r\n") && !strstr(ics,"crire") && !strstr(ics,"te : cr")); }
     hw=plat_host_create(0); app_init(app,hw); app_start(app);
@@ -1088,6 +1091,61 @@ static void check_accented_text(const char *dir){
     assert(strstr(jbuf,"\"name\":\"Fix the bike \xc3\xa7" "a\"}"));
     fresh_dir(dir); strcpy(s.tasks[0].name,"Fix \202"); write_bin(dir,"SAVE_A.BIN",&s,3);
     assert(save_load(dir,&out,&gen,&active)!=LOAD_MIGRATED);
+}
+
+/* LPS-DOS-115-CHG06d: files are the same bytes on the PicoCalc, DOS and the
+ * console. tests/fixtures/picocalc_intl.* come from the PicoCalc code
+ * (tools/picocalc_fixture.cpp intl / close): text CP437 lacks (œ, À, €,
+ * emoji) in catalog names, a frozen day name, notes, tasks and reminders. */
+static int same_file(const char *a, const char *b){
+    size_t n=slurp(a,jbuf,sizeof(jbuf)), n2=slurp(b,jbuf2,sizeof(jbuf2)); return n==n2 && !memcmp(jbuf,jbuf2,n);
+}
+static void check_intl_interop(const char *dir){
+    static unsigned char store[16384]; static State out; App *app=(App*)store; Platform *hw;
+    uint32_t gen=0, check=0; int active=-1; char path[256], pa[256], pb[256];
+    /* JSON: every byte kept in memory, written back the same. */
+    fresh_dir(dir); jpath(pa,dir,"SAVE_A.JSN"); jpath(pb,dir,"SAVE_B.JSN"); copy_file("tests/fixtures/picocalc_intl.jsn",pa);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen==12 && active==0);
+    assert(!strcmp(out.activities[0].fr,"Marche \xe2\x82\xac \xf0\x9f\x99\x82") && !strcmp(out.activities[1].en,"\xc5\x92uvre \xc3\x80 faire"));
+    assert(!strcmp(out.activities[22].fr,"\xc5\x92ufs; c\xc5\x93ur, \xc3\x80 \xf0\x9f\x8d\xb3") && !strcmp(out.activities[22].en,"Eggs \xf0\x9f\x8d\xb3"));
+    assert(day_orphan_count(&out,2)==1 && !strcmp(day_orphan(&out,2,0),"P\xc3\xa2tes \xf0\x9f\x8d\x9d \xc3\x80 l'\xc5\x93il"));
+    assert(!strcmp(out.today.note,"\xc5\x92uvre du jour, \xc3\x80 10 \xe2\x82\xac \xf0\x9f\x98\x80; \xc2\xab bien \xc2\xbb\\N fin"));
+    assert(!strcmp(ring(&out,1)->note,"C\xc5\x93ur: \xc3\x80 5 \xe2\x82\xac \xf0\x9f\x99\x82, \"ok\" \\ fin; oui"));
+    assert(out.taskCount==3 && !strcmp(out.tasks[0].name,"Acheter \xc5\x93ufs \xc3\x80 3 \xe2\x82\xac \xf0\x9f\x99\x82") && !strcmp(out.tasks[1].name,"\xc5\x92uvre, \xf0\x9f\x98\x80 \"x\" \\ y"));
+    assert(out.reminderCount==2 && !strcmp(out.reminders[0].text,"F\xc3\xaate \xf0\x9f\x8e\x89 \xc3\x80 20h, 15 \xe2\x82\xac") && !strcmp(out.reminders[1].text,"C\xc5\x93ur \xc5\x93uvre \xc5\x92\xc3\x80\xe2\x82\xac"));
+    jpath(path,dir,"OUT.JSN"); assert(jsave_write(path,&out,gen,&check) && same_file("tests/fixtures/picocalc_intl.jsn",path));
+    /* Close the day on DOS: the weight CSV, the ICS and the next save are the
+     * PicoCalc's bytes (its file names differ: EXPORT\YYYYMMDD.ICS, CHG02c). */
+    hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    if(app_screen(app)==SCR_REMINDER_POPUP){ assert(any_row(hw,"F\210te ? ? 20h, 15 ?")); app_key(app,KEY_ENTER); }
+    assert(app_screen(app)==SCR_HOME && row_has(hw,12,"F\210te ? ? 20h, 15 ?") && row_has(hw,13,"C?ur ?uvre ???"));
+    app_key(app,'9'); assert(app_screen(app)==SCR_FINISH); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD);
+    jpath(path,dir,"EXPORT\\20261115.ICS"); /* write_ics_file joins with a DOS backslash */ assert(same_file("tests/fixtures/picocalc_intl.ics",path));
+    jpath(path,dir,"WEIGHTS\\2026.csv"); assert(same_file("tests/fixtures/picocalc_intl.csv",path));
+    assert(same_file("tests/fixtures/picocalc_intl_closed.jsn",pb));
+    /* On screen CP437 shows '?' for what it lacks; the bytes stay. */
+    app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_HOME);
+    app_key(app,'1'); assert(cell_is(hw,5,0,"1 [ ] Marche ? ?") && row_has(hw,11,"  [ ] ?ufs; c?ur, ? ?"));
+    app_key(app,KEY_ESCAPE); app_key(app,'3'); assert(any_row(hw,"Acheter ?ufs ? 3 ? ?"));
+    /* Edits that change nothing leave the bytes alone: open and save a task,
+     * a reminder and an activity name. */
+    app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_TASK_EDIT && row_has(hw,6,"Acheter ?ufs ? 3 ? ?") && row_has(hw,9,"27/32"));
+    app_key(app,KEY_ENTER); app_key(app,KEY_ESCAPE);
+    app_key(app,'7'); app_key(app,KEY_DOWN); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REMINDER_EDIT && row_has(hw,11,"C?ur ?uvre ???"));
+    app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REMINDERS); app_key(app,KEY_ESCAPE);
+    app_key(app,'1'); app_key(app,'e'); assert(row_has(hw,6,"Marche ? ?") && row_has(hw,9,"15/24")); app_key(app,KEY_ENTER); app_key(app,KEY_ESCAPE);
+    app_flush_save(app);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && gen>13);
+    jpath(path,dir,"OUT.JSN"); assert(jsave_write(path,&out,13,&check) && same_file("tests/fixtures/picocalc_intl_closed.jsn",path)); /* nothing moved */
+    assert(!strcmp(out.tasks[0].name,"Acheter \xc5\x93ufs \xc3\x80 3 \xe2\x82\xac \xf0\x9f\x99\x82") && !strcmp(out.reminders[1].text,"C\xc5\x93ur \xc5\x93uvre \xc5\x92\xc3\x80\xe2\x82\xac"));
+    assert(!strcmp(out.activities[0].fr,"Marche \xe2\x82\xac \xf0\x9f\x99\x82"));
+    /* Backspace takes a whole UTF-8 character: the emoji (4 bytes), then €. */
+    app_key(app,'3'); app_key(app,KEY_ENTER); erase(app,1); assert(row_has(hw,9,"23/32") && row_has(hw,6,"Acheter ?ufs ? 3 ? "));
+    erase(app,2); assert(row_has(hw,9,"19/32")); app_key(app,0x80); app_key(app,KEY_ENTER); /* + Ç */
+    assert(!strcmp(app_state(app)->tasks[0].name,"Acheter \xc5\x93ufs \xc3\x80 3 \xc3\x87"));
+    app_key(app,KEY_ESCAPE); app_flush_save(app);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && !strcmp(out.tasks[0].name,"Acheter \xc5\x93ufs \xc3\x80 3 \xc3\x87"));
+    /* The PicoCalc reads what DOS wrote: checked with tools/picocalc_fixture check (README). */
 }
 
 int main(void){
@@ -1262,9 +1320,10 @@ int main(void){
     check_fast_rematch("tests/fixtures/picocalc_custom.jsn");
     check_bios_keys(tmpdir);
     check_accented_text(tmpdir);
+    check_intl_interop(tmpdir);
     assert(orphan_hits>0); /* some edit took a name history had stored */
 
-    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback, unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture), fixture decode (%u captures)\n", 0);
+    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback, unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture), UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }
