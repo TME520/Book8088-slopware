@@ -121,6 +121,7 @@ test: tests/test_storage ROSARY.DAT MEALS.DAT MEALSCGA.DAT
 	./tests/test_storage
 	cmp MEALS.DAT ../MEALS.DAT
 	cmp MEALSCGA.DAT ../MEALSCGA.DAT
+	python3 tools/checkdocs.py
 
 tests/test_storage: $(GEN)/test_storage.c $(COMMON_OBJS) $(ROSARY_SRC) $(GEN)/plat_host.c $(HEADERS)
 	$(HOST_CC) $(HOST_CFLAGS) -o tests/test_storage $(GEN)/test_storage.c $(COMMON_OBJS) $(ROSARY_SRC) $(GEN)/plat_host.c

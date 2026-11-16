@@ -243,13 +243,40 @@ On EGA a played card turns grey through the palette registers, without moving a 
 
 ![Meal Planner, CGA, played card in French](captures/11-meal-planner-cga-played-fr.png)
 
+### Final validation (LPS-DOS-115-CHG16)
+
+The last CGA change. A full regression run with the root files of this commit, in DOSBox Staging at 8088 speed (`cputype=8086`, `cycles=fixed 300`):
+
+- **`machine=ega`:** every Home entry, Config (language, save), TAB/SPACE, the Meal Planner, Close the day and the archive. Captures 01–09 retaken from a fresh save are **pixel-identical** to the ones in `captures/`.
+- **`machine=cga`:** the text screens in 80×25, the planner with pictures, a played card and putting it back. Captures 10–11 are pixel-identical too.
+- **`machine=hercules`:** text screens and the text-mode planner (*No EGA/CGA colour screen: Meal Planner in text mode*). Play, TAB and Esc all work, and `EXPORT\MP*.CSV` is written.
+- **PicoCalc round trip**, checked with the PicoCalc v1.15 code built on the host (`tools/picocalc_fixture.cpp`):
+  - A PicoCalc save (`picocalc_custom.jsn`) was opened on DOS, edited (an activity, a card) and saved. The PicoCalc reader accepts the DOS save and writes it back byte for byte; `homeHidden`, custom activities and the meal deck are kept.
+  - DOS's `MP*.CSV` matches the PicoCalc's.
+  - Closing a day on DOS writes the same ICS, weights CSV and JSON save as the PicoCalc closing the same day.
+- **Reference times** (the timer ticks every 55 ms; averages over several keys):
+
+  | Action | EGA | CGA | Hercules (text) |
+  |---|---|---|---|
+  | Start-up (short save) to Home | 0.77 s | 0.77 s | 0.72 s |
+  | Home, Down | 0.17 s | 0.17 s | 0.16 s |
+  | Activities, tick | 0.11 s | 0.11 s | 0.10 s |
+  | Activities, Esc (save) | 0.72 s | 0.66 s | 0.66 s |
+  | Space, open the planner | 0.50 s | 0.55 s | 0.17 s |
+  | Card not seen yet / already seen | 0.24 / 0.14 s | 0.23 / 0.21 s | 0.09 s |
+  | Enter, play / put back | 0.11 / 0.11 s | 0.22 / 0.28 s | 0.11 s |
+  | Moving onto a played card | 0.22 s | 0.33 s | 0.11 s |
+  | TAB → Config / → planner | 0.17 / 0.33 s | 0.17 / 0.39 s | 0.11 / 0.11 s |
+  | Esc, planner → Home (save + CSV) | 0.72 s | 0.72 s | 0.66 s |
+
 ## Requirements
 
 - MS-DOS 3.3+ / FreeDOS / MS-DOS 7.x (FAT12/16)
 - Intel 8088 or compatible (EXE built with Open Watcom `-0`)
-- ~360 KB free disk for `LPSCOMP.EXE` (~104 KB), `ROSARY.DAT` (~10 KB), `MEALS.DAT` (~196 KB) and `MEALSCGA.DAT` (~49 KB); the data folder grows with history (each JSON save is up to about 10 KB)
-- Colour text (CGA/EGA/VGA) for palettes; mono still readable
-- EGA (128 KB or more) or VGA in colour for the Meal Planner pictures; a colour CGA gets the CGA planner (LPS-DOS-115-CHG13) with the `MEALSCGA.DAT` pictures (LPS-DOS-115-CHG14); otherwise the planner runs in text mode
+- ~360 KB free disk for `LPSCOMP.EXE` (~104 KB), `ROSARY.DAT` (~10 KB), `MEALS.DAT` (~195 KB) and `MEALSCGA.DAT` (~49 KB); the data folder grows with history (each JSON save is up to about 10 KB)
+- Colour text (CGA/EGA/VGA) for palettes; mono (MDA/Hercules) still readable
+- Meal Planner pictures: EGA (128 KB or more) or VGA in colour, with `MEALS.DAT`; or a colour CGA, such as the Book 8088's, with `MEALSCGA.DAT` (320×200, 4 colours, LPS-DOS-115-CHG13/14/15); on a mono screen the planner runs in text mode
+- 640 KB conventional memory recommended; the Meal Planner's pictures are read on demand into far memory and freed when it closes
 - Python 3 to build `MEALS.DAT` and `MEALSCGA.DAT` (`make meals`, `make mealscga`, `make test`)
 - Open Watcom C/C++ (v2) to build; gcc to run the host tests
 
@@ -275,7 +302,7 @@ On EGA a played card turns grey through the palette registers, without moving a 
 | Dual A/B JSON save (`SAVE_A/B.JSN`, schema 2) + CRC | Yes (read **and** write, PicoCalc-compatible) |
 | `SAVE_A/B.BIN` v1–v6 migration | Yes (read once; `.BIN` files left untouched) |
 | ICS + weights CSV byte-compatible | Yes |
-| Meal Planner (16 cards, Space, card pictures) | Yes (LPS-DOS-115-CHG07, EGA graphics; CGA 320×200, LPS-DOS-115-CHG13, with dithered pictures from LPS-DOS-115-CHG14; text mode otherwise) |
+| Meal Planner (16 cards, Space, card pictures, played cards greyed) | Yes (LPS-DOS-115-CHG07, EGA graphics; CGA 320×200, LPS-DOS-115-CHG13, with dithered pictures from LPS-DOS-115-CHG14 and greyed played cards from LPS-DOS-115-CHG15; text mode on mono screens) |
 | Meal Planner CSV `EXPORT\MPYYMMDD.CSV` byte-compatible | Yes (LPS-DOS-115-CHG08, same name as the PicoCalc) |
 
 ## Build
@@ -332,7 +359,9 @@ wcl -0 -bt=dos -ml -zt256 -ox -fpc -k4096 -dLPS_DOS -i=$G -fe=LPSCOMP.EXE \
 ### Host tests (gcc, no DOS)
 
 `make test` builds `tools/mkrosary`, `ROSARY.DAT`, `MEALS.DAT` and `MEALSCGA.DAT` (and
-checks that `MEALS.DAT` and `MEALSCGA.DAT` match the copies at the repository root), then
+checks that `MEALS.DAT` and `MEALSCGA.DAT` match the copies at the repository root, and with
+`tools/checkdocs.py` that the READMEs, `BOOK8088-TEST.md` and `dosbox.conf` list the files
+to copy with the root files' sizes, LPS-DOS-115-CHG16), then
 `tests/test_storage` from the CP437 copies, and runs it from this directory so
 it finds `tests/fixtures/v12_payload.bin`, the PicoCalc JSON saves
 `tests/fixtures/picocalc_*.jsn` and `ROSARY.DAT`. The JSON tests cover the
@@ -488,11 +517,12 @@ PicoCalc-edited list can have, it falls back to the full match.
 
 ### What to try on the Book
 
-1. Copy **`HELLO.EXE`** and **`LPSCOMP.EXE`** from the repository root to the HDD or a floppy.
+1. Copy **`HELLO.EXE`**, **`LPSCOMP.EXE`**, **`ROSARY.DAT`**, **`MEALS.DAT`** and **`MEALSCGA.DAT`** from the repository root to one directory on the HDD or a floppy.
 2. Run `HELLO` — you must see `LPS COMPANION - HELLO` and video info; any key quits.
 3. Run `LPSCOMP` or `LPSCOMP C:\LPS` — you should briefly see the banner, then the home screen.
 4. Quit with **Q** from Home.
 5. If the banner appears but the UI does not, note whether the machine is mono or colour and open an issue.
+6. Then work through the full checklist in [`BOOK8088-TEST.md`](BOOK8088-TEST.md) (French, with a short English version), which has the DOSBox reference times for EGA and CGA.
 
 ![DOSBox 8086 home](captures/07-dosbox-8086-home.png)
 
@@ -521,7 +551,7 @@ C:
 LPSCOMP.EXE C:\LPS
 ```
 
-Use `machine=ega` and `cputype=8086` (or `8088`) to match the Book 8088.
+Use `machine=cga` and `cputype=8086` (or `8088`) with `cycles=fixed 300` to match the Book 8088 (CGA); `machine=ega` shows the EGA Meal Planner and `machine=hercules` the text-mode one.
 DOSBox 0.74 cannot set `cputype=8086`; use DOSBox-X or DOSBox Staging.
 
 ## Keys (same ideas as Companion / LPS Console)
@@ -604,11 +634,12 @@ byte-compatible with the firmware.
 | `src/cgafont.c` | 8×8 CP437 font for CGA graphics (2 KB) |
 | `tools/mkmeals.py` | Writes `MEALS.DAT` from `assets/meal_deck_sheet*.png` |
 | `tools/mkmealscga.py` | Writes `MEALSCGA.DAT` (CGA pictures, Atkinson dithering) from the same sheets (LPS-DOS-115-CHG14) |
+| `tools/checkdocs.py` | `make test`: the files to copy and their sizes in the docs match the root files (LPS-DOS-115-CHG16) |
 | `assets/meal_deck_sheet*.png` | The PicoCalc's Meal Planner card illustrations |
 | `src/plat_dos.c` | BIOS video/keyboard/timer; EGA/CGA detection and switch for the Meal Planner |
 | `src/plat_host.c` | Linux host for tests |
 | `src/hello.c` | `HELLO.EXE` BIOS smoke test |
-| `tests/test_storage.c` | Host encode/decode, ICS, CSV, A/B, `ROSARY.DAT`, v1.2 fixture, French CP437 screens, JSON saves, activities, custom activities |
+| `tests/test_storage.c` | Host encode/decode, ICS, CSV, A/B, `ROSARY.DAT`, v1.2 fixture, French CP437 screens, JSON saves, activities, custom activities, `MEALS.DAT`/`MEALSCGA.DAT`, Meal Planner and its CSV, TAB/SPACE, CGA 40-column fold and played-card mask |
 | `tests/fixtures/v12_payload.bin` | Synthetic Companion v1.2 payload |
 | `tests/fixtures/picocalc_*.jsn` | JSON saves written by the PicoCalc's own code |
 | `tests/fixtures/mealcsv/MP*.CSV` | Meal Planner CSV files written by the PicoCalc's own code |
@@ -624,7 +655,7 @@ byte-compatible with the firmware.
 
 ## Captures
 
-PNG screenshots under `captures/`, all raw 640×350 DOSBox grabs of v1.15 at 8088 speed (`machine=ega`, `cputype=8086`, `cycles=fixed 300`, LPS-DOS-115-CHG12): Home EN/FR, Activities, Kanban, Rosary mode, Timer, a DOSBox Home grab and the EGA Meal Planner (EN, and FR with a played card); since LPS-DOS-115-CHG13 also two raw 320×200 grabs of the CGA planner (`machine=cga`), retaken with the `MEALSCGA.DAT` pictures in LPS-DOS-115-CHG14: `10-meal-planner-cga.png` (EN, Blue theme, Coffee (Latte)) and `11-meal-planner-cga-played-fr.png` (FR, Green theme, Biscuit played, greyed out as in LPS-DOS-115-CHG15). Text dumps are not stored; `make captures` rewrites
+PNG screenshots under `captures/`, raw DOSBox grabs of v1.15 at 8088 speed (`cputype=8086`, `cycles=fixed 300`), checked pixel for pixel against the final EXE in LPS-DOS-115-CHG16. 01–09 are 640×350 (`machine=ega`, LPS-DOS-115-CHG12): Home EN/FR, Activities, Kanban, Rosary mode, Timer, a DOSBox Home grab and the EGA Meal Planner (EN, and FR with a played card); since LPS-DOS-115-CHG13 also two raw 320×200 grabs of the CGA planner (`machine=cga`), retaken with the `MEALSCGA.DAT` pictures in LPS-DOS-115-CHG14: `10-meal-planner-cga.png` (EN, Blue theme, Coffee (Latte)) and `11-meal-planner-cga-played-fr.png` (FR, Green theme, Biscuit played, greyed out as in LPS-DOS-115-CHG15). Text dumps are not stored; `make captures` rewrites
 `captures/*.txt` from the host UI driver.
 
 ---
@@ -850,6 +881,68 @@ En EGA, une carte jouée passe en gris par les registres de palette, sans touche
 
   Les autres touches sont comme en CHG14.
 
+### Validation finale (LPS-DOS-115-CHG16)
+
+Dernière modification CGA. Passe de non-régression complète avec les fichiers racine de ce commit, sous DOSBox Staging à la vitesse d'un 8088 (`cputype=8086`, `cycles=fixed 300`) :
+
+- **`machine=ega` :** toutes les entrées de l'accueil, Config (langue, enregistrer), TAB/ESPACE, le planificateur, Terminer le jour et l'archive. Les captures 01 à 09 refaites depuis une sauvegarde neuve sont **identiques au pixel près** à celles de `captures/`.
+- **`machine=cga` :** les écrans texte en 80×25, le planificateur avec images, une carte jouée puis remise. Les captures 10 et 11 sont identiques elles aussi.
+- **`machine=hercules` :** écrans texte et planificateur en mode texte (*No EGA/CGA colour screen: Meal Planner in text mode*). Jouer, TAB et Échap marchent, et `EXPORT\MP*.CSV` est écrit.
+- **Aller-retour PicoCalc**, vérifié avec le code PicoCalc v1.15 compilé sur l'hôte (`tools/picocalc_fixture.cpp`) :
+  - Une sauvegarde PicoCalc (`picocalc_custom.jsn`) a été ouverte sous DOS, modifiée (une activité, une carte) et enregistrée. Le lecteur PicoCalc accepte la sauvegarde DOS et la réécrit octet pour octet ; `homeHidden`, les activités personnalisées et le paquet de repas sont conservés.
+  - Le `MP*.CSV` de DOS est identique à celui de la PicoCalc.
+  - Terminer le jour sous DOS écrit le même ICS, le même CSV des poids et la même sauvegarde JSON que la PicoCalc pour le même jour.
+- **Temps de référence** (l'horloge avance par pas de 55 ms ; moyennes sur plusieurs touches) :
+
+  | Action | EGA | CGA | Hercules (texte) |
+  |---|---|---|---|
+  | Démarrage (petite sauvegarde) jusqu'à l'accueil | 0,77 s | 0,77 s | 0,72 s |
+  | Accueil, Bas | 0,17 s | 0,17 s | 0,16 s |
+  | Activités, cocher | 0,11 s | 0,11 s | 0,10 s |
+  | Activités, Échap (sauvegarde) | 0,72 s | 0,66 s | 0,66 s |
+  | Espace, ouvrir le planificateur | 0,50 s | 0,55 s | 0,17 s |
+  | Carte pas encore vue / déjà vue | 0,24 / 0,14 s | 0,23 / 0,21 s | 0,09 s |
+  | Entrée, jouer / remettre | 0,11 / 0,11 s | 0,22 / 0,28 s | 0,11 s |
+  | Aller sur une carte jouée | 0,22 s | 0,33 s | 0,11 s |
+  | TAB → Config / → planificateur | 0,17 / 0,33 s | 0,17 / 0,39 s | 0,11 / 0,11 s |
+  | Échap, planificateur → accueil (sauvegarde + CSV) | 0,72 s | 0,72 s | 0,66 s |
+
+## Configuration requise
+
+- MS-DOS 3.3+ / FreeDOS / MS-DOS 7.x (FAT12/16)
+- Intel 8088 ou compatible (EXE compilé avec Open Watcom `-0`)
+- ~360 Ko libres sur le disque pour `LPSCOMP.EXE` (~104 Ko), `ROSARY.DAT` (~10 Ko), `MEALS.DAT` (~195 Ko) et `MEALSCGA.DAT` (~49 Ko) ; le dossier de données grandit avec l'historique (une sauvegarde JSON fait 10 Ko au plus environ)
+- Texte couleur (CGA/EGA/VGA) pour les palettes ; un écran mono (MDA/Hercules) reste lisible
+- Images du planificateur : EGA (128 Ko ou plus) ou VGA couleur, avec `MEALS.DAT` ; ou CGA couleur, comme celle du Book 8088, avec `MEALSCGA.DAT` (320×200, 4 couleurs, LPS-DOS-115-CHG13/14/15) ; sur écran mono, le planificateur passe en mode texte
+- 640 Ko de mémoire conventionnelle conseillés ; les images du planificateur sont lues à la demande en mémoire lointaine et libérées à sa fermeture
+- Python 3 pour construire `MEALS.DAT` et `MEALSCGA.DAT` (`make meals`, `make mealscga`, `make test`)
+- Open Watcom C/C++ (v2) pour compiler ; gcc pour les tests sur l'hôte
+
+## Parité des fonctions (Companion v1.15)
+
+| Fonction | État |
+|---|---|
+| Saisie de la date (2000–2099) | Oui |
+| Activités : 22 par défaut, catalogue de 30 au plus lu dans la sauvegarde, 3 colonnes | Oui (LPS-DOS-115-CHG05) |
+| Activités personnalisées : E renommer, N nouvelle, Suppr supprimer, F4/F5 déplacer | Oui (LPS-DOS-115-CHG06) |
+| Bloc-notes | Retiré, comme en v1.12 (anciennes notes gardées dans SAVE et ICS) |
+| Poids attendu / mesuré | Oui |
+| Kanban 24 tâches A FAIRE / EN COURS / FINI | Oui |
+| Rosaire chrétien (4 modes, FR/EN) | Oui (accents français en CP437) |
+| Revue journalière | Oui |
+| Config langue EN/FR + 5 palettes, ouverte par TAB | Oui (attributs texte ; LPS-DOS-115-CHG10) |
+| Entrées d'accueil affichées / masquées (Config > Activités, `"homeHidden"`) | Oui (LPS-DOS-115-CHG10/CHG11) |
+| TAB/ESPACE depuis tous les écrans (Config, planificateur) | Oui (LPS-DOS-115-CHG09) |
+| 3 rappels | Oui |
+| Minuteur 5/30/60, touches 1 à 3 (horloge BIOS) | Oui |
+| Terminer le jour (XP et souvenirs masqués, comme en v1.12) | Oui |
+| Historique de 31 jours ←/→ | Oui |
+| Double sauvegarde JSON A/B (`SAVE_A/B.JSN`, schéma 2) + CRC | Oui (lecture **et** écriture, compatible PicoCalc) |
+| Migration `SAVE_A/B.BIN` v1 à v6 | Oui (lus une fois ; les `.BIN` restent intacts) |
+| ICS + CSV des poids identiques octet pour octet | Oui |
+| Planificateur de repas (16 cartes, Espace, images, cartes jouées grisées) | Oui (LPS-DOS-115-CHG07, graphique EGA ; CGA 320×200, LPS-DOS-115-CHG13, images tramées depuis LPS-DOS-115-CHG14, cartes jouées grisées depuis LPS-DOS-115-CHG15 ; mode texte sur écran mono) |
+| CSV du planificateur `EXPORT\MPYYMMDD.CSV` identique octet pour octet | Oui (LPS-DOS-115-CHG08, même nom que sur la PicoCalc) |
+
 ## Book 8088 / materiel reel
 
 Premier essai Book 8088 : ecran vide + curseur. Cause : **pile DOS 2 Ko** trop
@@ -914,7 +1007,7 @@ make rosary   # ROSARY.DAT (textes du rosaire)
 make meals    # MEALS.DAT (images du planificateur de repas, python3)
 make mealscga # MEALSCGA.DAT (les memes images pour le CGA, python3)
 make hello    # HELLO.EXE
-make test     # tests gcc, sans Watcom
+make test     # tests gcc, sans Watcom ; verifie aussi la liste et les tailles des fichiers dans la doc
 ```
 
 ## Utilisation
@@ -932,11 +1025,11 @@ colonne seulement). LPS-DOS-115-CHG06 : **E** renommer, **N** nouvelle,
 (planificateur) et **Tab** (Config) marchent depuis tous les ecrans sauf les
 saisies et les confirmations, et reviennent a l'ecran de depart.
 
-DOSBox-X / DOSBox Staging (`cputype=8086`, `machine=ega`) : copier les EXE, `ROSARY.DAT`, `MEALS.DAT` et `MEALSCGA.DAT` de la racine ici, puis `dosbox-x -conf dosbox.conf`.
+DOSBox-X / DOSBox Staging (`cputype=8086`, `cycles=fixed 300` ; `machine=cga` comme le Book 8088, `machine=ega` pour le planificateur EGA, `machine=hercules` pour le mode texte) : copier les EXE, `ROSARY.DAT`, `MEALS.DAT` et `MEALSCGA.DAT` de la racine ici, puis `dosbox-x -conf dosbox.conf`.
 
 ## Empreinte
 
-`LPSCOMP.EXE` fait environ **104 Ko** (modele large, 8086, pile 4 Ko), `ROSARY.DAT` environ **10 Ko**, `MEALS.DAT` environ **196 Ko** et `MEALSCGA.DAT` environ **49 Ko**. `HELLO.EXE` ~3 Ko.
+`LPSCOMP.EXE` fait environ **104 Ko** (modele large, 8086, pile 4 Ko), `ROSARY.DAT` environ **10 Ko**, `MEALS.DAT` environ **195 Ko** et `MEALSCGA.DAT` environ **49 Ko**. `HELLO.EXE` ~3 Ko.
 
 Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) passe d'environ 63 Ko a environ 14 Ko (17,3 Ko avec LPS-DOS-115-CHG06d, 18,5 Ko avec le planificateur EGA de LPS-DOS-115-CHG07, 19,1 Ko avec le planificateur CGA de LPS-DOS-115-CHG13, 19,5 Ko avec le lecteur de MEALSCGA.DAT de LPS-DOS-115-CHG14 (inchange avec la carte jouee CGA de LPS-DOS-115-CHG15), dont les images restent dans `MEALS.DAT` et la memoire lointaine) : les textes du rosaire sont dans `ROSARY.DAT`, charge en memoire lointaine a l'ouverture du rosaire, et les gros tampons (copies de `State`, sauvegarde, exports ICS/CSV) sont alloues en memoire lointaine au demarrage. Un `ROSARY.DAT` absent ou abime affiche un message, sans plantage.
 
@@ -958,3 +1051,10 @@ Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) p
 - Sauvegarde ecrite en quittant un ecran, en confirmant Date/Poids/Config, en
   cloturant le jour ou en quittant (**Q**), pas a chaque modification ; apres
   l'ecriture, DOS verifie le CRC-32 seulement, sans tout relire (vitesse 8088).
+
+## Captures
+
+Captures PNG dans `captures/`, prises brutes sous DOSBox de la v1.15 à la vitesse d'un 8088 (`cputype=8086`, `cycles=fixed 300`), vérifiées au pixel près avec l'EXE final dans LPS-DOS-115-CHG16 :
+
+- 01 à 09 : 640×350 (`machine=ega`) : accueil EN/FR, Activités, Kanban, mode du rosaire, minuteur, accueil sous DOSBox, planificateur EGA (EN, et FR avec une carte jouée).
+- 10 et 11 : 320×200 (`machine=cga`) : `10-meal-planner-cga.png` (EN, thème Bleu, Coffee (Latte)) et `11-meal-planner-cga-played-fr.png` (FR, thème Vert, Biscuit joué et grisé).
