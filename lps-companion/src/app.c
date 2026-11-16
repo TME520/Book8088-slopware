@@ -50,8 +50,20 @@ struct App {
      * platform draws it in graphics (MEALS_OK) or why not (text card). */
     unsigned mealCursor;
     int mealGraphics;
+    /* LPS-DOS-115-CHG09 (PicoCalc LPS-115-CHG02): TAB opens Config and SPACE
+     * the Meal Planner from any screen of today that is not a text entry or a
+     * confirmation. Each overlay keeps one return point (screen and cursor),
+     * no stack; Config may open over the planner, never the other way round.
+     * The timer counts on behind them. mealOpen: the planner's pictures are
+     * held (from opening the planner until it is left, Config over it
+     * included). */
+    ReturnPoint configReturn, mealReturn;
+    int timerActive;
+    int mealOpen;
 };
 
+static int in_config(int s){ return s==SCR_CONFIG||s==SCR_LANGUAGE||s==SCR_COLORS; }
+static int is_overlay(int s){ return in_config(s)||s==SCR_MEAL_PLANNER; }
 static const char *tr(const App *a, const char *en, const char *fr){
     return a->state.language==LANG_FR?fr:en;
 }
@@ -64,7 +76,7 @@ static void go(App *a, int s);
 static void start_timer(App *a, unsigned option){
     static const unsigned minutes[3]={5,30,60};
     a->timerRemaining=(lps_tick_t)minutes[option]*60000ul;
-    a->timerLast=a->timerNow; a->timerPaused=0;
+    a->timerLast=a->timerNow; a->timerPaused=0; a->timerActive=1;
     go(a,SCR_TIMER_RUNNING);
 }
 static int displayed_palette(const App *a){ return a->screen==SCR_COLORS?a->pendingPalette:a->state.palette; }
@@ -350,12 +362,53 @@ static void export_meals(App *a){
     if(!valid_date(a->state.today.date)){ say(a,tr(a,"Set Date to export meals","Renseignez Date pour exporter les repas")); return; }
     if(a->hw->export_meal_csv && !a->hw->export_meal_csv(a->hw,&a->state)) say(a,tr(a,"Meal CSV export failed","Export CSV repas échoué"));
 }
-/* Space or Esc: save the deck, back to Home, then the CSV. */
-static void leave_meal_planner(App *a){ flush_save(a); go(a,SCR_HOME); export_meals(a); }
+static void meal_release(App *a){
+    if(a->mealOpen && a->hw->meal_close) a->hw->meal_close(a->hw);
+    a->mealOpen=0;
+}
+static void reset_pending(App *a){ a->pendingLanguage=a->state.language; a->pendingPalette=a->state.palette; }
+/* LPS-DOS-115-CHG09 (PicoCalc returnTo): back to a screen without go(), so
+ * its drafts, Kanban column, Activities cursor, review scroll and Rosary
+ * position are untouched. A language saved meanwhile can shorten the Rosary
+ * text or the review, so those positions are clamped. The rosary texts and
+ * the planner pictures were kept loaded under the overlay (see go). */
+static void return_to(App *a, ReturnPoint r){
+    if(r.screen!=SCR_MEAL_PLANNER && !in_config(r.screen)) meal_release(a);
+    a->screen=r.screen; a->selection=r.selection; a->message[0]=0; a->confirmingDelete=0;
+    if(a->screen==SCR_ROSARY_PRAYER && rosary_loaded()){
+        unsigned pages=rosary_pages(rosary_text(a->state.language,a->rosaryMode,a->rosarySet,a->rosaryDecade,a->rosaryStep));
+        if(pages && a->rosaryPage>=pages) a->rosaryPage=pages-1;
+    }
+    if(a->screen==SCR_DAILY_REVIEW){
+        unsigned rows=review_rows(a), maximum=rows>REVIEW_PAGE?rows-REVIEW_PAGE:0;
+        if(a->reviewOffset>maximum) a->reviewOffset=maximum;
+    }
+}
+static ReturnPoint here(const App *a){ ReturnPoint r; r.screen=a->screen; r.selection=a->selection; return r; }
+static void open_config(App *a){ a->configReturn=here(a); reset_pending(a); go(a,SCR_CONFIG); }
+/* Leaves Config and its sub-screens; pending, unsaved changes are dropped. */
+static void close_config(App *a){ reset_pending(a); return_to(a,a->configReturn); }
+static void open_meal_planner(App *a){ a->mealReturn=here(a); go(a,SCR_MEAL_PLANNER); }
+/* Space or Esc: save the deck, back to where the planner was opened, then
+ * the CSV (a failure is shown there). */
+static void leave_meal_planner(App *a){ flush_save(a); return_to(a,a->mealReturn); export_meals(a); }
+/* Screens where TAB/SPACE keep their own meaning: text entry (SPACE is a
+ * character) and confirmations. Weight is numeric entry: TAB opens Config
+ * there (PicoCalc LPS-115-CHG02b) and SPACE stays ignored. */
+static int overlay_keys_allowed(const App *a, int k){
+    switch(a->screen){
+    case SCR_WEIGHT: return k==KEY_TAB;
+    case SCR_DATE: case SCR_ACTIVITY_EDIT: case SCR_TASK_EDIT: case SCR_REMINDER_EDIT:
+    case SCR_FINISH: case SCR_REMINDER_POPUP: return 0;
+    case SCR_ACTIVITIES: return !a->confirmingDelete;
+    default: return 1;
+    }
+}
 static void go(App *a, int s){
     const Day *vd;
-    /* LPS-DOS-115-CHG07: the pictures stay in memory while the planner is open. */
-    if(a->screen==SCR_MEAL_PLANNER && s!=SCR_MEAL_PLANNER && a->hw->meal_close) a->hw->meal_close(a->hw);
+    /* LPS-DOS-115-CHG07: the pictures stay in memory while the planner is
+     * open; CHG09: Config over the planner keeps them too. */
+    if(s!=SCR_MEAL_PLANNER && !in_config(s)) meal_release(a);
     /* LPS-DOS-115-CHG03b: the prayer texts live in ROSARY.DAT. Load them when
      * the Rosary opens; on failure stay put and say why. Free them on leaving. */
     if(is_rosary_screen(s)){
@@ -366,12 +419,13 @@ static void go(App *a, int s){
             else say(a,tr(a,"ROSARY.DAT is damaged: copy it again","ROSARY.DAT endommagé : recopiez-le"));
             return;
         }
-    }else rosary_unload();
+    }else if(!is_overlay(s)) rosary_unload(); /* CHG09: kept under Config and the planner */
     a->screen=s; a->selection=0; a->message[0]=0; a->confirmingDelete=0;
     if(s==SCR_DAILY_REVIEW) a->reviewOffset=0;
     if(s==SCR_MEAL_PLANNER){ /* PicoCalc LPS-114-CHG01: open on the first card still in the deck */
         a->mealCursor=meal_first_unplayed(&a->state);
         a->mealGraphics=a->hw->meal_open?a->hw->meal_open(a->hw):MEALS_NO_EGA;
+        a->mealOpen=1;
     }
     if(s==SCR_LANGUAGE) a->selection=(unsigned)a->pendingLanguage;
     if(s==SCR_COLORS) a->selection=(unsigned)a->pendingPalette;
@@ -494,6 +548,7 @@ void app_init(App *app, Platform *hw){
     app->pendingLanguage=LANG_EN;
     app->pendingPalette=PAL_GREEN;
     app->editingReminder=REMINDER_CAPACITY;
+    app->configReturn.screen=app->mealReturn.screen=SCR_HOME;
     app->editedTask=TASK_CAPACITY;
     app->kanbanColumn=TASK_TODO;
     app->dirty=0;
@@ -525,15 +580,22 @@ void app_start(App *app){
 void app_tick(App *app, lps_tick_t ms){
     unsigned before;
     app->timerNow=ms;
-    if(app->screen!=SCR_TIMER_RUNNING) return;
+    if(!app->timerActive) return; /* CHG09: counts down behind Config and the planner too */
     before=timer_seconds(app);
     if(!app->timerPaused){
         lps_tick_t elapsed=app->timerNow-app->timerLast;
         app->timerRemaining = elapsed>=app->timerRemaining ? 0 : app->timerRemaining-elapsed;
     }
     app->timerLast=app->timerNow;
-    if(!app->timerRemaining){ go(app,SCR_TIMER_COMPLETE); app_render(app); }
-    else if(before!=timer_seconds(app)) app_render(app);
+    if(!app->timerRemaining){
+        /* The alert takes over: Config closes without saving, and a planner
+         * left this way saves its deck and writes its CSV (PicoCalc tick). */
+        int meals=app->screen==SCR_MEAL_PLANNER||(in_config(app->screen)&&app->configReturn.screen==SCR_MEAL_PLANNER);
+        app->timerActive=0;
+        if(in_config(app->screen)) reset_pending(app);
+        if(meals) flush_save(app);
+        go(app,SCR_TIMER_COMPLETE); if(meals) export_meals(app); app_render(app);
+    }else if(app->screen==SCR_TIMER_RUNNING && before!=timer_seconds(app)) app_render(app);
 }
 
 /* --- key handler continues in app_key.c style: keep in this file --- */
@@ -591,6 +653,8 @@ void app_key(App *a, int k){
         a->screen=SCR_ACTIVITIES; memset(a->activityDraft,0,sizeof(a->activityDraft)); a->message[0]=0; app_render(a); return;
     }
     if(k==KEY_ESCAPE && a->screen==SCR_MEAL_PLANNER){ leave_meal_planner(a); app_render(a); return; }
+    if(k==KEY_ESCAPE && a->screen==SCR_CONFIG){ close_config(a); app_render(a); return; } /* one level up */
+    if(k==KEY_ESCAPE && a->screen==SCR_TIMER_RUNNING) a->timerActive=0; /* Esc still cancels the countdown */
     if(k==KEY_ESCAPE){
         int target=SCR_HOME;
         int from=a->screen;
@@ -602,13 +666,22 @@ void app_key(App *a, int k){
         /* Persist when leaving an editor back to Home (date/activities/weight/...). */
         if(target==SCR_HOME && a->dirty
            && (from==SCR_DATE||from==SCR_ACTIVITIES||from==SCR_WEIGHT
-               ||from==SCR_KANBAN||from==SCR_REMINDERS||from==SCR_CONFIG
-               ||from==SCR_COLORS||from==SCR_LANGUAGE||from==SCR_DAILY_REVIEW
+               ||from==SCR_KANBAN||from==SCR_REMINDERS||from==SCR_DAILY_REVIEW
                ||from==SCR_ROSARY_MODE||from==SCR_ROSARY_COMPLETE||from==SCR_FINISH
                ||from==SCR_REWARD||from==SCR_TIMER_SELECT)){
             flush_save(a);
         }
         go(a,target); app_render(a); return;
+    }
+    if(k==KEY_TAB||k==' '){
+        /* TAB closes Config entirely, from any of its screens; SPACE does
+         * nothing there. SPACE leaves the planner; TAB opens Config over it. */
+        if(in_config(a->screen)){ if(k==KEY_TAB) close_config(a); app_render(a); return; }
+        if(a->screen==SCR_MEAL_PLANNER && k==' '){ leave_meal_planner(a); app_render(a); return; }
+        if(overlay_keys_allowed(a,k)){ a->message[0]=0;
+            if(a->daysBack) read_only(a); else if(k==KEY_TAB) open_config(a); else open_meal_planner(a);
+            app_render(a); return;
+        }
     }
     a->message[0]=0;
     if(a->screen==SCR_REMINDER_POPUP){ go(a,SCR_HOME);
@@ -616,9 +689,6 @@ void app_key(App *a, int k){
         /* LPS-DOS-115-CHG02 (PicoCalc LPS-112-CHG05): no notepad; 0-9 today,
          * 1-2 on an archived day. */
         unsigned menuCount=a->daysBack?2u:10u;
-        /* LPS-DOS-115-CHG07 (PicoCalc LPS-114-CHG01): SPACE opens the Meal
-         * Planner; an archived day is read-only. */
-        if(k==' '){ if(a->daysBack) read_only(a); else go(a,SCR_MEAL_PLANNER); }
         if(k==KEY_LEFT){
             if(a->daysBack<a->state.count){ a->daysBack++; a->selection=0; a->page=0; }
             else say(a, a->state.count?tr(a,"Oldest saved day","Plus ancien jour conservé"):tr(a,"No archived days","Aucun jour archivé"));
@@ -636,8 +706,8 @@ void app_key(App *a, int k){
             int target=a->daysBack?archiveScreens[a->selection]:currentScreens[a->selection];
             if(target==SCR_KANBAN) a->kanbanColumn=TASK_TODO;
             if(target==SCR_REMINDERS) prune_reminders(a);
-            if(target==SCR_CONFIG){ a->pendingLanguage=a->state.language; a->pendingPalette=a->state.palette; }
-            go(a,target);
+            if(target==SCR_CONFIG) open_config(a); /* menu entry 6, as TAB */
+            else go(a,target);
         }
     }else if(a->screen==SCR_TIMER_SELECT){
         if(k==KEY_UP) a->selection=(a->selection+2)%3;
@@ -714,10 +784,10 @@ void app_key(App *a, int k){
                 len=grid_column_length(n,rows,col);
                 a->selection=col*rows+(row<len?row:len-1);
             }
-            else if(a->daysBack && (k==KEY_ENTER||k==' '||(k>='0'&&k<='9'))) read_only(a);
-            else if(k==KEY_ENTER||k==' '||(k>='0'&&k<='9')){
+            else if(a->daysBack && (k==KEY_ENTER||(k>='0'&&k<='9'))) read_only(a);
+            else if(k==KEY_ENTER||(k>='0'&&k<='9')){ /* CHG09: SPACE opens the planner */
                 unsigned id=a->selection;
-                if(k!=KEY_ENTER&&k!=' '){
+                if(k!=KEY_ENTER){
                     unsigned r=k=='0'?9u:(unsigned)(k-'1');
                     id=r<len ? col*rows+r : n; /* past the column's end: ignored */
                 }
@@ -733,7 +803,7 @@ void app_key(App *a, int k){
         else edit_text(a->activityDraft,ACTIVITY_NAME_LENGTH,k); /* 24 UTF-8 bytes, as the PicoCalc */
     }else if(a->screen==SCR_WEIGHT){
         if(a->daysBack){ if(k==KEY_ENTER) go(a,SCR_HOME); else read_only(a); }
-        else if(k==KEY_UP||k==KEY_DOWN||k==KEY_TAB) a->field=1-a->field;
+        else if(k==KEY_UP||k==KEY_DOWN) a->field=1-a->field; /* CHG09: TAB opens Config */
         else if(k==KEY_ENTER){ g_scratch=a->state;
             if(!parse_weight(a->weights[0],&g_scratch.today.expected)||!parse_weight(a->weights[1],&g_scratch.today.actual))
                 say(a,tr(a,"Invalid weight (example: 110.500)","Poids invalide (exemple : 110,500)"));
@@ -785,7 +855,7 @@ void app_key(App *a, int k){
             if(a->selection==0) go(a,SCR_LANGUAGE);
             else if(a->selection==1) go(a,SCR_COLORS);
             else { g_scratch=a->state; g_scratch.language=(uint8_t)a->pendingLanguage;
-                if(commit(a,&g_scratch)){ flush_save(a); go(a,SCR_HOME); say(a,tr(a,"Configuration saved","Configuration enregistrée")); }}
+                if(commit(a,&g_scratch)){ flush_save(a); close_config(a); say(a,tr(a,"Configuration saved","Configuration enregistrée")); }}
         }
     }else if(a->screen==SCR_LANGUAGE){
         if(k==KEY_UP||k==KEY_DOWN) a->selection=1-a->selection;
@@ -797,7 +867,7 @@ void app_key(App *a, int k){
         if(k>='1'&&k<='5') a->selection=(unsigned)(k-'1');
         a->pendingPalette=(int)a->selection;
         if(k==KEY_ENTER){ g_scratch=a->state; g_scratch.palette=(uint8_t)a->pendingPalette;
-            if(commit(a,&g_scratch)){ flush_save(a); go(a,SCR_HOME); say(a,tr(a,"Color saved","Couleur enregistrée")); }}
+            if(commit(a,&g_scratch)){ flush_save(a); close_config(a); say(a,tr(a,"Color saved","Couleur enregistrée")); }}
     }else if(a->screen==SCR_ROSARY_MODE){
         if(k==KEY_UP) a->selection=(a->selection+3)%4;
         if(k==KEY_DOWN) a->selection=(a->selection+1)%4;
@@ -821,7 +891,7 @@ void app_key(App *a, int k){
         if(k==KEY_LEFT){
             if(a->rosaryPage) a->rosaryPage--;
             else if(a->rosaryStep){ a->rosaryStep--; text=rosary_text(a->state.language,a->rosaryMode,a->rosarySet,a->rosaryDecade,a->rosaryStep); a->rosaryPage=rosary_pages(text)-1; }
-        }else if(k==KEY_RIGHT||k==KEY_ENTER||k==' '){
+        }else if(k==KEY_RIGHT||k==KEY_ENTER){ /* CHG09: SPACE opens the planner */
             if(a->rosaryPage+1<pages) a->rosaryPage++;
             else if(a->rosaryStep+1<rosary_steps(a->rosaryMode)){ a->rosaryStep++; a->rosaryPage=0; }
             else go(a,SCR_ROSARY_COMPLETE);
@@ -863,7 +933,6 @@ void app_key(App *a, int k){
          * Esc), as the other screens do. */
         if(k==KEY_LEFT||k==KEY_RIGHT||k==KEY_UP||k==KEY_DOWN) a->mealCursor=meal_move(a->mealCursor,k);
         else if(k==KEY_ENTER){ g_scratch=a->state; meal_toggle(&g_scratch,a->mealCursor); commit(a,&g_scratch); }
-        else if(k==' ') leave_meal_planner(a);
     }
     app_render(a);
 }

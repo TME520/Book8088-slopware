@@ -70,7 +70,7 @@ As on the PicoCalc v1.14/v1.15, **Space on Home** opens the Meal Planner: a deck
 - **Played cards** are greyed through the palette only: no pixel is redrawn.
 - **Checks:** `MEALS.DAT` starts with `LPSMEALS`, version 1, 13 pictures of 240×128, then a table (16 palette bytes and a 32-bit sum per picture) protected by a CRC-32; the file size must match. Each picture is checked against its sum (two 16-bit running sums, as in Fletcher's checksum) when it is loaded, not with a CRC-32: a CRC-32 of one 15 KB picture took 1.2 s on the 8088, the sum takes 0.11 s.
 - **Speed on an 8088** (DOSBox `machine=ega`, `cputype=8086`, `cycles=fixed 300`): Space on Home → planner drawn in 0.50 s (mode switch, whole screen, first picture read and checked); Left/Right to a picture not shown yet 0.24 s (0.155 s of it is the disk read and check), to a picture already in memory 0.15–0.16 s; Up/Down 0.17 s; Enter (play or put back) 0.15 s; Esc back to the text Home 0.22 s, plus the save (0.6 s for a small save). Drawing a whole card takes 88 ms. A real floppy or hard disk adds its own read time to the first view of each picture.
-- The global TAB/SPACE keys come with LPS-DOS-115-CHG09.
+- SPACE and TAB work from every screen since LPS-DOS-115-CHG09 (see below).
 
 ### Meal Planner CSV (LPS-DOS-115-CHG08)
 
@@ -94,6 +94,19 @@ order,category,card,portion
 
 
 ![Activities](captures/02-activities.png)
+
+### TAB and SPACE everywhere (LPS-DOS-115-CHG09)
+
+As on the PicoCalc v1.15 (LPS-115-CHG02/02b), **TAB opens Config** and **SPACE opens the Meal Planner** from any screen, not only from Home: Activities, Kanban, the Rosary, the daily review, Reminders, the Timer, and so on.
+
+- **TAB again** (or Esc, or Save) closes Config and goes back to the screen it was opened from, on the same entry; **SPACE again** (or Esc) closes the planner the same way. Each overlay remembers one return point: from the planner, TAB opens Config, and TAB in Config goes back to the planner, which goes back to its own screen. SPACE does nothing in Config.
+- **Not while typing or confirming**: the Date, activity names (E/N), Kanban tasks, reminder text and dates, the close-the-day confirmation, the reminder popup and the Activities delete prompt keep TAB and SPACE for themselves (SPACE types a space). On the **Weight tracker**, **Up/Down** switch between the expected and actual fields, **TAB** opens Config with both fields kept as typed, SPACE is ignored and **Enter** saves both fields, as on the PicoCalc.
+- SPACE therefore **no longer ticks** in Activities (Enter and 1–9, 0 do) and **no longer moves on** in the Rosary (Enter does), as on the PicoCalc.
+- On an archived day (read-only) TAB and SPACE show the read-only notice, as on the PicoCalc.
+- The screen underneath is not reset: the Rosary keeps its page and its texts stay loaded, the planner keeps its pictures in memory while Config is open over it, and the Kanban, Reminders or Activities keep their cursor.
+- **The timer keeps running** behind Config and the planner. When it ends, the end screen is shown; if the planner was open (directly or under Config), the save is written and the meal CSV is exported first, as when leaving the planner.
+- DOS keeps the **6 Config** entry on Home (the PicoCalc v1.15 menu without Config is a later change).
+- **Speed on an 8088** (DOSBox `machine=ega`, `cputype=8086`, `cycles=fixed 300`): TAB from Home to Config 0.11 s, back 0.17 s; SPACE from Kanban to the planner 0.61 s (mode switch, first picture read and checked), back 0.17 s; from the planner TAB to Config 0.17 s (EGA back to text) and TAB back to the planner 0.33 s (text to EGA, picture already in memory); SPACE from a Rosary prayer to the planner 0.50 s, back 0.17 s, with no reload of `ROSARY.DAT`. The timer costs nothing while the planner is shown (the planner is not redrawn every second).
 
 The **Timer / Minuteur** offers **5, 30 or 60 minutes** (LPS-DOS-115-CHG02b, as PicoCalc v1.12 CHG01/CHG02). Keys **1**, **2** and **3** start a duration directly, without Enter. On the completion screen they start a new countdown at once and Enter returns to the duration menu; while a countdown runs they are ignored, and Enter pauses or resumes. Timing still comes from the BIOS tick (about 55 ms).
 
@@ -410,10 +423,12 @@ Home digits, as in PicoCalc v1.12:
 
 **Left/Right** browse the last 31 closed days (read-only). **Space** opens the
 Meal Planner (LPS-DOS-115-CHG07): **Left/Right** card, **Up/Down** row,
-**Enter** play / put back, **Space** or **Esc** back to Home.
+**Enter** play / put back, **Space** or **Esc** back. Since LPS-DOS-115-CHG09
+**Space** (planner) and **Tab** (Config) work from every screen except text
+entry and confirmations, and close back to the screen they were opened from.
 
 Activities (LPS-DOS-115-CHG05): **Up/Down** within a column, **Left/Right**
-between columns (both wrap), **Enter** or **Space** ticks, **1–9, 0** tick
+between columns (both wrap), **Enter** ticks (Space opens the planner), **1–9, 0** tick
 rows 1–10 of the cursor's column (the numbers are shown on that column only).
 LPS-DOS-115-CHG06: **E** rename, **N** new, **Del** delete (Enter confirms,
 Esc cancels), **F4/F5** move up/down.
@@ -561,7 +576,7 @@ Comme sur la PicoCalc v1.14/v1.15, **Espace sur l'accueil** ouvre le planificate
 - **Les cartes jouées** passent en gris par la palette seule : aucun pixel n'est redessiné.
 - **Contrôles :** `MEALS.DAT` commence par `LPSMEALS`, version 1, 13 images de 240×128, puis une table (16 octets de palette et une somme 32 bits par image) protégée par un CRC-32 ; la taille du fichier doit correspondre. Chaque image est vérifiée au chargement par sa somme (deux sommes 16 bits cumulées, comme la somme de Fletcher), pas par un CRC-32 : un CRC-32 d'une image de 15 Ko prenait 1,2 s sur le 8088, la somme 0,11 s.
 - **Vitesse sur 8088** (DOSBox `machine=ega`, `cputype=8086`, `cycles=fixed 300`) : Espace sur l'accueil → planificateur affiché en 0,50 s (changement de mode, écran entier, première image lue et vérifiée) ; Gauche/Droite vers une image pas encore vue 0,24 s (dont 0,155 s de lecture et de contrôle), vers une image déjà en mémoire 0,15 à 0,16 s ; Haut/Bas 0,17 s ; Entrée (jouer ou remettre) 0,15 s ; Échap vers l'accueil texte 0,22 s, plus la sauvegarde (0,6 s pour une petite sauvegarde). Dessiner une carte entière prend 88 ms. Une vraie disquette ou un vrai disque dur ajoute son temps de lecture à la première vue de chaque image.
-- Les touches TAB/ESPACE globales arrivent avec LPS-DOS-115-CHG09.
+- ESPACE et TAB marchent depuis tous les écrans depuis LPS-DOS-115-CHG09 (voir plus bas).
 
 ### CSV du planificateur de repas (LPS-DOS-115-CHG08)
 
@@ -572,6 +587,19 @@ Quitter le planificateur (**Espace** ou **Échap**) réécrit `EXPORT\MPYYMMDD.C
 - **Terminer le jour n'écrit pas de CSV**, comme sur la PicoCalc : on ne termine le jour que depuis l'accueil, donc le fichier du jour terminé est celui écrit à la dernière sortie du planificateur, et il ne change plus. Le jour suivant commence avec un paquet neuf et a son propre fichier dès qu'une carte est jouée.
 - **Vitesse sur 8088** (DOSBox, `cputype=8086`, `cycles=fixed 300`) : l'export prend 13 ms sans carte jouée, 34 ms avec 5 cartes et 89 ms avec les 16 (144 ms avant que le fichier soit construit en mémoire en un seul passage). Quitter le planificateur prend un tic BIOS (55 ms) de plus : 0,28 s au lieu de 0,22 s, ou 0,66 s au lieu de 0,61 s avec la sauvegarde. Un vrai disque ajoute son temps d'écriture.
 
+
+### TAB et ESPACE partout (LPS-DOS-115-CHG09)
+
+Comme sur la PicoCalc v1.15 (LPS-115-CHG02/02b), **TAB ouvre Config** et **ESPACE ouvre le planificateur de repas** depuis n'importe quel écran, pas seulement l'accueil : Activités, Kanban, Rosaire, revue journalière, Rappels, Minuteur…
+
+- **TAB à nouveau** (ou Échap, ou Enregistrer) ferme Config et revient à l'écran d'où il a été ouvert, sur la même entrée ; **ESPACE à nouveau** (ou Échap) ferme le planificateur de la même façon. Chaque superposition retient un seul point de retour : depuis le planificateur, TAB ouvre Config, et TAB dans Config revient au planificateur, qui revient à son propre écran. ESPACE ne fait rien dans Config.
+- **Pas pendant une saisie ou une confirmation** : la Date, les noms d'activités (E/N), les tâches Kanban, le texte et les dates des rappels, la confirmation de clôture, la fenêtre de rappel et la confirmation de suppression des Activités gardent TAB et ESPACE pour elles (ESPACE tape une espace). Dans le **Suivi du poids**, **Haut/Bas** passent du champ attendu au champ effectif, **TAB** ouvre Config en gardant les deux champs tels que tapés, ESPACE est ignoré et **Entrée** enregistre les deux champs, comme sur la PicoCalc.
+- ESPACE **ne coche donc plus** dans Activités (Entrée et 1–9, 0 cochent) et **n'avance plus** dans le Rosaire (Entrée avance), comme sur la PicoCalc.
+- Sur un jour archivé (lecture seule), TAB et ESPACE affichent l'avis de lecture seule, comme sur la PicoCalc.
+- L'écran du dessous n'est pas réinitialisé : le Rosaire garde sa page et ses textes restent chargés, le planificateur garde ses images en mémoire pendant que Config est ouvert par-dessus, et le Kanban, les Rappels ou les Activités gardent leur curseur.
+- **Le minuteur continue** derrière Config et le planificateur. À la fin, l'écran de fin s'affiche ; si le planificateur était ouvert (directement ou sous Config), la sauvegarde est écrite et le CSV des repas est exporté avant, comme en quittant le planificateur.
+- DOS garde l'entrée **6 Config** sur l'accueil (le menu de la PicoCalc v1.15 sans Config viendra plus tard).
+- **Vitesse sur 8088** (DOSBox `machine=ega`, `cputype=8086`, `cycles=fixed 300`) : TAB de l'accueil à Config 0,11 s, retour 0,17 s ; ESPACE du Kanban au planificateur 0,61 s (changement de mode, première image lue et contrôlée), retour 0,17 s ; depuis le planificateur, TAB vers Config 0,17 s (EGA vers texte) et TAB retour au planificateur 0,33 s (texte vers EGA, image déjà en mémoire) ; ESPACE d'une prière du Rosaire au planificateur 0,50 s, retour 0,17 s, sans relire `ROSARY.DAT`. Le minuteur ne coûte rien pendant que le planificateur est affiché (il n'est pas redessiné chaque seconde).
 
 Le **Minuteur** propose **5, 30 ou 60 minutes** (LPS-DOS-115-CHG02b, comme les CHG01/CHG02 de la PicoCalc v1.12). Les touches **1**, **2** et **3** lancent directement une duree, sans Entree. Sur l'ecran de fin, elles relancent aussitot un compte a rebours et Entree revient au choix de la duree ; pendant un compte a rebours, elles sont ignorees et Entree met en pause ou reprend. Le temps vient toujours du tic BIOS (environ 55 ms). Une note deja enregistree par une ancienne version reste dans la sauvegarde et part toujours dans l'ICS (`\NNote: ...`) a la cloture du jour ; elle n'est plus affichee ni modifiable.
 
@@ -646,19 +674,21 @@ make test     # tests gcc, sans Watcom
 Copier `LPSCOMP.EXE`, `ROSARY.DAT`, `MEALS.DAT` (dans le meme dossier) et `HELLO.EXE` depuis la racine du depot, creer `C:\LPS`, lancer `LPSCOMP` (ou `LPSCOMP chemin`).
 **Q** quitte depuis l'accueil. Les touches reprennent celles du Companion.
 Activites (LPS-DOS-115-CHG05) : **Haut/Bas** dans une colonne, **Gauche/Droite**
-entre les colonnes (les deux bouclent), **Entree** ou **Espace** coche, **1–9, 0**
+entre les colonnes (les deux bouclent), **Entree** coche (Espace ouvre le planificateur), **1–9, 0**
 cochent les lignes 1 a 10 de la colonne du curseur (numeros affiches sur cette
 colonne seulement). LPS-DOS-115-CHG06 : **E** renommer, **N** nouvelle,
 **Suppr** supprimer (Entree confirme, Echap annule), **F4/F5** monter/descendre.
-**Espace** sur l'accueil ouvre le planificateur de repas (LPS-DOS-115-CHG07) :
+**Espace** ouvre le planificateur de repas (LPS-DOS-115-CHG07) :
 **Gauche/Droite** carte, **Haut/Bas** rangee, **Entree** jouer / remettre,
-**Espace** ou **Echap** retour a l'accueil.
+**Espace** ou **Echap** retour. Depuis LPS-DOS-115-CHG09, **Espace**
+(planificateur) et **Tab** (Config) marchent depuis tous les ecrans sauf les
+saisies et les confirmations, et reviennent a l'ecran de depart.
 
 DOSBox-X / DOSBox Staging (`cputype=8086`, `machine=ega`) : copier les EXE, `ROSARY.DAT` et `MEALS.DAT` de la racine ici, puis `dosbox-x -conf dosbox.conf`.
 
 ## Empreinte
 
-`LPSCOMP.EXE` fait environ **94 Ko** (modele large, 8086, pile 4 Ko), `ROSARY.DAT` environ **10 Ko** et `MEALS.DAT` environ **196 Ko**. `HELLO.EXE` ~3 Ko.
+`LPSCOMP.EXE` fait environ **96 Ko** (modele large, 8086, pile 4 Ko), `ROSARY.DAT` environ **10 Ko** et `MEALS.DAT` environ **196 Ko**. `HELLO.EXE` ~3 Ko.
 
 Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) passe d'environ 63 Ko a environ 14 Ko (17,3 Ko avec LPS-DOS-115-CHG06d, 18,5 Ko avec le planificateur EGA de LPS-DOS-115-CHG07, dont les images restent dans `MEALS.DAT` et la memoire lointaine) : les textes du rosaire sont dans `ROSARY.DAT`, charge en memoire lointaine a l'ouverture du rosaire, et les gros tampons (copies de `State`, sauvegarde, exports ICS/CSV) sont alloues en memoire lointaine au demarrage. Un `ROSARY.DAT` absent ou abime affiche un message, sans plantage.
 
@@ -670,7 +700,6 @@ Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) p
 - Config n'a pas d'entree « import SD » : le disque DOS **est** le stockage.
 - Masquage des entrees de l'accueil de la PicoCalc : pas encore sur DOS, mais
   ses donnees sont conservees dans la sauvegarde (LPS-DOS-115-CHG04).
-- Planificateur de repas (LPS-DOS-115-CHG07) : pas encore de touches
-  TAB/ESPACE globales (CHG09) ; la sauvegarde est ecrite
+- Planificateur de repas (LPS-DOS-115-CHG07) : la sauvegarde est ecrite
   en quittant le planificateur, pas a chaque carte ; les images sont controlees
   par une somme 32 bits au lieu d'un CRC-32 (vitesse sur 8088).

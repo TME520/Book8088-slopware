@@ -688,7 +688,10 @@ static void check_activities(const char *dir){
     app_key(app,KEY_LEFT); assert(app_selection(app)==13);
     app_key(app,'3'); assert(app_selection(app)==10 && app_state(app)->today.flags==((1ul<<21)|(1ul<<10)));
     app_key(app,KEY_ENTER); assert(app_state(app)->today.flags==(1ul<<21));
-    app_key(app,' '); assert(app_state(app)->today.flags==((1ul<<21)|(1ul<<10)) && cell_is(hw,7,27,"3 [x] Weekend"));
+    /* LPS-DOS-115-CHG09: SPACE opens the planner and comes back to the same cursor. */
+    app_key(app,' '); assert(app_screen(app)==SCR_MEAL_PLANNER);
+    app_key(app,' '); assert(app_screen(app)==SCR_ACTIVITIES && app_selection(app)==10 && app_state(app)->today.flags==(1ul<<21));
+    app_key(app,KEY_ENTER); assert(app_state(app)->today.flags==((1ul<<21)|(1ul<<10)) && cell_is(hw,7,27,"3 [x] Weekend"));
     app_key(app,'0'); assert(app_state(app)->today.flags==((1ul<<21)|(1ul<<10))); /* 8 rows: no row 10 */
     app_key(app,KEY_LEFT); app_key(app,plat_host_key(1,'&')); assert(app_state(app)->today.flags==((1ul<<21)|(1ul<<10)|1ul)); /* AZERTY 1 */
     app_key(app,'1'); app_key(app,KEY_ESCAPE);
@@ -1418,6 +1421,178 @@ static void check_meal_csv(const char *dir){
     assert(file_is(next,MCSV_HEAD "1,Drinks,Coffee (Black),1 cup\r\n"));
 }
 
+/* ---- LPS-DOS-115-CHG09: TAB/SPACE from any screen, as PicoCalc
+ * LPS-115-CHG02/02b (its tests/overlay_keys_test.cpp, section by section). */
+static unsigned ov_exports, ov_saves;
+static int (*ov_real_export)(Platform*, const State*);
+static int (*ov_real_save)(Platform*, const State*);
+static int ov_export(Platform *p, const State *s){ ov_exports++; return ov_real_export(p,s); }
+static int ov_save(Platform *p, const State *s){ ov_saves++; return ov_real_save(p,s); }
+#define OV_FRAME (ROWS*COLUMNS*2+ROWS)
+static void frame_of(Platform *hw, char *out){
+    int r, c; char *o=out;
+    for(r=0;r<ROWS;r++){
+        const char *t=plat_host_row(hw,r);
+        for(c=0;c<COLUMNS;c++){ *o++=t[c]; *o++=(char)(plat_host_rev(hw,r,c)?1:0); }
+        *o++='\n';
+    }
+}
+static int frame_is(Platform *hw, const char *before){ static char now[OV_FRAME]; frame_of(hw,now); return memcmp(now,before,OV_FRAME)==0; }
+/* TAB and SPACE each open their overlay and close back to the identical
+ * frame (same screen, cursor, column, scroll), by the same key or by Esc. */
+static void round_trips(App *app, Platform *hw, enum Screen s){
+    static char before[OV_FRAME]; unsigned exports=ov_exports, saves=ov_saves;
+    assert(app_screen(app)==s); frame_of(hw,before);
+    app_key(app,KEY_TAB); assert(app_screen(app)==SCR_CONFIG && row_has(hw,3,"CONFIGURATION"));
+    app_key(app,KEY_TAB); assert(app_screen(app)==s && frame_is(hw,before));
+    app_key(app,KEY_TAB); app_key(app,KEY_ESCAPE); assert(app_screen(app)==s && frame_is(hw,before));
+    app_key(app,KEY_TAB); app_key(app,'1'); assert(app_screen(app)==SCR_LANGUAGE);
+    app_key(app,KEY_TAB); assert(app_screen(app)==s && frame_is(hw,before)); /* from a sub-screen, TAB closes Config entirely */
+    app_key(app,' '); assert(app_screen(app)==SCR_MEAL_PLANNER && row_has(hw,3,"MEAL PLANNER"));
+    app_key(app,' '); assert(app_screen(app)==s && frame_is(hw,before));
+    app_key(app,' '); app_key(app,KEY_ESCAPE); assert(app_screen(app)==s && frame_is(hw,before));
+    assert(ov_exports==exports+2 && ov_saves==saves); /* every exit writes the CSV; nothing to save */
+}
+static Platform *ov_start(App *app, const char *dir){
+    Platform *hw; State *st; unsigned i; static const char *const names[4]={"alpha","beta","gamma","delta"};
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    ov_real_export=hw->export_meal_csv; hw->export_meal_csv=ov_export;
+    ov_real_save=hw->save; hw->save=ov_save; ov_exports=ov_saves=0;
+    st=(State*)app_state(app);
+    for(i=0;i<4;i++){ st->tasks[i].status=(uint8_t)(i<2?TASK_TODO:TASK_DOING); strcpy(st->tasks[i].name,names[i]); }
+    st->taskCount=4;
+    st->reminders[0].from=st->today.date; st->reminders[0].duration=30; strcpy(st->reminders[0].text,"Water plants");
+    st->reminders[1].from=st->today.date; st->reminders[1].duration=60; strcpy(st->reminders[1].text,"Call bank");
+    st->reminderCount=2;
+    app_render(app); assert(app_screen(app)==SCR_HOME);
+    return hw;
+}
+static void check_overlay_keys(const char *dir){
+    static unsigned char store[16384]; static char typed[OV_FRAME], kanban[OV_FRAME], planner[OV_FRAME];
+    App *app=(App*)store; Platform *hw; int i; char ex[300], csv[600], name[16];
+    /* 1. Menus, lists and views: identical return. */
+    hw=ov_start(app,dir);
+    app_key(app,KEY_DOWN); app_key(app,KEY_DOWN); app_key(app,KEY_DOWN); round_trips(app,hw,SCR_HOME);
+    assert(plat_host_rev(hw,10,2) && row_has(hw,10,"3  Kanban"));
+    app_key(app,KEY_ENTER); app_key(app,KEY_RIGHT); app_key(app,KEY_DOWN); assert(any_row(hw,"delta")); round_trips(app,hw,SCR_KANBAN);
+    app_key(app,KEY_ESCAPE); app_key(app,'1'); app_key(app,KEY_RIGHT); app_key(app,KEY_DOWN); app_key(app,KEY_DOWN);
+    assert(app_selection(app)==10); round_trips(app,hw,SCR_ACTIVITIES);
+    app_key(app,'3'); assert(app_state(app)->today.flags==(1ul<<10)); /* keys still act on that column afterwards */
+    app_key(app,KEY_ESCAPE); app_key(app,'5'); app_key(app,KEY_DOWN); round_trips(app,hw,SCR_DAILY_REVIEW);
+    app_key(app,KEY_ESCAPE); app_key(app,'7'); app_key(app,KEY_DOWN); round_trips(app,hw,SCR_REMINDERS);
+    app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REMINDER_EDIT && any_row(hw,"Call bank")); app_key(app,KEY_ESCAPE); app_key(app,KEY_ESCAPE);
+    app_key(app,'8'); app_key(app,KEY_DOWN); round_trips(app,hw,SCR_TIMER_SELECT);
+    app_key(app,KEY_ESCAPE); app_key(app,'4'); app_key(app,KEY_DOWN); round_trips(app,hw,SCR_ROSARY_MODE); app_key(app,KEY_UP); app_key(app,KEY_ENTER);
+    app_key(app,KEY_DOWN); app_key(app,KEY_DOWN); round_trips(app,hw,SCR_ROSARY_SET); app_key(app,KEY_ENTER);
+    app_key(app,KEY_DOWN); round_trips(app,hw,SCR_ROSARY_DECADE); app_key(app,KEY_ENTER);
+    app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); round_trips(app,hw,SCR_ROSARY_PRAYER);
+    /* DOS: the prayer texts stay loaded under the overlays (no reload). */
+    app_key(app,' '); assert(rosary_loaded()); app_key(app,KEY_TAB); assert(rosary_loaded()); app_key(app,KEY_TAB); app_key(app,' ');
+    for(i=0;i<300 && app_screen(app)==SCR_ROSARY_PRAYER;i++) app_key(app,KEY_RIGHT);
+    round_trips(app,hw,SCR_ROSARY_COMPLETE); app_key(app,KEY_ENTER); assert(!rosary_loaded());
+    app_key(app,' '); assert(!rosary_loaded()); app_key(app,' ');
+    app_key(app,'9'); app_key(app,KEY_ENTER); round_trips(app,hw,SCR_REWARD); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_HOME);
+    /* 2. Text entry: SPACE stays a character, TAB does not leave the editor. */
+    hw=ov_start(app,dir);
+    app_key(app,'3'); app_key(app,'n'); app_key(app,'a'); app_key(app,' '); app_key(app,KEY_TAB); app_key(app,'b');
+    assert(app_screen(app)==SCR_TASK_EDIT); app_key(app,KEY_ENTER); assert(!strcmp(app_state(app)->tasks[4].name,"a b"));
+    app_key(app,KEY_ESCAPE); app_key(app,'1'); app_key(app,'n'); app_key(app,'x'); app_key(app,' '); app_key(app,KEY_TAB); app_key(app,'y');
+    assert(app_screen(app)==SCR_ACTIVITY_EDIT); app_key(app,KEY_ENTER); assert(!strcmp(app_state(app)->activities[22].en,"x y"));
+    app_key(app,KEY_ESCAPE); app_key(app,'7'); app_key(app,'n'); app_key(app,KEY_DOWN); app_key(app,KEY_DOWN);
+    app_key(app,'p'); app_key(app,' '); app_key(app,KEY_TAB); app_key(app,'q'); assert(app_screen(app)==SCR_REMINDER_EDIT && any_row(hw,"p q"));
+    app_key(app,KEY_ESCAPE); app_key(app,KEY_ESCAPE);
+    app_key(app,'0'); app_key(app,' '); app_key(app,KEY_TAB); assert(app_screen(app)==SCR_DATE); app_key(app,KEY_ESCAPE);
+    /* Weight (numeric entry): TAB opens Config and returns with the field and
+     * the digits typed so far; Up/Down switch the field; SPACE is ignored. */
+    app_key(app,'2'); app_key(app,'1'); app_key(app,KEY_DOWN); app_key(app,'2'); app_key(app,'.');
+    assert(plat_host_rev(hw,9,0) && row_has(hw,9,"Actual   : 2."));
+    frame_of(hw,typed);
+    app_key(app,' '); assert(app_screen(app)==SCR_WEIGHT && frame_is(hw,typed));
+    app_key(app,KEY_TAB); assert(app_screen(app)==SCR_CONFIG); app_key(app,KEY_TAB); assert(app_screen(app)==SCR_WEIGHT && frame_is(hw,typed));
+    app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,KEY_ESCAPE); app_key(app,KEY_ESCAPE); assert(app_screen(app)==SCR_WEIGHT && frame_is(hw,typed));
+    app_key(app,KEY_TAB); app_key(app,'2'); app_key(app,KEY_TAB); assert(frame_is(hw,typed));
+    app_key(app,'5'); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_HOME && app_state(app)->today.expected==1000 && app_state(app)->today.actual==2500);
+    /* Saving a language from Weight keeps the drafts too. */
+    app_key(app,'2'); for(i=0;i<8;i++) app_key(app,KEY_BACKSPACE); app_key(app,'9');
+    app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'2'); app_key(app,'3');
+    assert(app_screen(app)==SCR_WEIGHT && row_has(hw,6,"Attendu  : 9") && plat_host_rev(hw,6,0) && row_has(hw,23,"Configuration enregistr\202e"));
+    app_key(app,KEY_ENTER); assert(app_state(app)->today.expected==9000 && app_state(app)->today.actual==2500);
+    app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'1'); app_key(app,'3'); assert(app_state(app)->language==LANG_EN);
+    assert(ov_exports==0);
+    /* 3. Confirmations: TAB/SPACE change nothing; the reminder popup is dismissed by any key. */
+    app_key(app,KEY_ESCAPE); app_key(app,'1'); app_key(app,KEY_DELETE); assert(row_has(hw,21,"Delete"));
+    app_key(app,KEY_TAB); app_key(app,' '); assert(app_screen(app)==SCR_ACTIVITIES && row_has(hw,21,"Delete"));
+    app_key(app,KEY_ESCAPE); assert(!row_has(hw,21,"Delete") && app_state(app)->activityCount==23); app_key(app,KEY_ESCAPE);
+    app_key(app,'9'); app_key(app,KEY_TAB); app_key(app,' '); assert(app_screen(app)==SCR_FINISH); app_key(app,KEY_ESCAPE);
+    app_init(app,hw); app_start(app); assert(app_screen(app)==SCR_REMINDER_POPUP); app_key(app,KEY_TAB); assert(app_screen(app)==SCR_HOME);
+    app_init(app,hw); app_start(app); app_key(app,' '); assert(app_screen(app)==SCR_HOME);
+    assert(ov_exports==0);
+    /* 4. Cross-open: TAB from the planner opens Config, which closes back to
+     * the planner (card kept, pictures kept); SPACE is ignored in Config;
+     * Esc goes up one level. */
+    hw=ov_start(app,dir);
+    hw->meal_open=fake_meal_open; hw->meal_card=fake_meal_card; hw->meal_close=fake_meal_close;
+    fake_open_result=MEALS_NO_EGA; fake_card_result=MEALS_OK; fake_opens=fake_closes=0;
+    app_key(app,'3'); app_key(app,KEY_RIGHT); app_key(app,KEY_DOWN); frame_of(hw,kanban);
+    app_key(app,' '); app_key(app,KEY_DOWN); app_key(app,KEY_RIGHT); frame_of(hw,planner); assert(row_has(hw,4,"Food 2/8") && fake_opens==1);
+    app_key(app,KEY_TAB); assert(app_screen(app)==SCR_CONFIG && fake_closes==0);
+    app_key(app,' '); assert(app_screen(app)==SCR_CONFIG); app_key(app,'2'); assert(app_screen(app)==SCR_COLORS);
+    app_key(app,' '); assert(app_screen(app)==SCR_COLORS);
+    app_key(app,KEY_ESCAPE); assert(app_screen(app)==SCR_CONFIG); app_key(app,KEY_ESCAPE);
+    assert(app_screen(app)==SCR_MEAL_PLANNER && frame_is(hw,planner) && fake_opens==1 && fake_closes==0);
+    app_key(app,KEY_TAB); app_key(app,KEY_TAB); assert(frame_is(hw,planner));
+    assert(ov_exports==0); /* Config inside the planner does not leave it */
+    app_key(app,KEY_ENTER); assert(app_state(app)->mealCount==1);
+    app_key(app,KEY_ESCAPE); assert(app_screen(app)==SCR_KANBAN && frame_is(hw,kanban) && fake_closes==1);
+    assert(ov_exports==1 && ov_saves==1);
+    hw->meal_open=0; hw->meal_card=0; hw->meal_close=0;
+    /* Saving Config returns to the screen it was opened from, in the new language. */
+    app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'2'); app_key(app,'3');
+    assert(app_screen(app)==SCR_KANBAN && app_state(app)->language==LANG_FR && row_has(hw,23,"Configuration enregistr\202e") && any_row(hw,"delta"));
+    /* A CSV failure is reported on the screen the planner returns to. */
+    jpath(ex,dir,"EXPORT"); rm_tree(ex); write_file(ex,(const unsigned char*)"x",1);
+    app_key(app,' '); app_key(app,' '); assert(app_screen(app)==SCR_KANBAN && row_has(hw,23,"Export CSV repas \202chou\202") && any_row(hw,"delta"));
+    remove(ex); lps_ensure_dirs();
+    /* A Rosary page past the end of the new language's text is clamped on return. */
+    app_key(app,KEY_ESCAPE); app_key(app,'4'); app_key(app,KEY_ENTER); app_key(app,KEY_ENTER); app_key(app,KEY_ENTER);
+    for(i=0;i<6;i++) app_key(app,KEY_RIGHT);
+    app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'1'); app_key(app,'3'); assert(app_screen(app)==SCR_ROSARY_PRAYER && app_state(app)->language==LANG_EN);
+    app_key(app,KEY_LEFT); app_key(app,KEY_RIGHT); assert(app_screen(app)==SCR_ROSARY_PRAYER);
+    app_key(app,KEY_ESCAPE);
+    /* 5. Archived days keep the read-only message. */
+    app_key(app,'9'); app_key(app,KEY_ENTER); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_HOME);
+    app_key(app,KEY_LEFT); app_key(app,KEY_TAB); assert(app_screen(app)==SCR_HOME && row_has(hw,23,"Archived day: read-only"));
+    app_key(app,KEY_DOWN); app_key(app,' '); assert(app_screen(app)==SCR_HOME && row_has(hw,23,"Archived day: read-only"));
+    app_key(app,'1'); assert(app_screen(app)==SCR_ACTIVITIES); app_key(app,KEY_TAB); assert(app_screen(app)==SCR_ACTIVITIES && row_has(hw,23,"Archived day: read-only"));
+    app_key(app,KEY_ESCAPE); app_key(app,'2'); assert(app_screen(app)==SCR_WEIGHT); app_key(app,KEY_TAB); assert(app_screen(app)==SCR_WEIGHT && row_has(hw,23,"Archived day: read-only"));
+    i=(int)ov_exports; app_key(app,KEY_ESCAPE); app_key(app,'1'); app_key(app,' '); assert(app_screen(app)==SCR_ACTIVITIES && ov_exports==(unsigned)i);
+    app_key(app,KEY_ESCAPE); app_key(app,KEY_RIGHT);
+    /* 6. The timer keeps counting behind Config and the planner, and its alert takes over. */
+    hw=ov_start(app,dir); meal_csv_name(&app_state(app)->today.date,name); jpath(ex,dir,"EXPORT"); jpath(csv,ex,name);
+    hw->meal_open=fake_meal_open; hw->meal_card=fake_meal_card; hw->meal_close=fake_meal_close; fake_opens=fake_closes=0;
+    app_tick(app,1000); app_key(app,'8'); app_key(app,'1'); assert(any_row(hw,"05:00"));
+    app_key(app,KEY_TAB); app_tick(app,61000); assert(app_screen(app)==SCR_CONFIG);
+    app_key(app,KEY_TAB); assert(app_screen(app)==SCR_TIMER_RUNNING && any_row(hw,"04:00"));
+    app_key(app,' '); app_key(app,KEY_TAB); app_tick(app,121000); app_key(app,KEY_ESCAPE); app_tick(app,122000); app_key(app,' ');
+    assert(app_screen(app)==SCR_TIMER_RUNNING && any_row(hw,"02:59"));
+    app_key(app,KEY_ENTER); app_key(app,KEY_TAB); app_tick(app,500000); app_key(app,KEY_TAB); assert(any_row(hw,"02:59")); /* paused stays paused */
+    app_key(app,KEY_ENTER); app_key(app,' '); app_key(app,KEY_ENTER); app_tick(app,678999); assert(app_screen(app)==SCR_MEAL_PLANNER);
+    i=fake_closes; app_tick(app,679000);
+    assert(app_screen(app)==SCR_TIMER_COMPLETE && any_row(hw,"TIMER FINISHED!") && ov_exports==2 && fake_closes==i+1);
+    {   static State out; uint32_t gen=0; int active=-1; /* DOS: the deck was saved before the alert */
+        assert(save_load(dir,&out,&gen,&active)==LOAD_OK && out.mealCount==1 && file_is(csv,MCSV_HEAD "1,Drinks,Coffee (Latte),1 mug\r\n")); }
+    /* Expiry inside Config drops the pending choice; inside Config over the planner it also writes the CSV. */
+    i=(int)ov_saves; app_key(app,'1'); app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'2'); app_tick(app,679000+300000);
+    assert(app_screen(app)==SCR_TIMER_COMPLETE && app_state(app)->language==LANG_EN && ov_saves==(unsigned)i);
+    app_key(app,KEY_TAB); assert(app_screen(app)==SCR_CONFIG && row_has(hw,6,"English")); app_key(app,KEY_TAB);
+    i=fake_closes; app_key(app,'1'); app_key(app,' '); app_key(app,KEY_TAB); app_tick(app,979000+300000);
+    assert(app_screen(app)==SCR_TIMER_COMPLETE && ov_exports==3 && fake_closes==i+1);
+    app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_TIMER_SELECT);
+    /* Esc on the running timer still cancels it: no alert later. */
+    app_key(app,'1'); app_key(app,KEY_ESCAPE); app_tick(app,9999999); assert(app_screen(app)==SCR_HOME);
+    hw->meal_open=0; hw->meal_card=0; hw->meal_close=0;
+}
+
 int main(void){
     const char *tmpdir="/tmp/lps-msdos-test";
     State s, out; Blob b; int32_t g=0; Date calendar; Day day;
@@ -1594,11 +1769,13 @@ int main(void){
     check_meals_dat(tmpdir);
     check_meal_planner(tmpdir);
     check_meal_csv(tmpdir);
+    check_overlay_keys(tmpdir);
     assert(orphan_hits>0); /* some edit took a name history had stored */
 
     printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
     printf("%s", " unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture),");
-    printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical), Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), fixture decode (%u captures)\n", 0);
+    printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical),");
+    printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

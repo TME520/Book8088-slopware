@@ -96,6 +96,8 @@ enum Screen {
 };
 
 typedef struct { uint16_t year; uint8_t month, day; } Date;
+/* A screen and its cursor to return to (LPS-DOS-115-CHG09 overlays). */
+typedef struct { int screen; unsigned selection; } ReturnPoint;
 typedef struct {
     Date date;
     uint32_t number;
