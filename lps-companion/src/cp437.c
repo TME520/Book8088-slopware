@@ -1,0 +1,84 @@
+/* CP437 <-> Unicode (LPS-DOS-115-CHG03).
+ *
+ * Screen text is CP437, the PC text-mode ROM font: sources stay UTF-8 like the
+ * PicoCalc's, and tools/cp437 turns each accented character inside a string
+ * literal into one CP437 byte at build time. Files keep the PicoCalc's UTF-8:
+ * the ICS writer converts back with cp437_to_utf8(). This table is shared by
+ * the build tool and the program, so both directions use the same mapping. */
+#include "lps.h"
+
+/* Unicode code point of each CP437 byte 0x80-0xFF. */
+static const unsigned short CP437_HIGH[128]={
+    0x00C7,0x00FC,0x00E9,0x00E2,0x00E4,0x00E0,0x00E5,0x00E7,  /* 0x80 */
+    0x00EA,0x00EB,0x00E8,0x00EF,0x00EE,0x00EC,0x00C4,0x00C5,  /* 0x88 */
+    0x00C9,0x00E6,0x00C6,0x00F4,0x00F6,0x00F2,0x00FB,0x00F9,  /* 0x90 */
+    0x00FF,0x00D6,0x00DC,0x00A2,0x00A3,0x00A5,0x20A7,0x0192,  /* 0x98 */
+    0x00E1,0x00ED,0x00F3,0x00FA,0x00F1,0x00D1,0x00AA,0x00BA,  /* 0xA0 */
+    0x00BF,0x2310,0x00AC,0x00BD,0x00BC,0x00A1,0x00AB,0x00BB,  /* 0xA8 */
+    0x2591,0x2592,0x2593,0x2502,0x2524,0x2561,0x2562,0x2556,  /* 0xB0 */
+    0x2555,0x2563,0x2551,0x2557,0x255D,0x255C,0x255B,0x2510,  /* 0xB8 */
+    0x2514,0x2534,0x252C,0x251C,0x2500,0x253C,0x255E,0x255F,  /* 0xC0 */
+    0x255A,0x2554,0x2569,0x2566,0x2560,0x2550,0x256C,0x2567,  /* 0xC8 */
+    0x2568,0x2564,0x2565,0x2559,0x2558,0x2552,0x2553,0x256B,  /* 0xD0 */
+    0x256A,0x2518,0x250C,0x2588,0x2584,0x258C,0x2590,0x2580,  /* 0xD8 */
+    0x03B1,0x00DF,0x0393,0x03C0,0x03A3,0x03C3,0x00B5,0x03C4,  /* 0xE0 */
+    0x03A6,0x0398,0x03A9,0x03B4,0x221E,0x03C6,0x03B5,0x2229,  /* 0xE8 */
+    0x2261,0x00B1,0x2265,0x2264,0x2320,0x2321,0x00F7,0x2248,  /* 0xF0 */
+    0x00B0,0x2219,0x00B7,0x221A,0x207F,0x00B2,0x25A0,0x00A0  /* 0xF8 */
+};
+
+size_t cp437_to_utf8(unsigned char c, char *out){
+    unsigned cp;
+    if(c<0x80){ out[0]=(char)c; return 1; }
+    cp=CP437_HIGH[c-0x80];
+    if(cp<0x800){ out[0]=(char)(0xC0|(cp>>6)); out[1]=(char)(0x80|(cp&0x3F)); return 2; }
+    out[0]=(char)(0xE0|(cp>>12)); out[1]=(char)(0x80|((cp>>6)&0x3F)); out[2]=(char)(0x80|(cp&0x3F)); return 3;
+}
+
+/* LPS-DOS-115-CHG06d: the screen converts user text at each redraw, so the
+ * common cases are quick on the 8088: Latin-1 through a table built once, and
+ * code points CP437 cannot have (U+0100-U+0191, above U+25A0: œ, emoji) are
+ * refused without a scan. */
+static unsigned char latin1[96]; /* U+00A0-U+00FF -> CP437, 0 if missing */
+static int latin1_ready;
+int unicode_to_cp437(unsigned long cp){
+    unsigned i;
+    if(cp<0x80) return (int)cp;
+    if(cp>=0xA0 && cp<=0xFF){
+        if(!latin1_ready){
+            for(i=0;i<128;i++) if(CP437_HIGH[i]>=0xA0 && CP437_HIGH[i]<=0xFF) latin1[CP437_HIGH[i]-0xA0]=(unsigned char)(0x80+i);
+            latin1_ready=1;
+        }
+        return latin1[cp-0xA0] ? (int)latin1[cp-0xA0] : -1;
+    }
+    if(cp<0x0192 || cp>0x25A0) return -1;
+    for(i=0;i<128;i++) if(CP437_HIGH[i]==cp) return (int)(0x80+i);
+    return -1;
+}
+
+/* Bytes allowed in program text (ROSARY.DAT): printable ASCII and the CP437
+ * accented letters 0x80-0xA5. UTF-8 lead bytes (0xC2-0xF4) are refused, so a
+ * text that missed the conversion is caught instead of shown as box art. */
+int cp437_text_byte(unsigned char c){
+    return (c>=32 && c<=126) || (c>=0x80 && c<=0xA5);
+}
+
+/* UTF-8 to CP437 (LPS-DOS-115-CHG04/CHG05): len bytes of in, NUL-ended in out,
+ * never longer. A character CP437 lacks, or a bad sequence, becomes '?'.
+ * Returns the length written. */
+size_t utf8_to_cp437(const char *in, size_t len, char *out){
+    const unsigned char *s=(const unsigned char*)in, *end=s+len; char *o=out;
+    while(s<end){
+        unsigned char c=*s; unsigned long cp; unsigned need,i; int ok=1, m;
+        if(c<0x80){ *o++=(char)c; s++; continue; }
+        if((c&0xe0)==0xc0){ cp=c&0x1f; need=1; } else if((c&0xf0)==0xe0){ cp=c&0x0f; need=2; }
+        else if((c&0xf8)==0xf0){ cp=c&0x07; need=3; } else { *o++='?'; s++; continue; }
+        for(i=1;i<=need;i++){ if(s+i>=end||(s[i]&0xc0)!=0x80){ ok=0; break; } cp=(cp<<6)|(s[i]&0x3f); }
+        if(!ok){ *o++='?'; s++; continue; }
+        s+=need+1;
+        m=unicode_to_cp437(cp);
+        *o++=(char)(m>=0x80 ? m : '?');
+    }
+    *o=0;
+    return (size_t)(o-out);
+}

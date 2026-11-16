@@ -2,19 +2,30 @@
 #include <stdio.h>
 #include <string.h>
 
-int ics_escape_append(char *dst, size_t cap, size_t *used, const char *text){
+/* LPS-DOS-115-CHG03: program text is CP437 (screen), but the ICS file stays
+ * UTF-8 like the PicoCalc's, so its bytes 0x80-0xFF are written back as
+ * UTF-8. User text (activity names, the note) is UTF-8 in memory (CHG05,
+ * CHG06d) and goes through ics_escape_append_utf8 unchanged. Same escapes as
+ * the PicoCalc. */
+static int escape_append(char *dst, size_t cap, size_t *used, const char *text, int utf8){
     size_t u=*used;
     while(*text){
         char c=*text++;
         if(c=='\\'||c==';'||c==','){ if(u+2>=cap) return 0; dst[u++]='\\'; dst[u++]=c; }
         else if(c=='\n'){ if(u+2>=cap) return 0; dst[u++]='\\'; dst[u++]='n'; }
+        else if(!utf8&&(unsigned char)c>=0x80){ char b[3]; size_t k,n=cp437_to_utf8((unsigned char)c,b); if(u+n>=cap) return 0; for(k=0;k<n;k++) dst[u++]=b[k]; }
         else { if(u+1>=cap) return 0; dst[u++]=c; }
     }
     dst[u]=0; *used=u; return 1;
 }
+int ics_escape_append(char *dst, size_t cap, size_t *used, const char *text){ return escape_append(dst,cap,used,text,0); }
+int ics_escape_append_utf8(char *dst, size_t cap, size_t *used, const char *text){ return escape_append(dst,cap,used,text,1); }
 
-int build_ics(const Day *day, uint32_t totalXp, uint32_t dayXp, int language, char *out, size_t cap){
-    char ymd[16], nxt[16], line[160], tmp[96];
+/* Activities as PicoCalc eachExportedActivity for a day just closed (its
+ * names frozen from the flags): ticked catalog entries, in catalog order, by
+ * their name in the export language. */
+int build_ics(const Day *day, const State *s, uint32_t totalXp, uint32_t dayXp, int language, char *out, size_t cap){
+    char ymd[16], nxt[16], tmp[96];
     Date tomorrow; size_t u=0; int en=language!=LANG_FR; unsigned i; int first;
     if(!valid_date(day->date)) return 0;
     tomorrow=day->date; if(!next_date(&tomorrow)) return 0;
@@ -24,17 +35,19 @@ int build_ics(const Day *day, uint32_t totalXp, uint32_t dayXp, int language, ch
     u+=sprintf(out+u,"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//LPS Companion//EN\r\nCALSCALE:GREGORIAN\r\nBEGIN:VEVENT\r\n");
     u+=sprintf(out+u,"UID:lps-companion-%s@picocalc\r\nDTSTART;VALUE=DATE:%s\r\nDTEND;VALUE=DATE:%s\r\n",ymd,ymd,nxt);
     u+=sprintf(out+u,"SUMMARY:LPS Companion\r\nDESCRIPTION:");
-    if(!ics_escape_append(out,cap,&u, en?"Activities: ":"Activites: ")) return 0;
+    if(!ics_escape_append(out,cap,&u, en?"Activities: ":"Activités: ")) return 0;
     first=1;
-    for(i=0;i<ACTIVITY_COUNT;i++) if(day->flags&(1u<<i)){
+    for(i=0;i<s->activityCount;i++) if(FLAG_BIT(day->flags,i)){
         if(!first){ if(u+2>=cap) return 0; out[u++]=','; out[u++]=' '; out[u]=0; }
-        if(!ics_escape_append(out,cap,&u, en?ACTIVITIES_EN[i]:ACTIVITIES_FR[i])) return 0;
+        if(!ics_escape_append_utf8(out,cap,&u, activity_display_name(&s->activities[i],language))) return 0;
         first=0;
     }
     if(first){ if(u+4>=cap) return 0; memcpy(out+u,"none",4); u+=4; out[u]=0; }
-    sprintf(line,"\\NXP: +%lu (total %lu)",(unsigned long)dayXp,(unsigned long)totalXp);
-    if(u+strlen(line)>=cap) return 0;
-    memcpy(out+u,line,strlen(line)); u+=strlen(line); out[u]=0;
+    /* LPS-DOS-115-CHG01 (PicoCalc LPS-112-CHG03): the XP line stays, empty,
+     * so the ICS structure matches earlier exports. XP values are not written. */
+    (void)totalXp; (void)dayXp;
+    if(u+5>=cap) return 0;
+    memcpy(out+u,"\\NXP:",5); u+=5; out[u]=0;
     if(day->expected>=0){
         if(u+2>=cap) return 0;
         out[u++]='\\'; out[u++]='N'; out[u]=0;
@@ -51,17 +64,21 @@ int build_ics(const Day *day, uint32_t totalXp, uint32_t dayXp, int language, ch
         if(u+2>=cap) return 0;
         out[u++]='\\'; out[u++]='N'; out[u]=0;
         if(!ics_escape_append(out,cap,&u,"Note: ")) return 0;
-        if(!ics_escape_append(out,cap,&u,day->note)) return 0;
+        if(!ics_escape_append_utf8(out,cap,&u,day->note)) return 0; /* UTF-8 as read (CHG06d) */
     }
     if(u+40>=cap) return 0;
     u+=sprintf(out+u,"\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
     return 1;
 }
 
-int write_ics_file(const char *export_dir, const Day *day, uint32_t totalXp, uint32_t dayXp, int language){
-    char path[200], buf[2048]; FILE *f;
-    if(!build_ics(day,totalXp,dayXp,language,buf,sizeof(buf))) return 0;
-    sprintf(path,"%s\\%04u-%02u-%02u_LPS-Companion.ics", export_dir,
+int write_ics_file(const char *export_dir, const Day *day, const State *s, uint32_t totalXp, uint32_t dayXp, int language){
+    /* Far-heap buffer (lps_buffers_init), not the 4 KB DOS stack. */
+    char *buf=lps_buf->ics; char path[200]; FILE *f;
+    if(!build_ics(day,s,totalXp,dayXp,language,buf,sizeof(lps_buf->ics))) return 0;
+    /* LPS-DOS-115-CHG02c: 8.3 name YYYYMMDD.ICS. The PicoCalc's long
+     * YYYY-MM-DD_LPS-Companion.ics was cut by DOS to YYYY-MM-.ICS, so every
+     * day of a month overwrote the same file. The content is unchanged. */
+    sprintf(path,"%s\\%04u%02u%02u.ICS", export_dir,
         (unsigned)day->date.year,(unsigned)day->date.month,(unsigned)day->date.day);
     f=fopen(path,"wb"); if(!f) return 0;
     if(fwrite(buf,1,strlen(buf),f)!=strlen(buf)){ fclose(f); remove(path); return 0; }
@@ -70,7 +87,9 @@ int write_ics_file(const char *export_dir, const Day *day, uint32_t totalXp, uin
 }
 
 int write_weight_csv(const char *weights_dir, const Day *day){
-    char path[200], date[16], expected[16], actual[16], line[64], buf[8192];
+    /* The 8 KB year buffer used to sit on the 4 KB DOS stack and overran it
+     * into BSS. It now lives in the far-heap buffers (lps_buffers_init). */
+    char *buf=lps_buf->csv; char path[200], date[16], expected[16], actual[16], line[64];
     FILE *f; size_t used=0; long sz;
     if(!valid_date(day->date)) return 0;
     sprintf(path,"%s\\%04u.csv", weights_dir, (unsigned)day->date.year);
@@ -82,7 +101,7 @@ int write_weight_csv(const char *weights_dir, const Day *day){
     f=fopen(path,"rb");
     if(f){
         if(fseek(f,0,SEEK_END)!=0){ fclose(f); return 0; }
-        sz=ftell(f); if(sz<0 || (size_t)sz>=sizeof(buf)){ fclose(f); return 0; }
+        sz=ftell(f); if(sz<0 || (size_t)sz>=sizeof(lps_buf->csv)){ fclose(f); return 0; }
         rewind(f);
         used=(size_t)fread(buf,1,(size_t)sz,f);
         fclose(f);

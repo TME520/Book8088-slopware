@@ -11,3 +11,38 @@ are retained. Day 2 has flags 512, actual weight 111.500 kg, and note
 
 `tests/test_storage.c` wraps these bytes in an `LPR1` `SAVE_A.BIN` envelope and
 checks that this port still decodes them.
+
+# PicoCalc JSON saves
+
+`picocalc_full.jsn` and `picocalc_custom.jsn` are `SAVE_B.JSN` / `SAVE_A.JSN`
+files written by the PicoCalc's own save code (`writeSave` in
+[LPS-Companion-PicoCalc](https://github.com/TME520/LPS-Companion-PicoCalc)
+v1.15), built on the host by `tools/picocalc_fixture.cpp`. They are synthetic,
+not user data.
+
+- `picocalc_full.jsn` (generation 41): the PicoCalc test suite's full state,
+  with the 22 default activities, 31 closed days, 24 tasks with quotes and
+  backslashes, 3 reminders, meals `[7,2]` and the timer hidden from Home.
+- `picocalc_custom.jsn` (generation 7): a reordered catalog (Sport first), a
+  custom activity `Vélo`/`Cycling` (id 23), an English-only `Chess` (id 24),
+  `Projet` renamed `Projet perso`, frozen day names (`Tai-chi`, `Projet`),
+  accented French notes, tasks and reminders, meals `[3,0,15]`, and Kanban and
+  Rosary hidden from Home.
+
+- `picocalc_accents.jsn` (generation 4, LPS-DOS-115-CHG06c): a DOS save with
+  accented task names and a reminder typed through the app, at the PicoCalc's
+  32-byte UTF-8 limits (16 `é`, 10 `₧` + `ab`, `ûâîêëüÿ ùçàè ƒ`, `Fête : crème
+  brûlée à 20h, `), passed through the PicoCalc writer with
+  `/tmp/pcfix resave`: the PicoCalc accepted it and wrote the same bytes.
+
+- `picocalc_intl.jsn` (generation 12, LPS-DOS-115-CHG06d): text CP437 lacks
+  (œ, À, €, emoji) in catalog names, a frozen day name, notes, tasks and
+  reminders, written by `tools/picocalc_fixture.cpp intl`.
+  `picocalc_intl.ics`, `picocalc_intl.csv` and `picocalc_intl_closed.jsn` are
+  what the PicoCalc writes when that day is closed (`close`: the Finish
+  screen's weight CSV row, `exportIcs` from `main.cpp`, and the committed
+  save). DOS must load, show and write all of them byte for byte.
+
+`tests/test_storage.c` loads them and checks that DOS writes them back byte
+for byte, then edits one through the app. Regenerate them with
+`/tmp/pcfix full|custom FILE` (see the main README).

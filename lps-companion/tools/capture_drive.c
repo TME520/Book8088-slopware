@@ -1,4 +1,4 @@
-#include "../src/lps.h"
+#include "lps.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -16,17 +16,18 @@ static void snap(Platform *hw, const char *name){
 }
 
 int main(void){
-    Platform *hw; App *app; static unsigned char store[8192];
+    Platform *hw; App *app; static unsigned char store[16384];
     lps_set_data_dir("/tmp/lps-msdos-cap");
     lps_ensure_dirs();
     hw=plat_host_create(0);
     app=(App*)store; app_init(app,hw); app_start(app);
     snap(hw,"01-home-en");
     app_key(app,'1'); snap(hw,"02-activities");
-    app_key(app,KEY_ESCAPE); app_key(app,'4'); snap(hw,"03-kanban");
-    app_key(app,KEY_ESCAPE); app_key(app,'5'); snap(hw,"04-rosary-mode");
-    app_key(app,KEY_ESCAPE); app_key(app,'9'); snap(hw,"05-timer");
-    app_key(app,KEY_ESCAPE); app_key(app,'7'); app_key(app,'1'); app_key(app,'2'); app_key(app,KEY_ENTER);
-    app_key(app,'3'); /* save FR */ snap(hw,"06-home-fr");
+    app_key(app,KEY_ESCAPE); app_key(app,'3'); snap(hw,"03-kanban");
+    app_key(app,KEY_ESCAPE); app_key(app,'4'); snap(hw,"04-rosary-mode");
+    app_key(app,KEY_ESCAPE); app_key(app,'7'); snap(hw,"05-timer");
+    /* Config (TAB, LPS-DOS-115-CHG10): 1 Language, 2 Francais, 4 Save */
+    app_key(app,KEY_ESCAPE); app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'2');
+    app_key(app,'4'); /* save FR */ snap(hw,"06-home-fr");
     return 0;
 }
