@@ -18,9 +18,10 @@
  * The activity catalog lives in the State and each day's stored names in
  * lps_day_names (LPS-DOS-115-CHG05): a day's flags are resolved from its
  * names against the catalog after the read, as on the PicoCalc, and names the
- * catalog lacks stay as frozen extras. The DOS port has no Meal Planner or
- * home menu settings yet, so the Meal Planner deck ("meals") and the hidden
- * home entries ("homeHidden") are kept here and written back as read.
+ * catalog lacks stay as frozen extras. The Meal Planner deck ("meals") is in
+ * the State (LPS-DOS-115-CHG07). The DOS port has no home menu settings yet,
+ * so the hidden home entries ("homeHidden") are kept here and written back
+ * as read.
  * Unknown keys are skipped, as on the PicoCalc.
  *
  * Text in the file is UTF-8 and the State keeps those exact bytes for every
@@ -44,7 +45,6 @@
 #define DAY_NAMES ACTIVITY_CAPACITY /* stored names per day */
 #define TEXT_CAPACITY 128     /* PicoCalc SaveTextCapacity */
 #define SAVE_MAX_BYTES 65000L /* one far block; the PicoCalc accepts 65536 */
-#define MEAL_CARDS 16
 #define HOME_ENTRIES 9
 #define HOME_LOCKED ((1u<<0)|(1u<<(HOME_ENTRIES-1))) /* Date, Close the day */
 #define WRITE_CHUNK 512
@@ -56,8 +56,6 @@
 #endif
 
 typedef struct {
-    uint8_t mealCount;
-    uint8_t meals[MEAL_CARDS];
     uint16_t homeHidden;
 } SaveExtras;
 
@@ -70,7 +68,7 @@ static const char *const STATUSES[3]={"todo","doing","done"};
 static const char *const HOME_IDS[HOME_ENTRIES]={"date","activities","weight","kanban","rosary","daily_review","reminders","timer","close_day"};
 void jsave_reset(void){
     if(!jsave_init()) return;
-    X->mealCount=0; X->homeHidden=0;
+    X->homeHidden=0;
     day_names_clear();
 }
 int jsave_init(void){
@@ -79,8 +77,6 @@ int jsave_init(void){
     X=(SaveExtras*)calloc(1,sizeof(SaveExtras));
     return X!=0;
 }
-/* Closing the day deals a new Meal Planner deck, as on the PicoCalc. */
-void jsave_new_day(void){ if(X) X->mealCount=0; }
 
 /* ---- Reader ------------------------------------------------------------ */
 enum { T_END, T_ERROR, T_OBJ, T_OBJ_END, T_ARR, T_ARR_END, T_COLON, T_COMMA, T_STRING, T_NUMBER, T_TRUE, T_FALSE, T_NULL };
@@ -362,17 +358,17 @@ static int read_state(State *s){
         else if(!strcmp(key,"meals")){
             int ms=1;
             if(next()!=T_OBJ) return 0;
-            X->mealCount=0;
+            s->mealCount=0;
             while((r=member(&ms,key))>0){
                 int ast=1;
                 if(strcmp(key,"played")){ if(!skip(next())) return 0; continue; }
                 if(next()!=T_ARR) return 0;
-                X->mealCount=0;
+                s->mealCount=0;
                 while((r=element(&ast,&t))>0){
                     unsigned i;
-                    if(t!=T_NUMBER||!J.integer||J.number>=MEAL_CARDS) return 0;
-                    for(i=0;i<X->mealCount;i++) if(X->meals[i]==J.number) return 0; /* each card once */
-                    X->meals[X->mealCount++]=(uint8_t)J.number;
+                    if(t!=T_NUMBER||!J.integer||J.number>=MEAL_CARD_COUNT) return 0;
+                    for(i=0;i<s->mealCount;i++) if(s->meals[i]==J.number) return 0; /* each card once */
+                    s->meals[s->mealCount++]=(uint8_t)J.number;
                 }
                 if(r<0) return 0;
             }
@@ -597,7 +593,7 @@ int jsave_write(const char *path, const State *s, uint32_t generation, uint32_t 
         put(','); key("text"); text(r->text); put('}');
     }
     raw("],\n"); key("meals"); put('{'); key("played"); put('[');
-    for(i=0;i<X->mealCount;i++){ if(i) put(','); number(X->meals[i]); }
+    for(i=0;i<s->mealCount;i++){ if(i) put(','); number(s->meals[i]); }
     raw("]},\n"); key("homeHidden"); put('[');
     for(i=0,n=0;i<HOME_ENTRIES;i++) if(X->homeHidden&(1u<<i)&~HOME_LOCKED){ if(n++) put(','); text(HOME_IDS[i]); }
     raw("]},\n");

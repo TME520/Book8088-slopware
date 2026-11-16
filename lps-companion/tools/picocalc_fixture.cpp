@@ -15,9 +15,13 @@
 //       closes today as the PicoCalc's Finish screen does: the weight CSV row
 //       (into an empty year file), the ICS (main.cpp exportIcs, written to a
 //       file instead of FatFs) and the save committed afterwards.
+//   ./picocalc_fixture meals IN.JSN OUT.JSN GENERATION CARD...   (LPS-DOS-115-CHG07)
+//       plays each card, or puts it back if played (toggleMealCard, the
+//       Meal Planner's Enter), and writes the save with that generation.
 #include "lps_companion.cpp"
 #include "save_helpers.h"
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 using namespace lps;
 
@@ -175,6 +179,14 @@ int main(int argc,char** argv){
         if(r!=SaveCheck::Valid){std::fprintf(stderr,"PicoCalc readSave: not valid (%d)\n",int(r));return 3;}
         return writeFile(argv[3],s,info.generation)?0:1;
     }
+    if(mode=="meals"&&argc>=5){
+        FILE* f=std::fopen(argv[2],"rb");if(!f)return 2;
+        static std::array<char,lps_test::MemoryCapacity> bytes{};const std::size_t n=std::fread(bytes.data(),1,bytes.size(),f);std::fclose(f);
+        lps_test::MemorySource source(bytes.data(),n);State s;SaveInfo info;
+        if(readSave(source,s,info)!=SaveCheck::Valid)return 3;
+        for(int i=5;i<argc;++i)toggleMealCard(s.meals,unsigned(std::atoi(argv[i])));
+        return writeFile(argv[3],s,uint32_t(std::atol(argv[4])))?0:1;
+    }
     if(mode=="check"){
         static const char* const names[]={"valid","damaged","unsupported","ioerror"};
         for(int i=2;i<argc;++i){
@@ -185,6 +197,6 @@ int main(int argc,char** argv){
         }
         return 0;
     }
-    std::fprintf(stderr,"usage: %s full|custom|intl OUT.JSN | resave IN.JSN OUT.JSN | check FILE... | close IN.JSN OUT.ICS OUT.CSV OUT.JSN\n",argv[0]);
+    std::fprintf(stderr,"usage: %s full|custom|intl OUT.JSN | resave IN.JSN OUT.JSN | check FILE... | close IN.JSN OUT.ICS OUT.CSV OUT.JSN | meals IN.JSN OUT.JSN GENERATION CARD...\n",argv[0]);
     return 2;
 }

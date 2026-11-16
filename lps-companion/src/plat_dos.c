@@ -1,5 +1,7 @@
 /* DOS platform: BIOS-safe text for 8088 (Book 8088 / CGA / MDA). C89. */
 #include "lps.h"
+#include "meals.h"
+#include "ega.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -25,6 +27,13 @@ typedef struct {
     int ega;            /* EGA/VGA BIOS present (INT 10h AH=12h answers) */
     int blink_was_on;   /* attribute bit 7 meant blink when we started */
     unsigned cursor_shape; /* BIOS cursor start/end lines, restored on exit */
+    /* LPS-DOS-115-CHG07: Meal Planner in EGA 640 x 350 x 16. */
+    int ega_colour;     /* an EGA/VGA colour display with 128 KB or more */
+    unsigned char text_mode; /* BIOS text mode to come back to (2, 3 or 7) */
+    int in_gfx;         /* mode 10h is on */
+    int want_card;      /* this frame shows a card (meal_card since clear) */
+    MealView card;
+    const uint8_t *card_planes;
 } DosPlat;
 
 static DosPlat *self_of(Platform *p){ return (DosPlat*)p->user; }
@@ -83,6 +92,8 @@ static void ensure_text_mode(DosPlat *d){
     /* Hide hardware cursor (optional; ignore failure) */
     r.h.ah = 0x01; r.h.ch = 0x20; r.h.cl = 0x00;
     int86(0x10, &r, &r);
+    r.h.ah = 0x0F; int86(0x10, &r, &r);
+    d->text_mode = r.h.al;
 }
 
 /* LPS-DOS-115-CHG03c: highlighted bars use a bright background (attribute
@@ -113,6 +124,9 @@ static void detect_adapter(DosPlat *d){
     r.h.ah=0x12; r.h.bl=0x10; r.h.bh=0xFF; r.x.cx=0xFFFF;
     int86(0x10,&r,&r);
     d->ega = r.h.bl!=0x10; /* a CGA/MDA BIOS leaves BL unchanged */
+    /* LPS-DOS-115-CHG07: mode 10h needs a colour display (BH 0) and 128 KB
+     * of video memory (BL 1+; 64 KB gives 4 colours only). VGA answers too. */
+    d->ega_colour = d->ega && !d->mono && r.h.bh==0 && r.h.bl>=1 && r.h.bl<=3;
     v=*bios_mode_ctl();
     d->blink_was_on = !(v&0x08) || (v&0x20); /* unknown -> DOS default: on */
     r.h.ah=0x03; r.h.bh=0; int86(0x10,&r,&r);
@@ -120,8 +134,10 @@ static void detect_adapter(DosPlat *d){
 }
 /* Leave DOS as found: last frame kept but without bit 7 (so it cannot start
  * blinking), blink setting and cursor shape restored. */
+static void leave_graphics(DosPlat *d);
 void plat_dos_shutdown(Platform *p){
     DosPlat *d=self_of(p); union REGS r; int i;
+    if(d->in_gfx) leave_graphics(d);
     if(!d->mono && !d->use_bios){
         unsigned char far *vid=(unsigned char far *)MK_FP(d->video_seg,0);
         for(i=0;i<ROWS*COLUMNS;i++) vid[i*2+1]&=0x7F;
@@ -133,6 +149,7 @@ void plat_dos_shutdown(Platform *p){
 
 static void dos_clear(Platform *p){
     DosPlat *d=self_of(p); int r;
+    d->want_card=0;
     for(r=0;r<ROWS;r++){
         memset(d->cells[r],' ',COLUMNS); d->cells[r][COLUMNS]=0;
         memset(d->rev[r],0,COLUMNS);
@@ -233,8 +250,50 @@ static void present_vram(DosPlat *d){
     d->painted=1;
 }
 
+/* ---- Meal Planner in EGA (LPS-DOS-115-CHG07) -------------------------------
+ * A frame with a card is drawn in mode 10h; the first frame without one goes
+ * back to the text mode we started in, with blink off and the cursor hidden
+ * again (the mode set resets both, and the palette), then repaints. */
+static unsigned char ega_value(unsigned char cga){
+    static const unsigned char v[16]={0,1,2,3,4,5,0x14,7,0x38,0x39,0x3A,0x3B,0x3C,0x3D,0x3E,0x3F};
+    return v[cga&15];
+}
+static void leave_graphics(DosPlat *d){
+    union REGS r;
+    r.h.ah=0x00; r.h.al=d->text_mode; int86(0x10,&r,&r);
+    set_blink(d,0);
+    r.h.ah=0x01; r.h.ch=0x20; r.h.cl=0x00; int86(0x10,&r,&r);
+    d->in_gfx=0; d->painted=0;
+}
+static void present_graphics(DosPlat *d){
+    int r;
+    if(!d->in_gfx){ ega_enter(ega_value(attr_for(d,0))); d->in_gfx=1; d->painted=0; }
+    for(r=0;r<ROWS;r++){
+        if(r>=5 && r<=21) continue; /* the card's rows */
+        if(d->painted && memcmp(d->sh_ch[r],d->cells[r],COLUMNS)==0 && memcmp(d->sh_rev[r],d->rev[r],COLUMNS)==0) continue;
+        ega_text_row(r,d->cells[r],d->rev[r]);
+        memcpy(d->sh_ch[r],d->cells[r],COLUMNS);
+        memcpy(d->sh_rev[r],d->rev[r],COLUMNS);
+    }
+    d->painted=1;
+    ega_card(&d->card,d->card_planes,meals_palette(d->card.picture));
+}
+static int dos_meal_open(Platform *p){
+    DosPlat *d=self_of(p);
+    if(!d->ega_colour || d->use_bios) return MEALS_NO_EGA;
+    return meals_open();
+}
+static int dos_meal_card(Platform *p, const MealView *v){
+    DosPlat *d=self_of(p);
+    d->card=*v; d->want_card=1;
+    return meals_picture(v->picture,&d->card_planes);
+}
+static void dos_meal_close(Platform *p){ (void)p; meals_close(); }
+
 static void dos_present(Platform *p){
     DosPlat *d=self_of(p);
+    if(d->want_card){ present_graphics(d); return; }
+    if(d->in_gfx) leave_graphics(d);
     if(d->use_bios) present_bios(d);
     else present_vram(d);
 }
@@ -294,6 +353,9 @@ Platform *plat_dos_create(void){
     dp->iface.save=dos_save;
     dp->iface.export_ics=dos_export_ics;
     dp->iface.export_weight_csv=dos_export_csv;
+    dp->iface.meal_open=dos_meal_open;
+    dp->iface.meal_card=dos_meal_card;
+    dp->iface.meal_close=dos_meal_close;
     dp->palette=PAL_GREEN;
     detect_video(dp);
     detect_adapter(dp);

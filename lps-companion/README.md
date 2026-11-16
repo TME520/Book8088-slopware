@@ -9,7 +9,7 @@ Companion). Data lives under `C:\LPS\` by default and uses the **same**
 `SAVE_A.JSN` / `SAVE_B.JSN` (JSON save, schema 2), `EXPORT\*.ics` and
 `WEIGHTS\*.csv` formats as the PicoCalc firmware v1.13 and later.
 
-Ready-to-run files are at the **repository root** (the directory above this one): [`../LPSCOMP.EXE`](../LPSCOMP.EXE), [`../ROSARY.DAT`](../ROSARY.DAT) and [`../HELLO.EXE`](../HELLO.EXE). Copy **both `LPSCOMP.EXE` and `ROSARY.DAT` into the same directory** on the Book 8088; `ROSARY.DAT` holds the rosary prayer texts. Without it everything works except the Rosary, which then shows *ROSARY.DAT not found: copy it next to LPSCOMP.EXE*. `make dos`, `make rosary` and `make hello` rebuild into this directory only; those local copies are gitignored. After a source change, copy the new files up (`cp LPSCOMP.EXE ROSARY.DAT HELLO.EXE ..`) so the root copies stay current. CI rebuilds and fails if the root files differ.
+Ready-to-run files are at the **repository root** (the directory above this one): [`../LPSCOMP.EXE`](../LPSCOMP.EXE), [`../ROSARY.DAT`](../ROSARY.DAT), [`../MEALS.DAT`](../MEALS.DAT) and [`../HELLO.EXE`](../HELLO.EXE). Copy **`LPSCOMP.EXE`, `ROSARY.DAT` and `MEALS.DAT` into the same directory** on the Book 8088; `ROSARY.DAT` holds the rosary prayer texts and `MEALS.DAT` the Meal Planner card pictures. Without `ROSARY.DAT` everything works except the Rosary, which then shows *ROSARY.DAT not found: copy it next to LPSCOMP.EXE*; without `MEALS.DAT` the Meal Planner runs in text mode. `make dos`, `make rosary`, `make meals` and `make hello` rebuild into this directory only; those local copies are gitignored. After a source change, copy the new files up (`cp LPSCOMP.EXE ROSARY.DAT MEALS.DAT HELLO.EXE ..`) so the root copies stay current. CI rebuilds and fails if the root files differ.
 
 The screen is the full **80×25** text mode (no 43/50-line modes). Home is two panes: the menu on the left, and a day summary (date, weight, reminders, kanban counts) on the right. The 22 activities sit on one page in three columns (see *Activities* below). Kanban shows TODO, DOING and DONE side by side. The rosary uses 80-character lines; the timer stays centered. Keys, English and French wording, palettes, and the SAVE/ICS/CSV bytes are unchanged. On the 8088 the video driver rewrites only the rows that changed.
 
@@ -59,6 +59,23 @@ The JSON saves, the ICS files and the weight CSV are the same bytes on the PicoC
 - Tested with PicoCalc-written fixtures (`tests/fixtures/picocalc_intl.*`, from `tools/picocalc_fixture.cpp intl` and `close`): DOS reads and writes the JSON byte for byte; closing that day on DOS writes the same ICS, weight CSV and next save as the PicoCalc's Finish screen (only the ICS file name differs, CHG02c); the PicoCalc reads DOS's saves and writes them back unchanged. The old `.BIN` migration is unchanged (those files only hold ASCII).
 - Speed on an 8088 (DOSBox `cputype=8086`, `cycles=fixed 300`): a Kanban key with 24 tasks takes about 295 ms (was 281 ms), with emoji and € in the tasks 110–123 ms (was 96–103 ms); other screens are within a few ms. Plain ASCII text is drawn without a copy.
 
+### Meal Planner (LPS-DOS-115-CHG07)
+
+As on the PicoCalc v1.14/v1.15, **Space on Home** opens the Meal Planner: a deck of 16 cards in three rows, **Drinks** (6), **Food** (8) and **Blank** (2). On a colour EGA or VGA screen the planner switches to EGA graphics (640×350, 16 colours) and shows each card with the original card illustrations from the PicoCalc (`assets/meal_deck_sheet1.png` and `meal_deck_sheet2.png`, the same files), its name and portion. The rest of the screen keeps the text layout and the user's palette colour.
+
+- **Left/Right** change card, **Up/Down** change row; both wrap. **Enter** plays the card (it turns grey and shows **PLAYED #n**, its place in the played order) or puts a played card back. **Space** or **Esc** returns to Home in text mode, with the blink setting, cursor and colours restored. On an archived day Space shows the read-only notice.
+- The played order is the PicoCalc's `"meals":{"played":[…]}` in the save, byte for byte (tested with a save written by the PicoCalc's own code, `tests/fixtures/picocalc_meals.jsn`). DOS writes the save when the planner closes, like its other screens; the PicoCalc writes after each play. Closing the day starts a new deck, as on the PicoCalc.
+- **Pictures:** `tools/mkmeals.py` (Python 3, standard library only; `make meals`) cuts the 13 card pictures out of the two sheets the way the PicoCalc's `meal_sprites.py` does, scales them to 240×128 EGA pixels (with the EGA's tall pixels taken into account) and picks for each card the 10 nearest of the EGA's 64 colours, plus the card body, ink, edge and ribbon colours. The artwork itself is not redrawn. The 13 pictures, stored by bit plane, make `MEALS.DAT` (199,964 bytes). LPSCOMP reads a picture from disk the first time it is shown and keeps it in far memory until the planner closes (15 KB each; when memory runs short it frees the others first).
+- **Without colour EGA** (CGA, MDA/Hercules, mono EGA, an EGA card with only 64 KB), or when `MEALS.DAT` is missing or damaged, or memory runs out, the planner still works in **text mode**: the same cards, keys and save, drawn as a text box with the name and portion, and a line saying why (*No EGA screen: Meal Planner in text mode*, *MEALS.DAT not found: copy it next to LPSCOMP.EXE*, *MEALS.DAT is damaged: copy it again*, *Not enough memory for the pictures*).
+- **Played cards** are greyed through the palette only: no pixel is redrawn.
+- **Checks:** `MEALS.DAT` starts with `LPSMEALS`, version 1, 13 pictures of 240×128, then a table (16 palette bytes and a 32-bit sum per picture) protected by a CRC-32; the file size must match. Each picture is checked against its sum (two 16-bit running sums, as in Fletcher's checksum) when it is loaded, not with a CRC-32: a CRC-32 of one 15 KB picture took 1.2 s on the 8088, the sum takes 0.11 s.
+- **Speed on an 8088** (DOSBox `machine=ega`, `cputype=8086`, `cycles=fixed 300`): Space on Home → planner drawn in 0.50 s (mode switch, whole screen, first picture read and checked); Left/Right to a picture not shown yet 0.24 s (0.155 s of it is the disk read and check), to a picture already in memory 0.15–0.16 s; Up/Down 0.17 s; Enter (play or put back) 0.15 s; Esc back to the text Home 0.22 s, plus the save (0.6 s for a small save). Drawing a whole card takes 88 ms. A real floppy or hard disk adds its own read time to the first view of each picture.
+- CSV export of the planner (`MPYYMMDD.CSV`) comes with LPS-DOS-115-CHG08, the global TAB/SPACE keys with CHG09.
+
+![Meal Planner, EGA](captures/08-meal-planner-ega.png)
+
+![Meal Planner, a played card, French](captures/09-meal-planner-played-fr.png)
+
 
 ![Activities](captures/02-activities.png)
 
@@ -69,7 +86,7 @@ French is shown with its accents (LPS-DOS-115-CHG03): **Activités, Journée, Ro
 Saves are JSON files, `SAVE_A.JSN` and `SAVE_B.JSN`, exactly as on the PicoCalc v1.13 and later (LPS-DOS-115-CHG04, PicoCalc LPS-113-CHG06). The data folder can be copied both ways between the PicoCalc SD card (`LPS/`) and `C:\LPS\`: the two machines write the same schema 2 file, with the same keys in the same order, the A/B alternation, the generation number and the CRC-32 as the last key, and each machine opens the other's saves.
 - **Migration**: when `C:\LPS\` has no `.JSN` save yet, LPSCOMP reads the old `SAVE_A.BIN`/`SAVE_B.BIN` (formats v1 to v6, as before) and writes `SAVE_A.JSN` at start-up. The `.BIN` files are never modified or deleted; they stay as a backup. A `.JSN` save cannot be read by an earlier DOS build.
 - **The activity catalog** (`{"id","fr","en"}` entries) is used since LPS-DOS-115-CHG05, and each day's activity names are kept, including names the catalog no longer has.
-- **PicoCalc data that DOS does not use yet is kept**: the Meal Planner deck (`"meals":{"played":[…]}`) and the hidden Home entries (`"homeHidden"`). DOS writes them back unchanged. Closing the day on DOS resets the meal deck, as the PicoCalc does. A DOS tick on an activity that the PicoCalc renamed goes under the PicoCalc's name, as it does there.
+- **PicoCalc data that DOS does not use yet is kept**: the hidden Home entries (`"homeHidden"`), written back unchanged. The Meal Planner deck (`"meals":{"played":[…]}`) is used since LPS-DOS-115-CHG07. Closing the day on DOS resets the meal deck, as the PicoCalc does. A DOS tick on an activity that the PicoCalc renamed goes under the PicoCalc's name, as it does there.
 - **Text** (notes, tasks, reminders) is UTF-8 in the file, as on the PicoCalc, and CP437 on screen. A character that CP437 does not have (for example `€`, `œ` or an emoji) is read as `?` and written back as `?`.
 - Unknown keys are skipped, as on the PicoCalc, and are not written back. A save from a newer schema (version 3 or later) is refused and protected: LPSCOMP shows the read error and does not overwrite it.
 - After each write, LPSCOMP reads the file back and checks its CRC-32 and generation before it marks the slot as current. The PicoCalc parses the whole file again at this point; DOS checks the CRC only, which is much faster on the 8088.
@@ -82,8 +99,10 @@ Saves are JSON files, `SAVE_A.JSN` and `SAVE_B.JSN`, exactly as on the PicoCalc 
 
 - MS-DOS 3.3+ / FreeDOS / MS-DOS 7.x (FAT12/16)
 - Intel 8088 or compatible (EXE built with Open Watcom `-0`)
-- ~97 KB free disk for `LPSCOMP.EXE` (~87 KB) and `ROSARY.DAT` (~10 KB); the data folder grows with history (each JSON save is up to about 10 KB)
+- ~300 KB free disk for `LPSCOMP.EXE` (~94 KB), `ROSARY.DAT` (~10 KB) and `MEALS.DAT` (~196 KB); the data folder grows with history (each JSON save is up to about 10 KB)
 - Colour text (CGA/EGA/VGA) for palettes; mono still readable
+- EGA (128 KB or more) or VGA in colour for the Meal Planner pictures; otherwise the planner runs in text mode
+- Python 3 to build `MEALS.DAT` (`make meals`, `make test`)
 - Open Watcom C/C++ (v2) to build; gcc to run the host tests
 
 ## Feature parity (Companion v1.11)
@@ -106,6 +125,7 @@ Saves are JSON files, `SAVE_A.JSN` and `SAVE_B.JSN`, exactly as on the PicoCalc 
 | Dual A/B JSON save (`SAVE_A/B.JSN`, schema 2) + CRC | Yes (read **and** write, PicoCalc-compatible) |
 | `SAVE_A/B.BIN` v1–v6 migration | Yes (read once; `.BIN` files left untouched) |
 | ICS + weights CSV byte-compatible | Yes |
+| Meal Planner (16 cards, Space on Home, card pictures) | Yes (LPS-DOS-115-CHG07, EGA graphics; text mode without EGA); CSV export in CHG08 |
 
 ## Build
 
@@ -132,12 +152,13 @@ From this directory:
 ```sh
 make dos      # LPSCOMP.EXE  (-0 -bt=dos -ml, 8086/8088, soft FP, 4 KB stack)
 make rosary   # ROSARY.DAT   prayer texts, built by tools/mkrosary (host gcc)
+make meals    # MEALS.DAT    Meal Planner pictures, built by tools/mkmeals.py (python3)
 make hello    # HELLO.EXE    BIOS smoke test
-make test     # host gcc tests (no WATCOM required; builds ROSARY.DAT first)
+make test     # host gcc tests (no WATCOM required; builds ROSARY.DAT and MEALS.DAT first)
 make clean
 ```
 
-`make` (no target) builds both EXEs and `ROSARY.DAT`, and runs the host tests. `make dos` and
+`make` (no target) builds both EXEs, `ROSARY.DAT` and `MEALS.DAT`, and runs the host tests. `make dos` and
 `make hello` prepend `$WATCOM/binl64` (or `binl`) to `PATH` for that command:
 `wcl` looks up `wcc` and `wlink` on `PATH`, not beside the `wcl` binary.
 `make captures` regenerates text dumps under `captures/` with the host UI driver.
@@ -152,19 +173,22 @@ for f in src/*.c src/*.h tests/test_storage.c tools/mkrosary.c; do
   ./tools/cp437 "$f" build/cp437/$(basename "$f"); done
 G=build/cp437
 wcl -0 -bt=dos -ml -zt256 -ox -fpc -k4096 -dLPS_DOS -i=$G -fe=LPSCOMP.EXE \
-  $G/state.c $G/ics.c $G/save.c $G/jsave.c $G/paths.c $G/rosary.c $G/app.c $G/cp437.c $G/wrap.c \
-  $G/plat_dos.c $G/main.c
+  $G/state.c $G/ics.c $G/save.c $G/jsave.c $G/paths.c $G/rosary.c $G/meals.c $G/app.c $G/cp437.c \
+  $G/wrap.c $G/ega.c $G/plat_dos.c $G/main.c
 ```
 
 ### Host tests (gcc, no DOS)
 
-`make test` builds `tools/mkrosary` and `ROSARY.DAT`, then
+`make test` builds `tools/mkrosary`, `ROSARY.DAT` and `MEALS.DAT` (and
+checks that `MEALS.DAT` matches the copy at the repository root), then
 `tests/test_storage` from the CP437 copies, and runs it from this directory so
 it finds `tests/fixtures/v12_payload.bin`, the PicoCalc JSON saves
 `tests/fixtures/picocalc_*.jsn` and `ROSARY.DAT`. The JSON tests cover the
 round trip and A/B alternation, byte-identical rewriting of the PicoCalc
 fixtures, BIN migration, a damaged A falling back to B, unknown keys and a
-newer schema.
+newer schema. The Meal Planner tests cover `MEALS.DAT` (load, sums, damaged and
+missing files) and the planner itself (keys, wrap, play and put back, saves,
+archived days, text cards, the graphics hooks, French).
 
 `tools/picocalc_fixture.cpp` builds the PicoCalc's own save code (from a
 checkout of [LPS-Companion-PicoCalc](https://github.com/TME520/LPS-Companion-PicoCalc))
@@ -175,6 +199,7 @@ P=/path/to/LPS-Companion-PicoCalc
 g++ -std=c++17 -I$P/src -I$P/tests -o /tmp/pcfix tools/picocalc_fixture.cpp
 /tmp/pcfix full tests/fixtures/picocalc_full.jsn
 /tmp/pcfix custom tests/fixtures/picocalc_custom.jsn
+/tmp/pcfix meals tests/fixtures/picocalc_custom.jsn tests/fixtures/picocalc_meals.jsn 8 2 0 9 14 15 13
 /tmp/pcfix check C:/LPS/SAVE_A.JSN      # prints valid / damaged / ...
 ```
 
@@ -204,8 +229,10 @@ g++ -std=c++17 -I$P/src -I$P/tests -o /tmp/pcfix tools/picocalc_fixture.cpp
 
 The EXE uses Open Watcom's **large model** (`-ml`): far data pointers and one
 code segment per module. The 64 KB DGROUP (near data + 4 KB stack) used to be
-almost full (63,088 bytes); it is now about 17 KB (17,504 bytes with
-LPS-DOS-115-CHG06), which leaves room for the EGA Meal Planner.
+almost full (63,088 bytes); it is now about 19 KB (17,664 bytes with
+LPS-DOS-115-CHG06d, 18,992 bytes with the EGA Meal Planner of
+LPS-DOS-115-CHG07). The Meal Planner pictures live in `MEALS.DAT` and the far
+heap, never in DGROUP.
 
 - The prayer texts are not in the EXE. `tools/mkrosary` builds `ROSARY.DAT`
   from `src/rosary_text.c`, the single source of the texts, and LPSCOMP loads
@@ -232,6 +259,13 @@ LPS-DOS-115-CHG06), which leaves room for the EGA Meal Planner.
   holds the accented French texts; a version 1 file from an earlier build is
   refused with *ROSARY.DAT is damaged: copy it again*, so copy both files
   together.
+- `MEALS.DAT` layout (little-endian, LPS-DOS-115-CHG07): `LPSMEALS` magic,
+  u16 version 1, u16 picture count 13, u16 width 240, u16 height 128, u16
+  picture size 15,360, u32 CRC-32 of the table; a table of 13 entries
+  (16 EGA palette values 0–63, u32 picture sum); then the 13 pictures, each
+  as 4 bit planes of 128 rows × 30 bytes. Palette entries 2–5 are the card
+  body, ink, edge and ribbon; 6–15 the picture's own colours; 0 and 1 stay
+  black and the user's text colour.
 
 Check the segment sizes with `wcl ... -fm=LPSCOMP.MAP` and look at `DGROUP`.
 
@@ -309,7 +343,7 @@ Other screens (activities, kanban, rosary, timer) are in `captures/`.
 
 ## Install on a real machine / DOSBox
 
-1. Copy the repository-root `LPSCOMP.EXE` **and `ROSARY.DAT`** into the same directory on a floppy or the hard disk (and `HELLO.EXE` for the smoke test).
+1. Copy the repository-root `LPSCOMP.EXE`, **`ROSARY.DAT` and `MEALS.DAT`** into the same directory on a floppy or the hard disk (and `HELLO.EXE` for the smoke test).
 2. Create `C:\LPS` (or pass the path as argv: `LPSCOMP D:\DATA`).
 3. Optional: `SET LPSDIR=C:\LPS`
 4. Run `LPSCOMP` or `LPSCOMP C:\LPS`.
@@ -318,7 +352,7 @@ Other screens (activities, kanban, rosary, timer) are in `captures/`.
 DOSBox-X or DOSBox Staging. `dosbox.conf` mounts the current directory as `C:` and sets an 8086 CPU with EGA, so the EXE has to sit in this directory. Copy the root binaries down (they are gitignored here) or use a local `make dos`, then start DOSBox:
 
 ```sh
-cp ../LPSCOMP.EXE ../ROSARY.DAT ../HELLO.EXE .
+cp ../LPSCOMP.EXE ../ROSARY.DAT ../MEALS.DAT ../HELLO.EXE .
 dosbox-x -conf dosbox.conf
 ```
 
@@ -352,7 +386,9 @@ Home digits, as in PicoCalc v1.12:
 | `8` | Timer | — |
 | `9` | Close the day | — |
 
-**Left/Right** browse the last 31 closed days (read-only).
+**Left/Right** browse the last 31 closed days (read-only). **Space** opens the
+Meal Planner (LPS-DOS-115-CHG07): **Left/Right** card, **Up/Down** row,
+**Enter** play / put back, **Space** or **Esc** back to Home.
 
 Activities (LPS-DOS-115-CHG05): **Up/Down** within a column, **Left/Right**
 between columns (both wrap), **Enter** or **Space** ticks, **1–9, 0** tick
@@ -402,7 +438,11 @@ byte-compatible with the firmware.
 | `src/cp437.c` | CP437 ↔ Unicode table; CP437 ↔ UTF-8 for the save and the ICS |
 | `tools/cp437.c` | Build step: UTF-8 string literals → CP437 copies in `build/cp437/` |
 | `src/wrap.c` | Word wrap at spaces for the 80-column screen (rosary texts) |
-| `src/plat_dos.c` | BIOS video/keyboard/timer |
+| `src/meals.c` | Meal Planner deck, keys and played order; loads `MEALS.DAT` |
+| `src/ega.c` | EGA mode 10h drawing for the Meal Planner (DOS only) |
+| `tools/mkmeals.py` | Writes `MEALS.DAT` from `assets/meal_deck_sheet*.png` |
+| `assets/meal_deck_sheet*.png` | The PicoCalc's Meal Planner card illustrations |
+| `src/plat_dos.c` | BIOS video/keyboard/timer; EGA switch for the Meal Planner |
 | `src/plat_host.c` | Linux host for tests |
 | `src/hello.c` | `HELLO.EXE` BIOS smoke test |
 | `tests/test_storage.c` | Host encode/decode, ICS, CSV, A/B, `ROSARY.DAT`, v1.2 fixture, French CP437 screens, JSON saves, activities, custom activities |
@@ -412,8 +452,8 @@ byte-compatible with the firmware.
 
 ## Captures
 
-PNG screenshots under `captures/` (home EN/FR, a few feature screens, and a
-DOSBox 8086 home grab). Text dumps are not stored; `make captures` rewrites
+PNG screenshots under `captures/` (home EN/FR, a few feature screens, a
+DOSBox 8086 home grab, and two DOSBox EGA grabs of the Meal Planner). Text dumps are not stored; `make captures` rewrites
 `captures/*.txt` from the host UI driver.
 
 ---
@@ -426,7 +466,7 @@ Memes formats `SAVE_A/B.JSN` (sauvegarde JSON, schema 2), ICS et CSV que le firm
 
 Seul le nom du fichier ICS differe de la PicoCalc (LPS-DOS-115-CHG02c) : `EXPORT\YYYYMMDD.ICS`, par exemple `EXPORT\20260917.ICS`, au lieu de `YYYY-MM-DD_LPS-Companion.ics`. DOS ne garde que des noms 8.3 et coupait le nom long en `YYYY-MM-.ICS` : tous les jours d'un mois ecrasaient le meme fichier. Le contenu ne change pas, et les anciens fichiers deja dans `EXPORT\` restent en place. Sous Linux, un disque FAT affiche en general ces noms en majuscules : un lecteur qui ne cherche que `*.ics` ne les voit pas.
 
-Les fichiers prets a lancer sont a la **racine du depot** : [`../LPSCOMP.EXE`](../LPSCOMP.EXE), [`../ROSARY.DAT`](../ROSARY.DAT) et [`../HELLO.EXE`](../HELLO.EXE). Copiez **`LPSCOMP.EXE` et `ROSARY.DAT` dans le meme dossier** sur le Book 8088 ; `ROSARY.DAT` contient les textes du rosaire. Sans lui, tout fonctionne sauf le rosaire, qui affiche *ROSARY.DAT introuvable : copiez-le a cote de LPSCOMP.EXE*. `make dos` / `make rosary` / `make hello` reconstruisent seulement dans ce dossier (copies non versionnees). Apres une modification des sources, recopiez-les a la racine (`cp LPSCOMP.EXE ROSARY.DAT HELLO.EXE ..`). La CI reconstruit et echoue si les fichiers a la racine different.
+Les fichiers prets a lancer sont a la **racine du depot** : [`../LPSCOMP.EXE`](../LPSCOMP.EXE), [`../ROSARY.DAT`](../ROSARY.DAT), [`../MEALS.DAT`](../MEALS.DAT) et [`../HELLO.EXE`](../HELLO.EXE). Copiez **`LPSCOMP.EXE`, `ROSARY.DAT` et `MEALS.DAT` dans le meme dossier** sur le Book 8088 ; `ROSARY.DAT` contient les textes du rosaire et `MEALS.DAT` les images des cartes du planificateur de repas. Sans `ROSARY.DAT`, tout fonctionne sauf le rosaire, qui affiche *ROSARY.DAT introuvable : copiez-le a cote de LPSCOMP.EXE* ; sans `MEALS.DAT`, le planificateur passe en mode texte. `make dos` / `make rosary` / `make meals` / `make hello` reconstruisent seulement dans ce dossier (copies non versionnees). Apres une modification des sources, recopiez-les a la racine (`cp LPSCOMP.EXE ROSARY.DAT MEALS.DAT HELLO.EXE ..`). La CI reconstruit et echoue si les fichiers a la racine different.
 
 L'ecran utilise tout le mode texte **80×25**. L'accueil a deux volets : le menu a gauche, le resume du jour a droite (date, poids, rappels, kanban). Les 22 activites tiennent sur une page en trois colonnes (voir *Activites* plus bas). Le kanban montre A FAIRE, EN COURS et FINI cote a cote. Le rosaire utilise des lignes de 80 caracteres ; le minuteur reste centre. Les touches, les textes, les palettes et les octets SAVE/ICS/CSV ne changent pas. Sur 8088, seules les lignes modifiees sont reecrites.
 
@@ -441,7 +481,7 @@ Le français s'affiche avec ses accents (LPS-DOS-115-CHG03) : **Activités, Jour
 Les sauvegardes sont des fichiers JSON, `SAVE_A.JSN` et `SAVE_B.JSN`, exactement comme sur la PicoCalc v1.13 et suivantes (LPS-DOS-115-CHG04, PicoCalc LPS-113-CHG06). Le dossier de donnees se copie dans les deux sens entre la carte SD de la PicoCalc (`LPS/`) et `C:\LPS\` : les deux machines ecrivent le meme fichier schema 2, memes cles dans le meme ordre, alternance A/B, numero de generation et CRC-32 en derniere cle, et chacune ouvre les sauvegardes de l'autre.
 - **Migration** : si `C:\LPS\` n'a pas encore de sauvegarde `.JSN`, LPSCOMP lit les anciens `SAVE_A.BIN`/`SAVE_B.BIN` (formats v1 a v6, comme avant) et ecrit `SAVE_A.JSN` au demarrage. Les `.BIN` ne sont jamais modifies ni effaces ; ils restent comme copie de secours. Une sauvegarde `.JSN` ne se relit pas avec une version DOS precedente.
 - **Le catalogue d'activites** (entrees `{"id","fr","en"}`) est utilise depuis LPS-DOS-115-CHG05, et les noms d'activites de chaque jour sont conserves, y compris ceux que le catalogue n'a plus.
-- **Les donnees PicoCalc que DOS n'utilise pas encore sont conservees** : le paquet du planificateur de repas (`"meals":{"played":[…]}`) et les entrees d'accueil masquees (`"homeHidden"`). DOS les reecrit telles quelles. Terminer le jour sur DOS remet le paquet de repas a zero, comme la PicoCalc. Une activite cochee sur DOS et renommee sur la PicoCalc s'enregistre sous le nom de la PicoCalc, comme la-bas.
+- **Les donnees PicoCalc que DOS n'utilise pas encore sont conservees** : les entrees d'accueil masquees (`"homeHidden"`), reecrites telles quelles. Le paquet du planificateur de repas (`"meals":{"played":[…]}`) est utilise depuis LPS-DOS-115-CHG07. Terminer le jour sur DOS remet le paquet de repas a zero, comme la PicoCalc. Une activite cochee sur DOS et renommee sur la PicoCalc s'enregistre sous le nom de la PicoCalc, comme la-bas.
 - **Le texte** (notes, taches, rappels) est en UTF-8 dans le fichier, comme sur la PicoCalc, et en CP437 a l'ecran. Un caractere absent de la CP437 (par exemple `€`, `œ` ou un emoji) est lu `?` et reecrit `?`.
 - Les cles inconnues sont ignorees, comme sur la PicoCalc, et ne sont pas reecrites. Une sauvegarde d'un schema plus recent (version 3 ou plus) est refusee et protegee : LPSCOMP affiche l'erreur de lecture et ne l'ecrase pas.
 - Apres chaque ecriture, LPSCOMP relit le fichier et verifie son CRC-32 et sa generation avant d'en faire le slot courant. La PicoCalc relit et analyse tout le fichier a ce moment ; DOS verifie seulement le CRC, bien plus rapide sur 8088.
@@ -485,6 +525,19 @@ Les sauvegardes JSON, les ICS et le CSV des poids sont les mêmes octets sur la 
 - Une lettre tapée passe en UTF-8 tout de suite ; Retour efface un caractère entier (les 4 octets d'un émoji d'un coup). Les limites sont en octets UTF-8, comme sur la PicoCalc : 32 pour une tâche ou un rappel, 24 pour un nom d'activité, et les compteurs montrent des octets.
 - Testé avec des fichiers écrits par le code de la PicoCalc (`tests/fixtures/picocalc_intl.*`, par `tools/picocalc_fixture.cpp intl` et `close`) : DOS relit et réécrit le JSON octet pour octet ; terminer ce jour sous DOS écrit le même ICS, le même CSV des poids et la même sauvegarde suivante que l'écran Terminer de la PicoCalc (seul le nom du fichier ICS diffère, CHG02c) ; la PicoCalc relit les sauvegardes DOS et les réécrit à l'identique. La migration des anciens `.BIN` ne change pas (ils ne contiennent que de l'ASCII).
 - Vitesse sur 8088 (DOSBox `cputype=8086`, `cycles=fixed 300`) : une touche dans le Kanban avec 24 tâches prend environ 295 ms (281 ms avant), avec émojis et € dans les tâches 110 à 123 ms (96 à 103 ms avant) ; les autres écrans varient de quelques ms. Le texte ASCII s'affiche sans copie.
+
+### Planificateur de repas (LPS-DOS-115-CHG07)
+
+Comme sur la PicoCalc v1.14/v1.15, **Espace sur l'accueil** ouvre le planificateur de repas : un paquet de 16 cartes en trois rangées, **Boissons** (6), **Nourriture** (8) et **Blank** (2). Sur un écran EGA ou VGA couleur, le planificateur passe en graphisme EGA (640×350, 16 couleurs) et montre chaque carte avec les illustrations d'origine de la PicoCalc (`assets/meal_deck_sheet1.png` et `meal_deck_sheet2.png`, les mêmes fichiers), son nom et sa portion. Le reste de l'écran garde la mise en page texte et la couleur de la palette choisie.
+
+- **Gauche/Droite** changent de carte, **Haut/Bas** de rangée ; les deux bouclent. **Entrée** joue la carte (elle passe en gris et affiche **JOUÉE #n**, son rang dans l'ordre joué) ou remet une carte jouée. **Espace** ou **Échap** revient à l'accueil en mode texte, avec clignotement, curseur et couleurs rétablis. Sur un jour archivé, Espace affiche l'avis de lecture seule.
+- L'ordre joué est celui de la PicoCalc, `"meals":{"played":[…]}` dans la sauvegarde, octet pour octet (testé avec une sauvegarde écrite par le code de la PicoCalc, `tests/fixtures/picocalc_meals.jsn`). DOS écrit la sauvegarde en quittant le planificateur, comme ses autres écrans ; la PicoCalc écrit après chaque carte. Terminer le jour remet le paquet à neuf, comme sur la PicoCalc.
+- **Images :** `tools/mkmeals.py` (Python 3, bibliothèque standard seulement ; `make meals`) découpe les 13 images des deux planches comme le `meal_sprites.py` de la PicoCalc, les met à 240×128 pixels EGA (en tenant compte des pixels hauts de l'EGA) et choisit pour chaque carte les 10 plus proches des 64 couleurs EGA, plus les couleurs du fond, de l'encre, du bord et du ruban. Les dessins ne sont pas refaits. Les 13 images, rangées par plan de bits, forment `MEALS.DAT` (199 964 octets). LPSCOMP lit une image sur le disque la première fois qu'elle s'affiche et la garde en mémoire lointaine jusqu'à la fermeture du planificateur (15 Ko chacune ; si la mémoire manque, il libère d'abord les autres).
+- **Sans EGA couleur** (CGA, MDA/Hercules, EGA monochrome, carte EGA de 64 Ko seulement), ou si `MEALS.DAT` manque ou est abîmé, ou si la mémoire manque, le planificateur marche quand même en **mode texte** : mêmes cartes, mêmes touches, même sauvegarde, dessinées dans un cadre texte avec nom et portion, et une ligne qui dit pourquoi (*Pas d'écran EGA : planificateur en mode texte*, *MEALS.DAT introuvable : copiez-le à côté de LPSCOMP.EXE*, *MEALS.DAT endommagé : recopiez-le*, *Mémoire insuffisante pour les images*).
+- **Les cartes jouées** passent en gris par la palette seule : aucun pixel n'est redessiné.
+- **Contrôles :** `MEALS.DAT` commence par `LPSMEALS`, version 1, 13 images de 240×128, puis une table (16 octets de palette et une somme 32 bits par image) protégée par un CRC-32 ; la taille du fichier doit correspondre. Chaque image est vérifiée au chargement par sa somme (deux sommes 16 bits cumulées, comme la somme de Fletcher), pas par un CRC-32 : un CRC-32 d'une image de 15 Ko prenait 1,2 s sur le 8088, la somme 0,11 s.
+- **Vitesse sur 8088** (DOSBox `machine=ega`, `cputype=8086`, `cycles=fixed 300`) : Espace sur l'accueil → planificateur affiché en 0,50 s (changement de mode, écran entier, première image lue et vérifiée) ; Gauche/Droite vers une image pas encore vue 0,24 s (dont 0,155 s de lecture et de contrôle), vers une image déjà en mémoire 0,15 à 0,16 s ; Haut/Bas 0,17 s ; Entrée (jouer ou remettre) 0,15 s ; Échap vers l'accueil texte 0,22 s, plus la sauvegarde (0,6 s pour une petite sauvegarde). Dessiner une carte entière prend 88 ms. Une vraie disquette ou un vrai disque dur ajoute son temps de lecture à la première vue de chaque image.
+- L'export CSV du planificateur (`MPYYMMDD.CSV`) arrive avec LPS-DOS-115-CHG08, les touches TAB/ESPACE globales avec CHG09.
 
 
 Le **Minuteur** propose **5, 30 ou 60 minutes** (LPS-DOS-115-CHG02b, comme les CHG01/CHG02 de la PicoCalc v1.12). Les touches **1**, **2** et **3** lancent directement une duree, sans Entree. Sur l'ecran de fin, elles relancent aussitot un compte a rebours et Entree revient au choix de la duree ; pendant un compte a rebours, elles sont ignorees et Entree met en pause ou reprend. Le temps vient toujours du tic BIOS (environ 55 ms). Une note deja enregistree par une ancienne version reste dans la sauvegarde et part toujours dans l'ICS (`\NNote: ...`) a la cloture du jour ; elle n'est plus affichee ni modifiable.
@@ -549,27 +602,31 @@ Open Watcom V2, variable `WATCOM` pointant sur la racine du compilateur
 ```sh
 make dos      # LPSCOMP.EXE (-0 -bt=dos -ml)
 make rosary   # ROSARY.DAT (textes du rosaire)
+make meals    # MEALS.DAT (images du planificateur de repas, python3)
 make hello    # HELLO.EXE
 make test     # tests gcc, sans Watcom
 ```
 
 ## Utilisation
 
-Copier `LPSCOMP.EXE`, `ROSARY.DAT` (dans le meme dossier) et `HELLO.EXE` depuis la racine du depot, creer `C:\LPS`, lancer `LPSCOMP` (ou `LPSCOMP chemin`).
+Copier `LPSCOMP.EXE`, `ROSARY.DAT`, `MEALS.DAT` (dans le meme dossier) et `HELLO.EXE` depuis la racine du depot, creer `C:\LPS`, lancer `LPSCOMP` (ou `LPSCOMP chemin`).
 **Q** quitte depuis l'accueil. Les touches reprennent celles du Companion.
 Activites (LPS-DOS-115-CHG05) : **Haut/Bas** dans une colonne, **Gauche/Droite**
 entre les colonnes (les deux bouclent), **Entree** ou **Espace** coche, **1–9, 0**
 cochent les lignes 1 a 10 de la colonne du curseur (numeros affiches sur cette
 colonne seulement). LPS-DOS-115-CHG06 : **E** renommer, **N** nouvelle,
 **Suppr** supprimer (Entree confirme, Echap annule), **F4/F5** monter/descendre.
+**Espace** sur l'accueil ouvre le planificateur de repas (LPS-DOS-115-CHG07) :
+**Gauche/Droite** carte, **Haut/Bas** rangee, **Entree** jouer / remettre,
+**Espace** ou **Echap** retour a l'accueil.
 
-DOSBox-X / DOSBox Staging (`cputype=8086`, `machine=ega`) : copier les EXE et `ROSARY.DAT` de la racine ici, puis `dosbox-x -conf dosbox.conf`.
+DOSBox-X / DOSBox Staging (`cputype=8086`, `machine=ega`) : copier les EXE, `ROSARY.DAT` et `MEALS.DAT` de la racine ici, puis `dosbox-x -conf dosbox.conf`.
 
 ## Empreinte
 
-`LPSCOMP.EXE` fait environ **87 Ko** (modele large, 8086, pile 4 Ko) et `ROSARY.DAT` environ **10 Ko**. `HELLO.EXE` ~3 Ko.
+`LPSCOMP.EXE` fait environ **94 Ko** (modele large, 8086, pile 4 Ko), `ROSARY.DAT` environ **10 Ko** et `MEALS.DAT` environ **196 Ko**. `HELLO.EXE` ~3 Ko.
 
-Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) passe d'environ 63 Ko a environ 14 Ko (17,1 Ko avec LPS-DOS-115-CHG06) : les textes du rosaire sont dans `ROSARY.DAT`, charge en memoire lointaine a l'ouverture du rosaire, et les gros tampons (copies de `State`, sauvegarde, exports ICS/CSV) sont alloues en memoire lointaine au demarrage. Un `ROSARY.DAT` absent ou abime affiche un message, sans plantage.
+Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) passe d'environ 63 Ko a environ 14 Ko (17,3 Ko avec LPS-DOS-115-CHG06d, 18,5 Ko avec le planificateur EGA de LPS-DOS-115-CHG07, dont les images restent dans `MEALS.DAT` et la memoire lointaine) : les textes du rosaire sont dans `ROSARY.DAT`, charge en memoire lointaine a l'ouverture du rosaire, et les gros tampons (copies de `State`, sauvegarde, exports ICS/CSV) sont alloues en memoire lointaine au demarrage. Un `ROSARY.DAT` absent ou abime affiche un message, sans plantage.
 
 ## Ecarts connus
 
@@ -577,6 +634,9 @@ Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) p
   a pas (LPS-DOS-115-CHG03).
 - Pas d'avertissement batterie (pas de materiel equivalent).
 - Config n'a pas d'entree « import SD » : le disque DOS **est** le stockage.
-- Planificateur de repas et masquage de l'accueil de la PicoCalc : pas encore
-  sur DOS, mais leurs donnees sont conservees dans la sauvegarde
-  (LPS-DOS-115-CHG04).
+- Masquage des entrees de l'accueil de la PicoCalc : pas encore sur DOS, mais
+  ses donnees sont conservees dans la sauvegarde (LPS-DOS-115-CHG04).
+- Planificateur de repas (LPS-DOS-115-CHG07) : pas encore d'export CSV
+  (CHG08) ni de touches TAB/ESPACE globales (CHG09) ; la sauvegarde est ecrite
+  en quittant le planificateur, pas a chaque carte ; les images sont controlees
+  par une somme 32 bits au lieu d'un CRC-32 (vitesse sur 8088).

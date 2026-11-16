@@ -33,6 +33,7 @@ typedef uint64_t lps_tick_t;
 #define LEGACY_ACTIVITY_COUNT 16
 #define LEGACY_ACTIVITY_MASK 0xFFFFu
 #define DAY_SLOTS (HISTORY_LENGTH+1) /* today + history, for the frozen day names */
+#define MEAL_CARD_COUNT 16 /* Meal Planner deck (LPS-DOS-115-CHG07, PicoCalc LPS-114-CHG01) */
 /* Bit i of a 32-bit flag word, with 16-bit shifts only (32-bit shifts by a
  * variable count are slow loops on the 8088). */
 #define FLAG_BIT(f,i) ((i)<16 ? (((unsigned)((f)&0xffffu)>>(i))&1u) : (((unsigned)((f)>>16)>>((i)-16))&1u))
@@ -90,7 +91,8 @@ enum Screen {
     SCR_DATE, SCR_ACTIVITIES, SCR_WEIGHT, SCR_KANBAN, SCR_TASK_EDIT,
     SCR_DAILY_REVIEW, SCR_FINISH, SCR_REWARD, SCR_CONFIG, SCR_LANGUAGE, SCR_COLORS,
     SCR_ROSARY_MODE, SCR_ROSARY_SET, SCR_ROSARY_DECADE, SCR_ROSARY_PRAYER, SCR_ROSARY_COMPLETE,
-    SCR_ACTIVITY_EDIT /* LPS-DOS-115-CHG06 */
+    SCR_ACTIVITY_EDIT, /* LPS-DOS-115-CHG06 */
+    SCR_MEAL_PLANNER   /* LPS-DOS-115-CHG07 */
 };
 
 typedef struct { uint16_t year; uint8_t month, day; } Date;
@@ -126,8 +128,25 @@ typedef struct {
     uint8_t activityCount;
     uint16_t nextActivityId;
     Activity activities[ACTIVITY_CAPACITY];
+    /* Meal Planner deck (LPS-DOS-115-CHG07): the cards played today, deck
+     * indices in order of play ("meals":{"played":[...]} in the save). */
+    uint8_t mealCount;
+    uint8_t meals[MEAL_CARD_COUNT];
 } State;
 typedef struct { uint8_t bytes[BLOB_CAPACITY]; size_t size; } Blob;
+
+/* Meal Planner pictures (LPS-DOS-115-CHG07). MEALS_NO_EGA: the platform
+ * has no EGA colour screen; the app then shows the planner in text mode. */
+enum MealsLoad { MEALS_OK = 0, MEALS_MISSING = 1, MEALS_CORRUPT = 2, MEALS_NO_MEMORY = 3, MEALS_NO_EGA = 4 };
+/* The card the planner shows. Texts are screen text (CP437). */
+typedef struct {
+    uint8_t card;      /* deck index 0-15 */
+    uint8_t picture;   /* MEALS.DAT picture */
+    uint8_t row;       /* enum MealRow */
+    uint8_t position;  /* 1-based place in the order of play, 0 = still in the deck */
+    uint8_t language;
+    const char *rowName, *name, *portion; /* name and portion empty on a Blank card */
+} MealView;
 
 typedef struct Platform Platform;
 struct Platform {
@@ -142,6 +161,15 @@ struct Platform {
     int  (*save)(Platform *self, const State *s);
     int  (*export_ics)(Platform *self, const Day *day, const State *s, uint32_t totalXp, uint32_t dayXp, int language);
     int  (*export_weight_csv)(Platform *self, const Day *day);
+    /* Meal Planner in graphics (LPS-DOS-115-CHG07); NULL = text only.
+     * meal_open: entering the planner, returns enum MealsLoad (MEALS_OK = the
+     * card will be drawn in graphics). meal_card: in a frame, instead of the
+     * text card; the screen switches to graphics at present() and back to
+     * text at the first frame without a card. Returns MEALS_OK, or why the
+     * picture is missing (the card is drawn without it). meal_close: leaving. */
+    int  (*meal_open)(Platform *self);
+    int  (*meal_card)(Platform *self, const MealView *view);
+    void (*meal_close)(Platform *self);
     void *user;
 };
 
@@ -233,11 +261,10 @@ int write_weight_csv(const char *weights_dir, const Day *day);
 
 /* JSON save file (jsave.c, LPS-DOS-115-CHG04): PicoCalc v1.15 schema 2. The
  * catalog is in the State and the day names in lps_day_names (CHG05); the
- * Meal Planner deck and hidden home entries the DOS port does not use yet
- * are kept inside jsave.c and written back. */
+ * hidden home entries the DOS port does not use yet are kept inside jsave.c
+ * and written back; the Meal Planner deck is in the State (CHG07). */
 int jsave_init(void);   /* far-heap tables; 0 = out of memory. Idempotent. */
-void jsave_reset(void); /* forget kept data: no day names, meals or hidden entries */
-void jsave_new_day(void); /* closing the day deals a new Meal Planner deck */
+void jsave_reset(void); /* forget kept data: no day names or hidden entries */
 enum SaveCheck jsave_read(const char *path, State *out, uint32_t *generation, uint32_t *checksum);
 int jsave_write(const char *path, const State *s, uint32_t generation, uint32_t *checksum);
 enum SaveCheck jsave_peek(const char *path, uint32_t *version, uint32_t *generation); /* first line only */

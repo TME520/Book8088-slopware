@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200112L
 #include "lps.h"
 #include "rosary.h"
+#include "meals.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -1148,6 +1149,182 @@ static void check_intl_interop(const char *dir){
     /* The PicoCalc reads what DOS wrote: checked with tools/picocalc_fixture check (README). */
 }
 
+/* ---- Meal Planner (LPS-DOS-115-CHG07) ------------------------------------ */
+static void put_file(const char *path, const unsigned char *buf, size_t n){ write_file(path,buf,n); }
+static int open_variant(const char *path){ meals_close(); meals_set_path(path); return meals_open(); }
+static void check_meals_dat(const char *tmpdir){
+    static unsigned char dat[MEALS_DAT_SIZE+1], bad[MEALS_DAT_SIZE+1];
+    char path[256], cwd[512]; long n; unsigned i, k; const uint8_t *pl, *first, *again, *pal;
+    const size_t pictures=MEALS_DAT_HEADER+(size_t)MEAL_PICTURE_COUNT*MEALS_TABLE_ENTRY;
+    n=read_file(MEALS_DAT_NAME,dat,sizeof(dat));
+    if(n<0){ fprintf(stderr,"missing MEALS.DAT (run `make meals` in lps-companion)\n"); assert(0); }
+    assert(n==MEALS_DAT_SIZE && n==199964 && !memcmp(dat,MEALS_DAT_MAGIC,8));
+    { static const uint8_t w[4]={1,0,2,0}; assert(meals_checksum(w,4)==0x00040003ul && meals_checksum(w,0)==0); }
+    assert(open_variant(MEALS_DAT_NAME)==MEALS_OK);
+    for(i=0;i<MEAL_PICTURE_COUNT;i++){
+        pal=meals_palette(i);
+        assert(pal && pal[0]==0 && pal[1]==0 && pal[MEAL_INK_BODY]==0x3F && pal[MEAL_INK_TEXT]==0x00);
+        for(k=2;k<16;k++) assert(pal[k]<64);
+        assert(meals_picture(i,&pl)==MEALS_OK && pl);
+        if(!i) first=pl;
+        /* Every pixel is a card colour (2-15): index bits 1-3 are never all 0. */
+        for(k=0;k<MEALS_PLANE_BYTES;k++) assert((pl[MEALS_PLANE_BYTES+k]|pl[2*MEALS_PLANE_BYTES+k]|pl[3*MEALS_PLANE_BYTES+k])==0xFF);
+        /* The top-left corner is the card body (2) in every picture. */
+        assert((pl[0]&0x80)==0 && (pl[MEALS_PLANE_BYTES]&0x80) && !(pl[2*MEALS_PLANE_BYTES]&0x80) && !(pl[3*MEALS_PLANE_BYTES]&0x80));
+        assert(meals_checksum(pl,MEALS_PICTURE_BYTES)==((uint32_t)pal[16]|((uint32_t)pal[17]<<8)|((uint32_t)pal[18]<<16)|((uint32_t)pal[19]<<24)));
+    }
+    assert(meals_picture(0,&again)==MEALS_OK && again==first); /* kept until closed */
+    assert(meals_picture(MEAL_PICTURE_COUNT,&pl)==MEALS_CORRUPT && !pl);
+    meals_close(); assert(!meals_palette(0) && meals_picture(0,&pl)==MEALS_CORRUPT);
+    /* Damaged copies are refused when the planner opens. */
+    sprintf(path,"%s/MEALS.DAT",tmpdir);
+    {   static const size_t at[]={0,8,10,12,14,16,20,MEALS_DAT_HEADER+5,MEALS_DAT_HEADER+MEALS_TABLE_ENTRY+17};
+        for(i=0;i<sizeof(at)/sizeof(at[0]);i++){
+            memcpy(bad,dat,(size_t)n); bad[at[i]]^=0x01;
+            put_file(path,bad,(size_t)n); assert(open_variant(path)==MEALS_CORRUPT && !meals_palette(0));
+        }
+    }
+    put_file(path,dat,(size_t)n-1); assert(open_variant(path)==MEALS_CORRUPT);           /* truncated */
+    memcpy(bad,dat,(size_t)n); bad[n]=0; put_file(path,bad,(size_t)n+1); assert(open_variant(path)==MEALS_CORRUPT); /* longer */
+    /* A palette value past 63, the table CRC made right: still refused. */
+    memcpy(bad,dat,(size_t)n); bad[MEALS_DAT_HEADER+3*MEALS_TABLE_ENTRY+9]=64;
+    put32(bad+20,crc32(bad+MEALS_DAT_HEADER,(size_t)MEAL_PICTURE_COUNT*MEALS_TABLE_ENTRY));
+    put_file(path,bad,(size_t)n); assert(open_variant(path)==MEALS_CORRUPT);
+    /* A damaged picture: the planner opens, that picture is refused, the
+     * others still load. */
+    memcpy(bad,dat,(size_t)n); bad[pictures+5u*MEALS_PICTURE_BYTES+1234]^=0x10;
+    put_file(path,bad,(size_t)n); assert(open_variant(path)==MEALS_OK);
+    assert(meals_picture(5,&pl)==MEALS_CORRUPT && !pl && meals_picture(4,&pl)==MEALS_OK && meals_picture(6,&pl)==MEALS_OK);
+    meals_close(); remove(path);
+    /* Not next to the EXE: the current directory's copy; nowhere: missing. */
+    assert(open_variant(path)==MEALS_OK && meals_picture(MP_SOUP,&pl)==MEALS_OK && pl); meals_close();
+    assert(getcwd(cwd,sizeof(cwd)) && chdir(tmpdir)==0);
+    assert(open_variant(path)==MEALS_MISSING && !meals_palette(0));
+    assert(chdir(cwd)==0);
+    meals_set_path(MEALS_DAT_NAME);
+}
+static int fake_opens, fake_closes, fake_cards, fake_open_result, fake_card_result;
+static MealView fake_view;
+static int fake_meal_open(Platform *p){ (void)p; fake_opens++; return fake_open_result; }
+static int fake_meal_card(Platform *p, const MealView *v){ (void)p; fake_cards++; fake_view=*v; return fake_card_result; }
+static void fake_meal_close(Platform *p){ (void)p; fake_closes++; }
+static int text_card_shows(Platform *hw, const char *name, const char *portion){
+    char b[48]; sprintf(b,"[ %s ]",portion);
+    return row_has(hw,12,name) && row_has(hw,14,b);
+}
+static void check_meal_planner(const char *dir){
+    static unsigned char store[16384]; static State out; App *app=(App*)store; Platform *hw;
+    uint32_t gen=0; int active=-1; char pa[256], pb[256]; size_t n;
+    fresh_dir(dir); jpath(pa,dir,"SAVE_A.JSN"); jpath(pb,dir,"SAVE_B.JSN");
+    hw=plat_host_create(0); app_init(app,hw); app_start(app); assert(app_screen(app)==SCR_HOME);
+    /* SPACE from Home; no graphics on the host: the text card. */
+    app_key(app,' '); assert(app_screen(app)==SCR_MEAL_PLANNER);
+    assert(row_has(hw,3,"MEAL PLANNER") && row_has(hw,4,"Drinks 1/6") && row_has(hw,4,"16/16 left"));
+    assert(row_has(hw,7,"Drinks") && plat_host_rev(hw,7,38) && !plat_host_rev(hw,7,20) && text_card_shows(hw,"Coffee (Latte)","1 mug"));
+    assert(row_has(hw,21,"No EGA screen: Meal Planner in text mode") && row_has(hw,22,"<- -> Card   Up/Down Row"));
+    assert(row_has(hw,24,"Enter:Play  Space/Esc:Back") && !row_has(hw,3,"PLAYED"));
+    /* Arrows wrap in the row; Up/Down keep the column or take the row's last. */
+    app_key(app,KEY_LEFT); assert(row_has(hw,4,"Drinks 6/6") && text_card_shows(hw,"Light Juice","1 glass"));
+    app_key(app,KEY_RIGHT); assert(row_has(hw,4,"Drinks 1/6"));
+    app_key(app,KEY_DOWN); assert(row_has(hw,4,"Food 1/8") && text_card_shows(hw,"Light Cheese Wrap","1 wrap"));
+    app_key(app,KEY_LEFT); assert(row_has(hw,4,"Food 8/8") && text_card_shows(hw,"Soup","1 bowl"));
+    app_key(app,KEY_DOWN); assert(row_has(hw,4,"Blank 2/2") && row_has(hw,13,"~  Blank  ~") && !row_has(hw,14,"["));
+    app_key(app,KEY_DOWN); assert(row_has(hw,4,"Drinks 2/6") && text_card_shows(hw,"Coffee (Black)","1 cup"));
+    app_key(app,KEY_UP); assert(row_has(hw,4,"Blank 2/2"));
+    app_key(app,KEY_UP); assert(row_has(hw,4,"Food 2/8"));
+    app_key(app,KEY_UP); assert(row_has(hw,4,"Drinks 2/6"));
+    {   unsigned c, k; static const int keys[4]={KEY_LEFT,KEY_RIGHT,KEY_UP,KEY_DOWN};
+        for(c=0;c<MEAL_CARD_COUNT;c++) for(k=0;k<4;k++){ unsigned to=meal_move(c,keys[k]); assert(to<MEAL_CARD_COUNT); }
+        assert(meal_move(5,KEY_RIGHT)==0 && meal_move(6,KEY_LEFT)==13 && meal_move(13,KEY_DOWN)==15 && meal_move(15,KEY_DOWN)==1 && meal_move(0,KEY_UP)==14 && meal_move(12,KEY_UP)==5);
+    }
+    /* Enter plays (in order), Enter again puts back; later plays move up. */
+    app_key(app,KEY_ENTER); assert(app_state(app)->mealCount==1 && app_state(app)->meals[0]==1);
+    assert(row_has(hw,3,"PLAYED #1") && row_has(hw,17,"PLAYED #1") && row_has(hw,4,"15/16 left") && row_has(hw,24,"Enter:Put back  Space/Esc:Back"));
+    app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER); assert(row_has(hw,3,"PLAYED #2"));
+    app_key(app,KEY_LEFT); app_key(app,KEY_ENTER); assert(!row_has(hw,3,"PLAYED") && row_has(hw,4,"15/16 left"));
+    assert(app_state(app)->mealCount==1 && app_state(app)->meals[0]==2 && app_state(app)->meals[1]==0);
+    assert(!exists(pa)); /* saved when the planner closes */
+    app_key(app,' '); assert(app_screen(app)==SCR_HOME);
+    n=slurp(pa,jbuf,sizeof(jbuf)); assert(n && strstr(jbuf,"\"meals\":{\"played\":[2]},"));
+    /* It opens on the first card still in the deck; Esc saves too. */
+    app_key(app,' '); assert(row_has(hw,4,"Drinks 1/6")); app_key(app,KEY_ENTER); app_key(app,KEY_ESCAPE);
+    assert(app_screen(app)==SCR_HOME); slurp(pb,jbuf,sizeof(jbuf)); assert(strstr(jbuf,"\"meals\":{\"played\":[2,0]},"));
+    app_key(app,' '); assert(row_has(hw,4,"Drinks 2/6")); app_key(app,KEY_ESCAPE);
+    {   /* A full deck opens on card 0; a 17th card is ignored. */
+        unsigned c; static State s; state_init(&s);
+        for(c=0;c<MEAL_CARD_COUNT;c++) meal_toggle(&s,c);
+        assert(s.mealCount==MEAL_CARD_COUNT && meal_first_unplayed(&s)==0 && meal_play_position(&s,15)==16);
+        meal_toggle(&s,MEAL_CARD_COUNT); assert(s.mealCount==MEAL_CARD_COUNT);
+        meal_toggle(&s,0); assert(s.mealCount==15 && s.meals[0]==1 && s.meals[14]==15 && meal_first_unplayed(&s)==0);
+        meal_toggle(&s,0); assert(meal_play_position(&s,0)==16 && meal_first_unplayed(&s)==0);
+    }
+    /* Closing the day deals a new deck. */
+    app_key(app,'0'); type_text(app,"\b\b\b\b\b\b\b\b\b\b2026-11-16"); app_key(app,KEY_ENTER);
+    app_key(app,'9'); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD && app_state(app)->mealCount==0);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && out.mealCount==0);
+    slurp(active?pb:pa,jbuf,sizeof(jbuf)); assert(strstr(jbuf,"\"meals\":{\"played\":[]},"));
+    app_key(app,KEY_ENTER);
+    /* An archived day is read-only: SPACE does not open the planner. */
+    app_key(app,KEY_LEFT); app_key(app,' ');
+    assert(app_screen(app)==SCR_HOME && row_has(hw,23,"Archived day: read-only"));
+    app_key(app,KEY_RIGHT);
+    /* With graphics: the platform gets the card instead of the text card. */
+    hw->meal_open=fake_meal_open; hw->meal_card=fake_meal_card; hw->meal_close=fake_meal_close;
+    fake_open_result=MEALS_OK; fake_card_result=MEALS_OK;
+    app_key(app,' '); assert(fake_opens==1 && fake_cards>=1 && fake_closes==0);
+    assert(fake_view.card==0 && fake_view.picture==MP_LATTE && fake_view.row==MEAL_DRINKS && fake_view.position==0 && fake_view.language==LANG_EN);
+    assert(!strcmp(fake_view.rowName,"Drinks") && !strcmp(fake_view.name,"Coffee (Latte)") && !strcmp(fake_view.portion,"1 mug"));
+    assert(!row_has(hw,12,"Coffee") && !row_has(hw,21,"EGA") && row_has(hw,4,"Drinks 1/6"));
+    app_key(app,KEY_ENTER); assert(fake_view.position==1 && row_has(hw,3,"PLAYED #1"));
+    app_key(app,KEY_DOWN); app_key(app,KEY_DOWN); assert(fake_view.card==14 && fake_view.picture==MP_BLANK && fake_view.row==MEAL_BLANK && !fake_view.name[0] && !fake_view.portion[0]);
+    fake_card_result=MEALS_CORRUPT; app_key(app,KEY_RIGHT);
+    assert(fake_view.card==15 && row_has(hw,23,"MEALS.DAT is damaged: copy it again"));
+    fake_card_result=MEALS_NO_MEMORY; app_key(app,KEY_LEFT); assert(row_has(hw,23,"Not enough memory for the pictures"));
+    fake_card_result=MEALS_OK; app_key(app,KEY_LEFT); assert(!row_has(hw,23,"MEALS"));
+    app_key(app,KEY_ESCAPE); assert(app_screen(app)==SCR_HOME && fake_closes==1);
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && out.mealCount==1 && out.meals[0]==0);
+    slurp(active?pb:pa,jbuf,sizeof(jbuf)); assert(strstr(jbuf,"\"meals\":{\"played\":[0]},"));
+    fake_open_result=MEALS_MISSING; n=(size_t)fake_cards;
+    app_key(app,' '); assert(fake_opens==2 && (size_t)fake_cards==n && text_card_shows(hw,"Coffee (Black)","1 cup"));
+    assert(row_has(hw,21,"MEALS.DAT not found: copy it next to LPSCOMP.EXE"));
+    app_key(app,' '); assert(app_screen(app)==SCR_HOME && fake_closes==2);
+    /* French: names, portions and labels in CP437. */
+    choose_language(app,1); app_key(app,KEY_ESCAPE); assert(app_state(app)->language==LANG_FR);
+    fake_open_result=MEALS_NO_EGA; app_key(app,' ');
+    assert(row_has(hw,3,"PLANIFICATEUR DE REPAS") && row_has(hw,4,"Boissons 2/6") && row_has(hw,4,"15/16 restantes"));
+    assert(text_card_shows(hw,"Caf\202 (Noir)","1 tasse") && row_has(hw,21,"Pas d'\202cran EGA : planificateur en mode texte"));
+    assert(row_has(hw,24,"Entr\202e:Jouer  Espace/\220chap:Retour") && row_has(hw,22,"<- -> Carte   Haut/Bas Rang\202e"));
+    app_key(app,KEY_DOWN); assert(text_card_shows(hw,"Wrap fromage l\202ger","1 wrap"));
+    app_key(app,KEY_RIGHT); assert(text_card_shows(hw,"Salade de tomates","1 bol"));
+    app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); assert(text_card_shows(hw,"Pomme","1 moyenne"));
+    app_key(app,KEY_UP); app_key(app,KEY_LEFT); assert(text_card_shows(hw,"Th\202 \205 la menthe","1 tasse"));
+    app_key(app,KEY_ENTER); assert(row_has(hw,3,"JOU\220E #2") && row_has(hw,17,"JOU\220E #2") && row_has(hw,24,"Entr\202e:Remettre  Espace/\220chap:Retour"));
+    hw->meal_open=fake_meal_open; fake_open_result=MEALS_OK; app_key(app,KEY_ESCAPE); app_key(app,' ');
+    assert(!strcmp(fake_view.rowName,"Boissons") && !strcmp(fake_view.name,"Caf\202 (Noir)") && fake_view.language==LANG_FR);
+    app_key(app,KEY_ESCAPE);
+    hw->meal_open=0; hw->meal_card=0; hw->meal_close=0;
+    /* The PicoCalc reads the deck DOS wrote; DOS keeps a PicoCalc deck. */
+    assert(save_load(dir,&out,&gen,&active)==LOAD_OK && out.mealCount==2 && out.meals[0]==0 && out.meals[1]==4);
+    /* Byte for byte with the PicoCalc: from its custom save ([3,0,15]), play
+     * 2, put back 0, play 9 and 14, put back 15, play 13 - through the keys.
+     * tools/picocalc_fixture meals did the same with the PicoCalc's
+     * toggleMealCard and writer (one save, generation 8: DOS saves when the
+     * planner closes). */
+    fresh_dir(dir); copy_file("tests/fixtures/picocalc_custom.jsn",pb);
+    hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    if(app_screen(app)==SCR_REMINDER_POPUP) app_key(app,KEY_ENTER);
+    app_key(app,' '); assert(row_has(hw,4,"Boissons 2/6") && row_has(hw,4,"13/16 restantes")); /* card 0 is played */
+    app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER);                         /* play 2 */
+    app_key(app,KEY_LEFT); app_key(app,KEY_LEFT); assert(row_has(hw,3,"JOU\220E #2")); app_key(app,KEY_ENTER); /* put back 0 */
+    app_key(app,KEY_DOWN); app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT);
+    assert(text_card_shows(hw,"Biscuit","1 portion")); app_key(app,KEY_ENTER);  /* play 9 */
+    app_key(app,KEY_DOWN); app_key(app,KEY_LEFT); assert(row_has(hw,4,"Blank 1/2")); app_key(app,KEY_ENTER); /* play 14 */
+    app_key(app,KEY_RIGHT); assert(row_has(hw,3,"JOU\220E #2")); app_key(app,KEY_ENTER); /* put back 15 */
+    app_key(app,KEY_UP); app_key(app,KEY_LEFT); app_key(app,KEY_LEFT); assert(text_card_shows(hw,"Soupe","1 bol")); app_key(app,KEY_ENTER); /* play 13 */
+    assert(row_has(hw,3,"JOU\220E #5") && row_has(hw,4,"11/16 restantes"));
+    app_key(app,' '); assert(app_screen(app)==SCR_HOME && same_file("tests/fixtures/picocalc_meals.jsn",pa));
+}
+
 int main(void){
     const char *tmpdir="/tmp/lps-msdos-test";
     State s, out; Blob b; int32_t g=0; Date calendar; Day day;
@@ -1321,9 +1498,13 @@ int main(void){
     check_bios_keys(tmpdir);
     check_accented_text(tmpdir);
     check_intl_interop(tmpdir);
+    check_meals_dat(tmpdir);
+    check_meal_planner(tmpdir);
     assert(orphan_hits>0); /* some edit took a name history had stored */
 
-    printf("PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback, unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture), UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), fixture decode (%u captures)\n", 0);
+    printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, menu 0-9 without notepad, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
+    printf("%s", " unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture),");
+    printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical), fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

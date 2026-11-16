@@ -16,12 +16,12 @@ HOST_WARN = -std=c89 -Wall -Wextra -Wno-unused-parameter -O2 -DLPS_HOST
 GEN = build/cp437
 HOST_CFLAGS = $(HOST_WARN) -I$(GEN)
 
-SRC_COMMON = state.c ics.c save.c jsave.c paths.c rosary.c app.c cp437.c wrap.c
-HEADERS = $(GEN)/lps.h $(GEN)/rosary.h
+SRC_COMMON = state.c ics.c save.c jsave.c paths.c rosary.c meals.c app.c cp437.c wrap.c
+HEADERS = $(GEN)/lps.h $(GEN)/rosary.h $(GEN)/meals.h $(GEN)/ega.h
 # rosary_text.c is the single source of the prayer texts. It is NOT linked into
 # LPSCOMP.EXE: tools/mkrosary turns it into ROSARY.DAT (LPS-DOS-115-CHG03b).
 ROSARY_SRC = $(GEN)/rosary_text.c
-DOS_OBJS = $(addprefix $(GEN)/,$(SRC_COMMON) plat_dos.c main.c)
+DOS_OBJS = $(addprefix $(GEN)/,$(SRC_COMMON) ega.c plat_dos.c main.c)
 HOST_OBJS = $(addprefix $(GEN)/,$(SRC_COMMON) plat_host.c main.c)
 COMMON_OBJS = $(addprefix $(GEN)/,$(SRC_COMMON))
 
@@ -40,7 +40,7 @@ WBIN = $(WATCOM)/binl64
 endif
 WCL = $(WBIN)/wcl
 
-.PHONY: all dos host test clean captures hello rosary
+.PHONY: all dos host test clean captures hello rosary meals
 
 # tools/cp437 and its table are plain ASCII C, built straight from src/.
 tools/cp437: tools/cp437.c src/cp437.c src/lps.h
@@ -62,7 +62,7 @@ $(GEN)/capture_drive.c: tools/capture_drive.c tools/cp437
 	@mkdir -p $(GEN)
 	./tools/cp437 $< $@
 
-all: dos hello rosary host test
+all: dos hello rosary meals host test
 
 dos: LPSCOMP.EXE
 
@@ -72,6 +72,15 @@ rosary: ROSARY.DAT
 
 ROSARY.DAT: tools/mkrosary
 	./tools/mkrosary ROSARY.DAT
+
+# MEALS.DAT (LPS-DOS-115-CHG07): the Meal Planner pictures for the EGA screen,
+# from the user's card sheets in assets/ (copies of the PicoCalc repository's).
+# tools/mkmeals.py needs only Python 3 (no Pillow) and is deterministic, so
+# `make test` rebuilds it and checks that the committed ../MEALS.DAT matches.
+meals: MEALS.DAT
+
+MEALS.DAT: tools/mkmeals.py assets/meal_deck_sheet1.png assets/meal_deck_sheet2.png
+	python3 tools/mkmeals.py MEALS.DAT
 
 tools/mkrosary: $(GEN)/mkrosary.c $(ROSARY_SRC) $(GEN)/state.c $(GEN)/cp437.c $(HEADERS)
 	$(HOST_CC) $(HOST_CFLAGS) -o tools/mkrosary $(GEN)/mkrosary.c $(ROSARY_SRC) $(GEN)/state.c $(GEN)/cp437.c
@@ -99,8 +108,9 @@ host: lpscomp-host
 lpscomp-host: $(HOST_OBJS) $(HEADERS)
 	$(HOST_CC) $(HOST_CFLAGS) -o lpscomp-host $(HOST_OBJS)
 
-test: tests/test_storage ROSARY.DAT
+test: tests/test_storage ROSARY.DAT MEALS.DAT
 	./tests/test_storage
+	cmp MEALS.DAT ../MEALS.DAT
 
 tests/test_storage: $(GEN)/test_storage.c $(COMMON_OBJS) $(ROSARY_SRC) $(GEN)/plat_host.c $(HEADERS)
 	$(HOST_CC) $(HOST_CFLAGS) -o tests/test_storage $(GEN)/test_storage.c $(COMMON_OBJS) $(ROSARY_SRC) $(GEN)/plat_host.c
@@ -109,5 +119,5 @@ captures: $(GEN)/capture_drive.c $(COMMON_OBJS) $(GEN)/plat_host.c $(HEADERS)
 	./tools/drive_captures.sh
 
 clean:
-	rm -f LPSCOMP.EXE HELLO.EXE ROSARY.DAT lpscomp-host tests/test_storage tools/capture_drive tools/mkrosary tools/cp437 *.o src/*.o tests/*.o *.err *.map
+	rm -f LPSCOMP.EXE HELLO.EXE ROSARY.DAT MEALS.DAT lpscomp-host tests/test_storage tools/capture_drive tools/mkrosary tools/cp437 *.o src/*.o tests/*.o *.err *.map
 	rm -rf build

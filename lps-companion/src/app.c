@@ -1,6 +1,7 @@
 /* app.c - LPS Companion UI state machine (v1.11 feature parity). C89. */
 #include "lps.h"
 #include "rosary.h"
+#include "meals.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -45,6 +46,10 @@ struct App {
     unsigned editingActivity;
     char activityDraft[ACTIVITY_NAME_LENGTH+1];
     int confirmingDelete;
+    /* LPS-DOS-115-CHG07: the card shown in the Meal Planner, and whether the
+     * platform draws it in graphics (MEALS_OK) or why not (text card). */
+    unsigned mealCursor;
+    int mealGraphics;
 };
 
 static const char *tr(const App *a, const char *en, const char *fr){
@@ -330,8 +335,17 @@ static void prune_reminders(App *a){
     }
 }
 static int is_rosary_screen(int s){ return s>=SCR_ROSARY_MODE && s<=SCR_ROSARY_COMPLETE; }
+/* Why the Meal Planner shows text instead of pictures (LPS-DOS-115-CHG07). */
+static const char *meals_problem(const App *a, int r){
+    if(r==MEALS_MISSING) return tr(a,"MEALS.DAT not found: copy it next to LPSCOMP.EXE","MEALS.DAT introuvable : copiez-le à côté de LPSCOMP.EXE");
+    if(r==MEALS_CORRUPT) return tr(a,"MEALS.DAT is damaged: copy it again","MEALS.DAT endommagé : recopiez-le");
+    if(r==MEALS_NO_MEMORY) return tr(a,"Not enough memory for the pictures","Mémoire insuffisante pour les images");
+    return tr(a,"No EGA screen: Meal Planner in text mode","Pas d'écran EGA : planificateur en mode texte");
+}
 static void go(App *a, int s){
     const Day *vd;
+    /* LPS-DOS-115-CHG07: the pictures stay in memory while the planner is open. */
+    if(a->screen==SCR_MEAL_PLANNER && s!=SCR_MEAL_PLANNER && a->hw->meal_close) a->hw->meal_close(a->hw);
     /* LPS-DOS-115-CHG03b: the prayer texts live in ROSARY.DAT. Load them when
      * the Rosary opens; on failure stay put and say why. Free them on leaving. */
     if(is_rosary_screen(s)){
@@ -345,6 +359,10 @@ static void go(App *a, int s){
     }else rosary_unload();
     a->screen=s; a->selection=0; a->message[0]=0; a->confirmingDelete=0;
     if(s==SCR_DAILY_REVIEW) a->reviewOffset=0;
+    if(s==SCR_MEAL_PLANNER){ /* PicoCalc LPS-114-CHG01: open on the first card still in the deck */
+        a->mealCursor=meal_first_unplayed(&a->state);
+        a->mealGraphics=a->hw->meal_open?a->hw->meal_open(a->hw):MEALS_NO_EGA;
+    }
     if(s==SCR_LANGUAGE) a->selection=(unsigned)a->pendingLanguage;
     if(s==SCR_COLORS) a->selection=(unsigned)a->pendingPalette;
     if(s==SCR_WEIGHT){
@@ -576,7 +594,7 @@ void app_key(App *a, int k){
                ||from==SCR_KANBAN||from==SCR_REMINDERS||from==SCR_CONFIG
                ||from==SCR_COLORS||from==SCR_LANGUAGE||from==SCR_DAILY_REVIEW
                ||from==SCR_ROSARY_MODE||from==SCR_ROSARY_COMPLETE||from==SCR_FINISH
-               ||from==SCR_REWARD||from==SCR_TIMER_SELECT)){
+               ||from==SCR_REWARD||from==SCR_TIMER_SELECT||from==SCR_MEAL_PLANNER)){
             flush_save(a);
         }
         go(a,target); app_render(a); return;
@@ -587,6 +605,9 @@ void app_key(App *a, int k){
         /* LPS-DOS-115-CHG02 (PicoCalc LPS-112-CHG05): no notepad; 0-9 today,
          * 1-2 on an archived day. */
         unsigned menuCount=a->daysBack?2u:10u;
+        /* LPS-DOS-115-CHG07 (PicoCalc LPS-114-CHG01): SPACE opens the Meal
+         * Planner; an archived day is read-only. */
+        if(k==' '){ if(a->daysBack) read_only(a); else go(a,SCR_MEAL_PLANNER); }
         if(k==KEY_LEFT){
             if(a->daysBack<a->state.count){ a->daysBack++; a->selection=0; a->page=0; }
             else say(a, a->state.count?tr(a,"Oldest saved day","Plus ancien jour conservé"):tr(a,"No archived days","Aucun jour archivé"));
@@ -815,16 +836,63 @@ void app_key(App *a, int k){
                 /* LPS-DOS-115-CHG01: XP is still banked in the save for compatibility, never shown. */
                 /* LPS-DOS-115-CHG05: the closed day keeps its ticked names, frozen
                  * in catalog order (PicoCalc freezeDayNames); today starts empty. */
+                /* Closing the day deals a new Meal Planner deck, as on the PicoCalc. */
+                g_scratch.mealCount=0; memset(g_scratch.meals,0,sizeof(g_scratch.meals));
                 if(commit(a,&g_scratch)){
                     day_names_freeze(&a->state,1u+slot,a->state.history[slot].flags);
                     day_names(0)->count=0;
-                    jsave_new_day();
                     if(flush_save(a)) go(a,SCR_REWARD);
                 }
             }
         }
     }else if(a->screen==SCR_REWARD && k==KEY_ENTER) go(a,SCR_HOME);
+    else if(a->screen==SCR_MEAL_PLANNER){
+        /* LPS-DOS-115-CHG07 (PicoCalc LPS-114-CHG01): arrows wrap; Enter plays
+         * the card or puts it back, saved when the planner closes (SPACE or
+         * Esc), as the other screens do. */
+        if(k==KEY_LEFT||k==KEY_RIGHT||k==KEY_UP||k==KEY_DOWN) a->mealCursor=meal_move(a->mealCursor,k);
+        else if(k==KEY_ENTER){ g_scratch=a->state; meal_toggle(&g_scratch,a->mealCursor); commit(a,&g_scratch); }
+        else if(k==' '){ flush_save(a); go(a,SCR_HOME); }
+    }
     app_render(a);
+}
+
+static void right_text(App *a, int row, const char *text){
+    int n=(int)strlen(text); if(n>COLUMNS-1) n=COLUMNS-1;
+    a->hw->text(a->hw,row,COLUMNS-1-n,text,0);
+}
+/* The card in text mode (no EGA, no MEALS.DAT, host tests): a framed card
+ * with the row on its header band, the name and the portion. */
+#define CARD_LEFT 20
+#define CARD_WIDTH 40
+static void card_line(App *a, int row, const char *text, int reverse){
+    char b[CARD_WIDTH+1]; int n=(int)strlen(text), i, col;
+    if(n>CARD_WIDTH-2) n=CARD_WIDTH-2;
+    for(i=0;i<CARD_WIDTH;i++) b[i]=' ';
+    b[0]=b[CARD_WIDTH-1]='\xb3'; b[CARD_WIDTH]=0; /* CP437 vertical line */
+    col=(CARD_WIDTH-n)/2; memcpy(b+col,text,(size_t)n);
+    a->hw->text(a->hw,row,CARD_LEFT,b,0);
+    if(reverse){ b[CARD_WIDTH-1]=0; a->hw->text(a->hw,row,CARD_LEFT+1,b+1,1); }
+}
+static void card_rule(App *a, int row, char left, char right){
+    char b[CARD_WIDTH+1]; int i;
+    for(i=0;i<CARD_WIDTH;i++) b[i]='\xc4'; /* CP437 horizontal line */
+    b[0]=left; b[CARD_WIDTH-1]=right; b[CARD_WIDTH]=0;
+    a->hw->text(a->hw,row,CARD_LEFT,b,0);
+}
+static void text_card(App *a, const MealView *v){
+    char b[40]; int r;
+    card_rule(a,6,'\xda','\xbf');
+    card_line(a,7,v->rowName,1);
+    card_rule(a,8,'\xc3','\xb4');
+    for(r=9;r<19;r++) card_line(a,r,"",0);
+    if(v->row==MEAL_BLANK) card_line(a,13,"~  Blank  ~",0);
+    else {
+        card_line(a,12,v->name,0);
+        sprintf(b,"[ %s ]",v->portion); card_line(a,14,b,0);
+    }
+    if(v->position){ sprintf(b,tr(a,"PLAYED #%u","JOUÉE #%u"),(unsigned)v->position); card_line(a,17,b,0); }
+    card_rule(a,19,'\xc0','\xd9');
 }
 
 void app_render(App *a){
@@ -1112,6 +1180,23 @@ void app_render(App *a){
         sprintf(b,tr(a,"Activities: %u","Activités : %u"), count_flags(a->state.today.flags)); line(a,6,b,0);
         line(a,13,tr(a,"Enter: save and advance","Entrée : enregistrer et avancer"),0);
         line(a,15,tr(a,"An empty day has no penalty.","Une journée vide ne coûte rien."),0);
+    }else if(a->screen==SCR_MEAL_PLANNER){
+        MealView v; char right[32];
+        meal_view(&a->state,a->mealCursor,&v);
+        field(a,3,1,40,tr(a,"MEAL PLANNER","PLANIFICATEUR DE REPAS"),0);
+        if(v.position){ sprintf(right,tr(a,"PLAYED #%u","JOUÉE #%u"),(unsigned)v.position); right_text(a,3,right); }
+        sprintf(b,"%s %u/%u",v.rowName,a->mealCursor-MEAL_ROW_FIRST[v.row]+1u,(unsigned)(MEAL_ROW_FIRST[v.row+1]-MEAL_ROW_FIRST[v.row]));
+        field(a,4,1,40,b,0);
+        sprintf(right,tr(a,"%u/%u left","%u/%u restantes"),(unsigned)(MEAL_CARD_COUNT-a->state.mealCount),(unsigned)MEAL_CARD_COUNT);
+        right_text(a,4,right);
+        if(a->mealGraphics==MEALS_OK){
+            int r=a->hw->meal_card(a->hw,&v);
+            if(r!=MEALS_OK && !a->message[0]) say(a,meals_problem(a,r));
+        }else{
+            text_card(a,&v);
+            center_line(a,21,meals_problem(a,a->mealGraphics),0);
+        }
+        center_line(a,22,tr(a,"<- -> Card   Up/Down Row","<- -> Carte   Haut/Bas Rangée"),0);
     }else{
         center_line(a,3,tr(a,"DAY SAVED","JOUR ENREGISTRÉ"),0);
         line(a,15,tr(a,"Enter: start the new day","Entrée : commencer le nouveau jour"),0);
@@ -1122,7 +1207,10 @@ void app_render(App *a){
     else if(a->message[0]) line(a,statusRow,a->message,0);
     if(a->hw->battery_low && a->hw->battery_low(a->hw))
         a->hw->alert(a->hw,22,0,tr(a,"[!] Low battery!","[!] Batterie faible !"));
-    if(a->screen!=SCR_TIMER_RUNNING && a->screen!=SCR_TIMER_COMPLETE)
+    if(a->screen==SCR_MEAL_PLANNER)
+        center_line(a,24,meal_play_position(&a->state,a->mealCursor)?tr(a,"Enter:Put back  Space/Esc:Back","Entrée:Remettre  Espace/Échap:Retour")
+                                                              :tr(a,"Enter:Play  Space/Esc:Back","Entrée:Jouer  Espace/Échap:Retour"),1);
+    else if(a->screen!=SCR_TIMER_RUNNING && a->screen!=SCR_TIMER_COMPLETE)
         center_line(a,24,tr(a,"Up/Down  Enter:OK  Esc:Back","Haut/Bas  Entrée:OK  Échap:Retour"),1);
     a->hw->present(a->hw);
 }

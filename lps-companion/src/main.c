@@ -1,6 +1,7 @@
 /* LPSCOMP.EXE entry (DOS) / host interactive. */
 #include "lps.h"
 #include "rosary.h"
+#include "meals.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,18 +25,23 @@ static void usage(void){
     puts("  Env LPSDIR overrides default.");
 }
 
-/* ROSARY.DAT sits next to LPSCOMP.EXE. On DOS 3+, argv[0] is the full path
- * of the program (from the environment block), e.g. C:\LPSCOMP\LPSCOMP.EXE. */
-static void set_rosary_path(const char *exe){
-    char path[160]; size_t n=0, cut=0, i;
+/* ROSARY.DAT and MEALS.DAT (LPS-DOS-115-CHG07) sit next to LPSCOMP.EXE. On
+ * DOS 3+, argv[0] is the full path of the program (from the environment
+ * block), e.g. C:\LPSCOMP\LPSCOMP.EXE. */
+static void data_file_path(char *path, size_t cap, const char *exe, const char *name){
+    size_t n=0, cut=0, i, len=strlen(name)+1;
     if(exe){
         n=strlen(exe);
         for(i=0;i<n;i++) if(exe[i]=='\\'||exe[i]=='/'||exe[i]==':') cut=i+1;
     }
-    if(cut+sizeof(ROSARY_DAT_NAME)>sizeof(path)) cut=0;
+    if(cut+len>cap) cut=0;
     if(cut) memcpy(path,exe,cut);
-    memcpy(path+cut,ROSARY_DAT_NAME,sizeof(ROSARY_DAT_NAME));
-    rosary_set_path(path);
+    memcpy(path+cut,name,len);
+}
+static void set_data_paths(const char *exe){
+    char path[160];
+    data_file_path(path,sizeof(path),exe,ROSARY_DAT_NAME); rosary_set_path(path);
+    data_file_path(path,sizeof(path),exe,MEALS_DAT_NAME); meals_set_path(path);
 }
 
 int main(int argc, char **argv){
@@ -56,7 +62,7 @@ int main(int argc, char **argv){
     else dir="./LPS";
 #endif
     lps_set_data_dir(dir);
-    set_rosary_path(argc>0?argv[0]:0);
+    set_data_paths(argc>0?argv[0]:0);
     /* Do not hard-fail if mkdir fails — UI still starts (read-only / blocked). */
     lps_ensure_dirs();
 
