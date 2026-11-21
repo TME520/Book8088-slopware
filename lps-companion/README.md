@@ -586,7 +586,7 @@ LPS-DOS-115-CHG06: **E** rename, **N** new, **Del** delete (Enter confirms,
 Esc cancels), **F4/F5** move up/down.
 
 The PicoCalc README documents the full per-screen binding list; this port follows
-the same map (F1–F5 on Kanban, N/Del on Kanban and Reminders, etc.).
+the same map (F1–F5 on Kanban, F to toggle Focus, N/Del on Kanban and Reminders, etc.).
 
 ## Data layout
 

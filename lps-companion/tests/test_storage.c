@@ -1957,6 +1957,127 @@ static void check_home_entries(const char *dir){
     newest_save(dir); assert(strstr(jbuf,"\"homeHidden\":[\"kanban\",\"rosary\"]},\n\"crc32\":\""));
     (void)n;
 }
+
+/* LPS116-FEAT01-CHG01: Kanban focus (F), "*" marker, cleared on DONE.
+ * Focus lives in memory only: JSON and the binary wire stay as in v1.15. */
+static void check_kanban_focus(const char *dir){
+    static unsigned char store[16384]; static State loaded, dec; static Blob wire;
+    App *app=(App*)store; Platform *hw; uint32_t check=0, gen=0; int active=-1;
+    size_t n,n2; char pa[256], pb[256], cells[COLUMNS], folded[40];
+    unsigned char rev[COLUMNS], frev[40];
+
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    assert(app_bios_key('f',0x21)=='f' && app_bios_key('F',0x21)=='F');
+    app_key(app,'3'); assert(app_screen(app)==SCR_KANBAN);
+    app_key(app,'f'); app_key(app,'F'); /* empty column: no-op */
+    assert(row_has(hw,21,"F1 TODO  F2 DOING  F3 DONE  F Focus"));
+    assert(row_has(hw,20,"N New  Enter Edit  Del Delete") && row_has(hw,22,"F4 Up F5 Down"));
+
+    app_key(app,'n'); type_text(app,"Alpha"); app_key(app,KEY_ENTER);
+    app_key(app,'n'); type_text(app,"Bravo"); app_key(app,KEY_ENTER);
+    app_key(app,'n'); type_text(app,"Charlie"); app_key(app,KEY_ENTER);
+    assert(app_state(app)->taskCount==3 && app_state(app)->tasks[0].focus==0 && app_state(app)->tasks[1].focus==0);
+    assert(cell_is(hw,7,0," 1 Alpha") && cell_is(hw,8,0," 2 Bravo") && cell_is(hw,9,0," 3 Charlie"));
+
+    jpath(pa,dir,"BEFORE.JSN"); jpath(pb,dir,"AFTER.JSN");
+    assert(jsave_write(pa,app_state(app),1,&check));
+    n=slurp(pa,jbuf,sizeof(jbuf));
+
+    app_key(app,KEY_UP); app_key(app,KEY_UP); /* Alpha */
+    app_key(app,'f');
+    assert(app_state(app)->tasks[0].focus==1 && app_state(app)->tasks[1].focus==0);
+    assert(cell_is(hw,7,0," 1*Alpha") && cell_is(hw,8,0," 2 Bravo") && plat_host_rev(hw,7,0));
+    app_key(app,'f'); assert(app_state(app)->tasks[0].focus==0 && cell_is(hw,7,0," 1 Alpha"));
+    app_key(app,'F'); assert(app_state(app)->tasks[0].focus==1 && cell_is(hw,7,0," 1*Alpha"));
+
+    assert(jsave_write(pb,app_state(app),1,&check));
+    n2=slurp(pb,jbuf2,sizeof(jbuf2));
+    assert(n==n2 && !memcmp(jbuf,jbuf2,n) && !strstr(jbuf,"focus"));
+
+    app_key(app,KEY_DOWN); app_key(app,'f'); /* Bravo too */
+    assert(app_state(app)->tasks[0].focus==1 && app_state(app)->tasks[1].focus==1);
+    /* F4/F5 keep focus on the moved card. Bravo (sel 1) goes up: it becomes row 1. */
+    app_key(app,KEY_F4);
+    assert(app_selection(app)==0 && !strcmp(app_state(app)->tasks[0].name,"Bravo") && app_state(app)->tasks[0].focus==1);
+    assert(!strcmp(app_state(app)->tasks[1].name,"Alpha") && app_state(app)->tasks[1].focus==1);
+    assert(cell_is(hw,7,0," 1*Bravo") && cell_is(hw,8,0," 2*Alpha") && cell_is(hw,9,0," 3 Charlie"));
+    app_key(app,KEY_F5);
+    assert(app_selection(app)==1 && !strcmp(app_state(app)->tasks[0].name,"Alpha") && app_state(app)->tasks[0].focus==1);
+    assert(!strcmp(app_state(app)->tasks[1].name,"Bravo") && app_state(app)->tasks[1].focus==1);
+    assert(cell_is(hw,7,0," 1*Alpha") && cell_is(hw,8,0," 2*Bravo"));
+
+    /* Column move to DOING keeps focus; to DONE it clears it. */
+    app_key(app,KEY_UP); /* Alpha */
+    app_key(app,KEY_F2);
+    assert(app_state(app)->tasks[2].status==TASK_DOING && !strcmp(app_state(app)->tasks[2].name,"Alpha") && app_state(app)->tasks[2].focus==1);
+    assert(cell_is(hw,7,27," 1*Alpha"));
+    app_key(app,KEY_F3);
+    assert(app_state(app)->tasks[2].status==TASK_DONE && app_state(app)->tasks[2].focus==0);
+    assert(cell_is(hw,7,54," 1 Alpha"));
+    app_key(app,'f'); app_key(app,'F');
+    assert(app_state(app)->tasks[2].focus==0 && cell_is(hw,7,54," 1 Alpha")); /* DONE is unfocusable */
+
+    /* Digit 3 also goes to DONE and drops focus. */
+    app_key(app,KEY_LEFT); app_key(app,KEY_LEFT); /* TODO, Bravo is focused */
+    assert(!strcmp(app_state(app)->tasks[0].name,"Bravo") && app_state(app)->tasks[0].focus==1);
+    app_key(app,'3');
+    assert(app_state(app)->tasks[2].status==TASK_DONE && !strcmp(app_state(app)->tasks[2].name,"Bravo") && app_state(app)->tasks[2].focus==0);
+    assert(cell_is(hw,8,54," 2 Bravo"));
+
+    /* TAB/SPACE still overlay from Kanban; F in the name editor types F. */
+    app_key(app,KEY_LEFT); app_key(app,KEY_LEFT);
+    app_key(app,'n'); app_key(app,'A'); app_key(app,'f'); app_key(app,'F');
+    assert(app_screen(app)==SCR_TASK_EDIT);
+    app_key(app,KEY_ENTER);
+    assert(app_screen(app)==SCR_KANBAN && !strcmp(app_state(app)->tasks[3].name,"AfF"));
+    app_key(app,KEY_TAB); assert(app_screen(app)==SCR_CONFIG);
+    app_key(app,KEY_TAB); assert(app_screen(app)==SCR_KANBAN && any_row(hw,"AfF"));
+    app_key(app,' '); assert(app_screen(app)==SCR_MEAL_PLANNER);
+    app_key(app,' '); assert(app_screen(app)==SCR_KANBAN);
+
+    choose_language(app,1);
+    /* tools/cp437 folds \u00c0 to A, so the French footer is ASCII "A FAIRE". */
+    assert(row_has(hw,21,"F1 A FAIRE F2 EN COURS F3 FINI  F Focus"));
+
+    /* CHG01: a save does not keep focus; it is gone on reload. */
+    app_flush_save(app);
+    app_init(app,hw); app_start(app);
+    assert(app_state(app)->taskCount==4 && app_state(app)->tasks[0].focus==0 && app_state(app)->tasks[1].focus==0);
+    assert(app_state(app)->tasks[2].focus==0 && app_state(app)->tasks[3].focus==0);
+
+    /* PicoCalc v1.15 fixture: focus in RAM does not change the written bytes. */
+    fresh_dir(dir); jpath(pa,dir,"SAVE_A.JSN");
+    copy_file("tests/fixtures/picocalc_custom.jsn",pa);
+    gen=0; active=-1;
+    assert(save_load(dir,&loaded,&gen,&active)==LOAD_OK && loaded.taskCount==3 && loaded.tasks[0].focus==0);
+    loaded.tasks[0].focus=1; loaded.tasks[1].focus=1;
+    jpath(pb,dir,"OUT.JSN");
+    assert(jsave_write(pb,&loaded,gen,&check));
+    n=slurp("tests/fixtures/picocalc_custom.jsn",jbuf,sizeof(jbuf)); n2=slurp(pb,jbuf2,sizeof(jbuf2));
+    assert(n==n2 && !memcmp(jbuf,jbuf2,n));
+
+    /* Binary wire layout is unchanged; focus is not stored and decodes as 0.
+     * The wire only accepts ASCII names (UTF-8 lives in the JSON save). */
+    state_init(&loaded);
+    loaded.taskCount=2; loaded.tasks[0].status=TASK_DOING; strcpy(loaded.tasks[0].name,"Fix the bike"); loaded.tasks[0].focus=1;
+    loaded.tasks[1].status=TASK_TODO; strcpy(loaded.tasks[1].name,"Write docs");
+    encode_state(&loaded,&wire); assert(wire.size==WIRE_SIZE);
+    assert(decode_state(wire.bytes,wire.size,&dec) && dec.taskCount==loaded.taskCount);
+    assert(!strcmp(dec.tasks[0].name,loaded.tasks[0].name) && dec.tasks[0].status==loaded.tasks[0].status && dec.tasks[0].focus==0);
+    assert(!strcmp(dec.tasks[1].name,"Write docs") && dec.tasks[1].focus==0);
+
+    /* CGA 40-column fold: the marker in the first band and the footer stay readable. */
+    memset(cells,' ',COLUMNS); memset(rev,0,sizeof(rev));
+    memcpy(cells+0," 1*Alpha",8); memcpy(cells+27," 1 Bravo",8); memcpy(cells+54," 1 Charlie",10);
+    lps_fold_row(cells,rev,40,folded,frev);
+    /* Fold skips the band's leading space, as it does for unfocused " 1 Name". */
+    assert(!memcmp(folded,"1*Alpha",7) && memchr(folded,'*',40)==folded+1);
+    memset(cells,' ',COLUMNS);
+    memcpy(cells,"F1 TODO  F2 DOING  F3 DONE  F Focus",35);
+    lps_fold_row(cells,rev,40,folded,frev);
+    assert(!memcmp(folded,"F1 TODO  F2 DOING  F3 DONE  F Focus",35));
+}
+
 int main(void){
     const char *tmpdir="/tmp/lps-msdos-test";
     State s, out; Blob b; int32_t g=0; Date calendar; Day day;
@@ -2139,12 +2260,13 @@ int main(void){
     check_overlay_keys(tmpdir);
     check_home_entries(tmpdir);
     check_home_filtered(tmpdir);
+    check_kanban_focus(tmpdir);
     assert(orphan_hits>0); /* some edit took a name history had stored */
 
     printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, title v1.15, menu 0-8 without notepad or Config, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
     printf("%s", " unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture),");
     printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), MEALSCGA.DAT (13 CGA pictures, colours, checksums, damaged/missing, EGA/CGA independent), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical),");
-    printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR, MEALSCGA.DAT messages), CGA played card (checkerboard grey-out masks, PLAYED/JOUEE label sizes), fixture decode (%u captures)\n", 0);
+    printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR, MEALSCGA.DAT messages), CGA played card (checkerboard grey-out masks, PLAYED/JOUEE label sizes), Kanban focus (F toggle, * marker, cleared on DONE, kept on reorder/move, JSON and wire unchanged), fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

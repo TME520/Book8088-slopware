@@ -552,6 +552,7 @@ static void move_task_to(App *a, int target){
     if(index>=a->state.taskCount) return;
     if(a->state.tasks[index].status==target){ say(a,tr(a,"Task is already in this column","Tâche déjà dans cette colonne")); return; }
     g_scratch=a->state; moved=g_scratch.tasks[index]; moved.status=(uint8_t)target;
+    if(target==TASK_DONE) moved.focus=0; /* LPS116-FEAT01-CHG01: DONE drops focus */
     for(i=index;i+1<g_scratch.taskCount;i++) g_scratch.tasks[i]=g_scratch.tasks[i+1];
     g_scratch.tasks[g_scratch.taskCount-1]=moved;
     if(commit(a,&g_scratch)){ a->kanbanColumn=target; a->selection=tasks_in(a,target)-1; say(a,tr(a,"Task moved","Tâche déplacée")); }
@@ -875,6 +876,16 @@ void app_key(App *a, int k){
         else if((k=='1'||k=='2'||k=='3') && n) move_task_to(a, k-'1');
         else if(k==KEY_F4 || k=='-'){ if(n) reorder_task(a,0); }
         else if(k==KEY_F5 || k=='+'){ if(n) reorder_task(a,1); }
+        else if((k=='f'||k=='F') && n){
+            /* LPS116-FEAT01-CHG01: F toggles focus; a DONE card stays unfocused.
+             * Memory only: no commit, so the JSON save is unchanged (CHG02). */
+            unsigned index=task_at(a,a->kanbanColumn,a->selection);
+            if(index<a->state.taskCount && a->state.tasks[index].status!=TASK_DONE){
+                if(a->daysBack) read_only(a);
+                else if(a->blocked) say(a, tr(a,"Unreadable save: writes blocked","Sauvegarde illisible : écriture bloquée"));
+                else a->state.tasks[index].focus=(uint8_t)!a->state.tasks[index].focus;
+            }
+        }
     }else if(a->screen==SCR_TASK_EDIT){
         if(k==KEY_ENTER){
             if(!a->taskDraft[0]) say(a,tr(a,"Task name cannot be empty","Le nom ne peut pas être vide"));
@@ -883,7 +894,7 @@ void app_key(App *a, int k){
                 g_scratch=a->state;
                 if(a->editedTask<TASK_CAPACITY) memcpy(g_scratch.tasks[a->editedTask].name,a->taskDraft,TASK_NAME_LENGTH+1);
                 else if(g_scratch.taskCount>=TASK_CAPACITY){ say(a,tr(a,"Kanban is full (24 tasks)","Kanban complet (24 tâches)")); app_render(a); return; }
-                else { destination=g_scratch.taskCount; g_scratch.tasks[g_scratch.taskCount].status=(uint8_t)a->kanbanColumn; memcpy(g_scratch.tasks[g_scratch.taskCount].name,a->taskDraft,TASK_NAME_LENGTH+1); g_scratch.taskCount++; }
+                else { destination=g_scratch.taskCount; memset(&g_scratch.tasks[destination],0,sizeof(Task)); g_scratch.tasks[destination].status=(uint8_t)a->kanbanColumn; memcpy(g_scratch.tasks[destination].name,a->taskDraft,TASK_NAME_LENGTH+1); g_scratch.taskCount++; }
                 if(commit(a,&g_scratch)){ a->editedTask=destination; a->selection=task_position(a,a->kanbanColumn,a->editedTask); a->screen=SCR_KANBAN; a->message[0]=0; }
             }
         }else edit_text(a->taskDraft,TASK_NAME_LENGTH,k);
@@ -1222,13 +1233,15 @@ void app_render(App *a){
                 end=first+visible<n?first+visible:n;
                 for(position=first; position<end; position++){
                     unsigned index=task_at(a,col,position);
-                    sprintf(b,"%2u %-22s", position+1, shown(a->state.tasks[index].name));
+                    /* LPS116-FEAT01-CHG01: '*' takes the padding space: " 1*Name". */
+                    sprintf(b, a->state.tasks[index].focus?"%2u*%-22s":"%2u %-22s",
+                        position+1, shown(a->state.tasks[index].name));
                     field(a,7+(int)(position-first), starts[col], 26, b, active && position==a->selection);
                 }
             }
         }
         line(a,20,tr(a,"N New  Enter Edit  Del Delete","N Nouveau Entrée Modifier Suppr Effacer"),0);
-        line(a,21,tr(a,"F1 TODO  F2 DOING  F3 DONE","F1 À FAIRE F2 EN COURS F3 FINI"),0);
+        line(a,21,tr(a,"F1 TODO  F2 DOING  F3 DONE  F Focus","F1 À FAIRE F2 EN COURS F3 FINI  F Focus"),0);
         line(a,22,tr(a,"F4 Up F5 Down  <- -> Columns","F4 Monter F5 Descendre <- -> Colonnes"),0);
     }else if(a->screen==SCR_TASK_EDIT){
         center_line(a,3, a->editedTask<TASK_CAPACITY?tr(a,"EDIT TASK","MODIFIER LA TÂCHE"):tr(a,"NEW TASK","NOUVELLE TÂCHE"),0);
