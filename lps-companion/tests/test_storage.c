@@ -440,7 +440,7 @@ static int same_state(const State *a, const State *b){
     if(a->activityCount!=b->activityCount||a->nextActivityId!=b->nextActivityId) return 0;
     for(i=0;i<a->activityCount;i++) if(a->activities[i].id!=b->activities[i].id
         ||strcmp(a->activities[i].fr,b->activities[i].fr)||strcmp(a->activities[i].en,b->activities[i].en)) return 0;
-    for(i=0;i<a->taskCount;i++) if(a->tasks[i].status!=b->tasks[i].status||strcmp(a->tasks[i].name,b->tasks[i].name)) return 0;
+    for(i=0;i<a->taskCount;i++) if(a->tasks[i].status!=b->tasks[i].status||a->tasks[i].focus!=b->tasks[i].focus||strcmp(a->tasks[i].name,b->tasks[i].name)) return 0;
     for(i=0;i<a->reminderCount;i++){
         const Reminder *x=&a->reminders[i], *y=&b->reminders[i];
         if(x->from.year!=y->from.year||x->from.month!=y->from.month||x->from.day!=y->from.day||x->duration!=y->duration||strcmp(x->text,y->text)) return 0;
@@ -1958,8 +1958,8 @@ static void check_home_entries(const char *dir){
     (void)n;
 }
 
-/* LPS116-FEAT01-CHG01: Kanban focus (F), "*" marker, cleared on DONE.
- * Focus lives in memory only: JSON and the binary wire stay as in v1.15. */
+/* LPS116-FEAT01-CHG01/CHG02: Kanban focus (F), "*" marker, cleared on DONE,
+ * persisted in JSON as "focus":true only on focused cards. */
 static void check_kanban_focus(const char *dir){
     static unsigned char store[16384]; static State loaded, dec; static Blob wire;
     App *app=(App*)store; Platform *hw; uint32_t check=0, gen=0; int active=-1;
@@ -1982,17 +1982,29 @@ static void check_kanban_focus(const char *dir){
     jpath(pa,dir,"BEFORE.JSN"); jpath(pb,dir,"AFTER.JSN");
     assert(jsave_write(pa,app_state(app),1,&check));
     n=slurp(pa,jbuf,sizeof(jbuf));
+    assert(strstr(jbuf,"{\"status\":\"todo\",\"name\":\"Alpha\"}") && !strstr(jbuf,"focus"));
 
     app_key(app,KEY_UP); app_key(app,KEY_UP); /* Alpha */
     app_key(app,'f');
-    assert(app_state(app)->tasks[0].focus==1 && app_state(app)->tasks[1].focus==0);
+    assert(app_state(app)->tasks[0].focus==1 && app_state(app)->tasks[1].focus==0 && app_is_dirty(app));
     assert(cell_is(hw,7,0," 1*Alpha") && cell_is(hw,8,0," 2 Bravo") && plat_host_rev(hw,7,0));
-    app_key(app,'f'); assert(app_state(app)->tasks[0].focus==0 && cell_is(hw,7,0," 1 Alpha"));
+    app_key(app,'f'); assert(app_state(app)->tasks[0].focus==0 && cell_is(hw,7,0," 1 Alpha") && app_is_dirty(app));
     app_key(app,'F'); assert(app_state(app)->tasks[0].focus==1 && cell_is(hw,7,0," 1*Alpha"));
 
+    /* Focused card: "focus":true after name. Unfocused cards stay in the v1.15 form. */
     assert(jsave_write(pb,app_state(app),1,&check));
     n2=slurp(pb,jbuf2,sizeof(jbuf2));
-    assert(n==n2 && !memcmp(jbuf,jbuf2,n) && !strstr(jbuf,"focus"));
+    assert(strstr(jbuf2,"{\"status\":\"todo\",\"name\":\"Alpha\",\"focus\":true}") && !strstr(jbuf2,"\"focus\":false"));
+    assert(strstr(jbuf2,"{\"status\":\"todo\",\"name\":\"Bravo\"}") && strstr(jbuf2,"{\"status\":\"todo\",\"name\":\"Charlie\"}"));
+    assert(n2!=n);
+
+    /* Turning focus off writes the v1.15 bytes again. */
+    app_key(app,'f');
+    assert(app_state(app)->tasks[0].focus==0);
+    assert(jsave_write(pb,app_state(app),1,&check));
+    n2=slurp(pb,jbuf2,sizeof(jbuf2));
+    assert(n==n2 && !memcmp(jbuf,jbuf2,n) && !strstr(jbuf2,"focus"));
+    app_key(app,'F'); assert(app_state(app)->tasks[0].focus==1);
 
     app_key(app,KEY_DOWN); app_key(app,'f'); /* Bravo too */
     assert(app_state(app)->tasks[0].focus==1 && app_state(app)->tasks[1].focus==1);
@@ -2039,22 +2051,77 @@ static void check_kanban_focus(const char *dir){
     /* tools/cp437 folds \u00c0 to A, so the French footer is ASCII "A FAIRE". */
     assert(row_has(hw,21,"F1 A FAIRE F2 EN COURS F3 FINI  F Focus"));
 
-    /* CHG01: a save does not keep focus; it is gone on reload. */
+    /* After the moves, no live card is focused; DONE cards stay unfocused. */
     app_flush_save(app);
     app_init(app,hw); app_start(app);
-    assert(app_state(app)->taskCount==4 && app_state(app)->tasks[0].focus==0 && app_state(app)->tasks[1].focus==0);
-    assert(app_state(app)->tasks[2].focus==0 && app_state(app)->tasks[3].focus==0);
+    assert(app_state(app)->taskCount==4);
+    assert(!strcmp(app_state(app)->tasks[0].name,"Charlie") && app_state(app)->tasks[0].focus==0);
+    assert(!strcmp(app_state(app)->tasks[3].name,"AfF") && app_state(app)->tasks[3].focus==0);
+    assert(app_state(app)->tasks[1].status==TASK_DONE && app_state(app)->tasks[1].focus==0);
+    assert(app_state(app)->tasks[2].status==TASK_DONE && app_state(app)->tasks[2].focus==0);
 
-    /* PicoCalc v1.15 fixture: focus in RAM does not change the written bytes. */
+    /* Round trip: a focused card is reloaded with focus. */
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    app_key(app,'3'); app_key(app,'n'); type_text(app,"Alpha"); app_key(app,KEY_ENTER);
+    app_key(app,'n'); type_text(app,"Bravo"); app_key(app,KEY_ENTER);
+    app_key(app,KEY_UP); app_key(app,'f'); /* Alpha */
+    assert(app_state(app)->tasks[0].focus==1 && app_is_dirty(app));
+    app_flush_save(app);
+    app_init(app,hw); app_start(app);
+    assert(app_state(app)->taskCount==2 && app_state(app)->tasks[0].focus==1 && !strcmp(app_state(app)->tasks[0].name,"Alpha"));
+    assert(app_state(app)->tasks[1].focus==0 && !strcmp(app_state(app)->tasks[1].name,"Bravo"));
+    newest_save(dir);
+    assert(strstr(jbuf,"{\"status\":\"todo\",\"name\":\"Alpha\",\"focus\":true}") && strstr(jbuf,"{\"status\":\"todo\",\"name\":\"Bravo\"}") && !strstr(jbuf,"\"focus\":false"));
+
+    /* PicoCalc v1.15 fixture: load unchanged; a rewrite with no focus stays byte-identical. */
     fresh_dir(dir); jpath(pa,dir,"SAVE_A.JSN");
     copy_file("tests/fixtures/picocalc_custom.jsn",pa);
     gen=0; active=-1;
-    assert(save_load(dir,&loaded,&gen,&active)==LOAD_OK && loaded.taskCount==3 && loaded.tasks[0].focus==0);
-    loaded.tasks[0].focus=1; loaded.tasks[1].focus=1;
+    assert(save_load(dir,&loaded,&gen,&active)==LOAD_OK && loaded.taskCount==3 && loaded.tasks[0].focus==0 && loaded.tasks[1].focus==0 && loaded.tasks[2].focus==0);
     jpath(pb,dir,"OUT.JSN");
     assert(jsave_write(pb,&loaded,gen,&check));
     n=slurp("tests/fixtures/picocalc_custom.jsn",jbuf,sizeof(jbuf)); n2=slurp(pb,jbuf2,sizeof(jbuf2));
-    assert(n==n2 && !memcmp(jbuf,jbuf2,n));
+    assert(n==n2 && !memcmp(jbuf,jbuf2,n) && !strstr(jbuf,"focus"));
+    loaded.tasks[0].focus=1;
+    assert(jsave_write(pb,&loaded,gen,&check));
+    slurp(pb,jbuf2,sizeof(jbuf2));
+    assert(strstr(jbuf2,",\"focus\":true}"));
+
+    /* "focus":false is accepted and omitted on write-back; a focus on a DONE
+     * card is dropped; a malformed value damages the save, as a bad status does. */
+    state_init(&loaded);
+    loaded.taskCount=3;
+    loaded.tasks[0].status=TASK_TODO; strcpy(loaded.tasks[0].name,"Keep"); loaded.tasks[0].focus=0;
+    loaded.tasks[1].status=TASK_DOING; strcpy(loaded.tasks[1].name,"Work"); loaded.tasks[1].focus=0;
+    loaded.tasks[2].status=TASK_DONE; strcpy(loaded.tasks[2].name,"Done"); loaded.tasks[2].focus=0;
+    assert(jsave_write(pb,&loaded,1,&check));
+    n=slurp(pb,jbuf,sizeof(jbuf));
+    insert_after(jbuf,"\"name\":\"Keep\""," ,\"focus\":false");
+    insert_after(jbuf,"\"name\":\"Work\""," ,\"focus\":true");
+    insert_after(jbuf,"\"name\":\"Done\""," ,\"focus\":true");
+    resign(jbuf); spit(pb,jbuf,strlen(jbuf));
+    assert(jsave_read(pb,&dec,&gen,&check)==SAVE_VALID);
+    assert(dec.taskCount==3 && dec.tasks[0].focus==0 && !strcmp(dec.tasks[0].name,"Keep"));
+    assert(dec.tasks[1].focus==1 && !strcmp(dec.tasks[1].name,"Work"));
+    assert(dec.tasks[2].status==TASK_DONE && dec.tasks[2].focus==0 && !strcmp(dec.tasks[2].name,"Done"));
+    assert(jsave_write(pb,&dec,1,&check));
+    slurp(pb,jbuf2,sizeof(jbuf2));
+    assert(strstr(jbuf2,"{\"status\":\"doing\",\"name\":\"Work\",\"focus\":true}"));
+    assert(strstr(jbuf2,"{\"status\":\"todo\",\"name\":\"Keep\"}") && !strstr(jbuf2,"\"name\":\"Keep\",\"focus\""));
+    assert(strstr(jbuf2,"{\"status\":\"done\",\"name\":\"Done\"}") && !strstr(jbuf2,"\"name\":\"Done\",\"focus\""));
+    {
+        static const char *bad[]={"1","\"true\"","null"};
+        unsigned i;
+        for(i=0;i<sizeof(bad)/sizeof(bad[0]);i++){
+            char extra[40];
+            assert(jsave_write(pb,&loaded,1,&check));
+            slurp(pb,jbuf,sizeof(jbuf));
+            sprintf(extra,",\"focus\":%s",bad[i]);
+            insert_after(jbuf,"\"name\":\"Keep\"",extra);
+            resign(jbuf); spit(pb,jbuf,strlen(jbuf));
+            if(jsave_read(pb,&dec,&gen,&check)!=SAVE_DAMAGED){ fprintf(stderr,"focus value %s accepted\n",bad[i]); assert(0); }
+        }
+    }
 
     /* Binary wire layout is unchanged; focus is not stored and decodes as 0.
      * The wire only accepts ASCII names (UTF-8 lives in the JSON save). */
@@ -2266,7 +2333,7 @@ int main(void){
     printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, title v1.15, menu 0-8 without notepad or Config, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
     printf("%s", " unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture),");
     printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), MEALSCGA.DAT (13 CGA pictures, colours, checksums, damaged/missing, EGA/CGA independent), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical),");
-    printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR, MEALSCGA.DAT messages), CGA played card (checkerboard grey-out masks, PLAYED/JOUEE label sizes), Kanban focus (F toggle, * marker, cleared on DONE, kept on reorder/move, JSON and wire unchanged), fixture decode (%u captures)\n", 0);
+    printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR, MEALSCGA.DAT messages), CGA played card (checkerboard grey-out masks, PLAYED/JOUEE label sizes), Kanban focus (F toggle, * marker, cleared on DONE, kept on reorder/move, JSON focus:true, wire unchanged), fixture decode (%u captures)\n", 0);
     rm_tree(tmpdir);
     return 0;
 }

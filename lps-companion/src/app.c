@@ -877,13 +877,14 @@ void app_key(App *a, int k){
         else if(k==KEY_F4 || k=='-'){ if(n) reorder_task(a,0); }
         else if(k==KEY_F5 || k=='+'){ if(n) reorder_task(a,1); }
         else if((k=='f'||k=='F') && n){
-            /* LPS116-FEAT01-CHG01: F toggles focus; a DONE card stays unfocused.
-             * Memory only: no commit, so the JSON save is unchanged (CHG02). */
+            /* LPS116-FEAT01-CHG02: F toggles focus and marks the save dirty
+             * through commit, like the other Kanban edits. A DONE card stays
+             * unfocused. */
             unsigned index=task_at(a,a->kanbanColumn,a->selection);
             if(index<a->state.taskCount && a->state.tasks[index].status!=TASK_DONE){
-                if(a->daysBack) read_only(a);
-                else if(a->blocked) say(a, tr(a,"Unreadable save: writes blocked","Sauvegarde illisible : écriture bloquée"));
-                else a->state.tasks[index].focus=(uint8_t)!a->state.tasks[index].focus;
+                g_scratch=a->state;
+                g_scratch.tasks[index].focus=(uint8_t)!g_scratch.tasks[index].focus;
+                commit(a,&g_scratch);
             }
         }
     }else if(a->screen==SCR_TASK_EDIT){

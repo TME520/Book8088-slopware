@@ -116,8 +116,10 @@ typedef struct {
 } Day;
 /* User texts (task names, reminder texts, notes, activity names) are the
  * files' UTF-8 bytes, unchanged (LPS-DOS-115-CHG06d); limits are UTF-8 bytes.
- * LPS116-FEAT01-CHG01: focus is in memory only (F on the Kanban). It is not
- * written to JSON (CHG02) nor to the binary wire (WIRE_V5 / WIRE_SIZE). */
+ * LPS116-FEAT01-CHG02: a focused card is written as "focus":true after name
+ * in the JSON save (only when focused). Focus is not in the binary wire
+ * (WIRE_V5 / WIRE_SIZE): the app writes JSON only, and a day's archive does
+ * not snapshot the kanban. */
 typedef struct { uint8_t status; uint8_t focus; char name[TASK_NAME_LENGTH + 1]; } Task;
 /* One catalog entry. Names are UTF-8, as in the save; the screen shows them
  * through utf8_to_cp437. The French name (or the English one when French is
