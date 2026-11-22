@@ -271,7 +271,8 @@ static void french_screen_ok(Platform *hw, const char *where){
     int r; unsigned i; const unsigned char *p;
     for(r=0;r<ROWS;r++){
         for(p=(const unsigned char*)plat_host_row(hw,r);*p;p++)
-            if(!cp437_text_byte(*p)){ fprintf(stderr,"%s row %d: byte 0x%02X is not CP437 text\n",where,r,*p); assert(0); }
+            /* 0x18/0x19: Daily Review scroll arrows (CHG05); not typed text. */
+            if(!cp437_text_byte(*p) && *p!=0x18 && *p!=0x19){ fprintf(stderr,"%s row %d: byte 0x%02X is not CP437 text\n",where,r,*p); assert(0); }
         for(i=0;FOLDED_FR[i];i++) if(has_word(plat_host_row(hw,r),FOLDED_FR[i])){
             fprintf(stderr,"%s row %d: folded \"%s\" in \"%s\"\n",where,r,FOLDED_FR[i],plat_host_row(hw,r)); assert(0); }
     }
@@ -980,7 +981,8 @@ static void check_bios_keys(const char *dir){
     assert(app_bios_key('7',0x47)=='7' && app_bios_key('0',0x52)=='0'); /* keypad with NumLock */
     assert(app_bios_key(0,0x48)==KEY_UP && app_bios_key(0xE0,0x53)==KEY_DELETE && app_bios_key(0,0x3E)==KEY_F4);
     assert(app_bios_key(13,0x1C)==KEY_ENTER && app_bios_key(27,0x01)==KEY_ESCAPE && app_bios_key(8,0x0E)==KEY_BACKSPACE);
-    assert(app_bios_key('q',0x1E)=='q' && app_bios_key(1,0x1E)==-1 && app_bios_key(0,0x47)==-1);
+    assert(app_bios_key('q',0x1E)=='q' && app_bios_key(1,0x1E)==-1 && app_bios_key(0,0x47)==KEY_HOME);
+    assert(app_bios_key(0,0x49)==KEY_PGUP && app_bios_key(0,0x4F)==KEY_END && app_bios_key(0,0x51)==KEY_PGDN);
     assert(plat_host_key(1,'-')==KEY_TOPROW('-','6') && plat_host_key(0,'-')=='-' && plat_host_key(1,',')==',');
 
     fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
@@ -2165,6 +2167,153 @@ static void check_daily_review_layout(const char *dir){
     }
 }
 
+
+/* Force refresh_labels after a test pokes the catalog (it skips when the language is unchanged). */
+static void host_refresh_labels(App *app){
+    State *st=(State*)app_state(app);
+    st->language=(uint8_t)(st->language==LANG_EN?LANG_FR:LANG_EN);
+    app_render(app);
+    st->language=(uint8_t)(st->language==LANG_EN?LANG_FR:LANG_EN);
+    app_render(app);
+}
+/* 24 focused cards + 30 ticked activities: 67 lines today (5 + 1+24 + 6 + 1+30). */
+static void fill_max_today_review(App *app){
+    State *st=(State*)app_state(app);
+    unsigned i; uint32_t flags=0;
+    memset(st->tasks,0,sizeof(st->tasks));
+    st->taskCount=TASK_CAPACITY;
+    for(i=0;i<TASK_CAPACITY;i++){
+        st->tasks[i].status=TASK_TODO;
+        st->tasks[i].focus=1;
+        sprintf(st->tasks[i].name,"Card %02u",i+1);
+    }
+    for(i=st->activityCount;i<ACTIVITY_CAPACITY;i++){
+        st->activities[i].id=st->nextActivityId++;
+        sprintf(st->activities[i].en,"Extra %02u",i+1);
+        sprintf(st->activities[i].fr,"Plus %02u",i+1);
+    }
+    st->activityCount=ACTIVITY_CAPACITY;
+    for(i=0;i<ACTIVITY_CAPACITY;i++) flags|=FLAG_MASK(i);
+    st->today.flags=flags;
+    host_refresh_labels(app);
+}
+static int review_mark(Platform *hw, int row, unsigned char ch){
+    const char *t=plat_host_row(hw,row);
+    return t && (unsigned char)t[COLUMNS-1]==ch;
+}
+
+/* LPS116-FEAT02-CHG05: Daily Review scrolling, markers, clamp, reset, archive. */
+static void check_daily_review_scroll(const char *dir){
+    static unsigned char store[16384];
+    App *app=(App*)store; Platform *hw;
+    State *st;
+    char before[OV_FRAME];
+
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+
+    /* Fits on one page: no arrows, footer has the range but not the scroll hint. */
+    app_key(app,'5'); assert(app_screen(app)==SCR_DAILY_REVIEW);
+    assert(row_has(hw,22,"1-15/15") && row_has(hw,22,"Esc back") && !row_has(hw,22,"Up/Down: scroll"));
+    assert(!review_mark(hw,1,'\x18') && !review_mark(hw,21,'\x19'));
+    app_key(app,KEY_DOWN); app_key(app,KEY_UP); app_key(app,KEY_END); app_key(app,KEY_PGDN);
+    assert(row_has(hw,1,"Thursday 17 September 2026 - Week 38") && row_has(hw,22,"1-15/15"));
+
+    /* 67-line today. */
+    app_key(app,KEY_ESCAPE);
+    fill_max_today_review(app);
+    app_key(app,'5');
+    assert(row_has(hw,22,"Up/Down: scroll  1-21/67  Esc back"));
+    assert(!review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+    assert(row_has(hw,1,"Thursday 17 September 2026 - Week 38"));
+    /* Last visible line at the top is a focused card (items 0..20: header+kanban+cards). */
+    assert(any_row(hw,"  Card 01") && any_row(hw,"  Card 15") && !any_row(hw,"  Card 16"));
+
+    /* Up at the top does not wrap. */
+    app_key(app,KEY_UP); app_key(app,KEY_PGUP); app_key(app,KEY_HOME); app_key(app,KEY_LEFT);
+    assert(row_has(hw,22,"1-21/67") && !review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+
+    /* One line down, then a page (Right / PgDn, as in v1.15). */
+    app_key(app,KEY_DOWN);
+    assert(row_has(hw,22,"2-22/67") && review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+    app_key(app,KEY_RIGHT);
+    assert(row_has(hw,22,"23-43/67") && review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+    app_key(app,KEY_PGDN);
+    assert(row_has(hw,22,"44-64/67") && review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+
+    /* End / clamp at the bottom. */
+    app_key(app,KEY_END);
+    assert(row_has(hw,22,"47-67/67") && review_mark(hw,1,'\x18') && !review_mark(hw,21,'\x19'));
+    assert(any_row(hw,"  Extra 30") && !any_row(hw,"  Card 01"));
+    app_key(app,KEY_DOWN); app_key(app,KEY_PGDN); app_key(app,KEY_RIGHT);
+    assert(row_has(hw,22,"47-67/67") && review_mark(hw,1,'\x18') && !review_mark(hw,21,'\x19'));
+
+    /* Left / PgUp page back, Home returns to the top. */
+    app_key(app,KEY_LEFT);
+    assert(row_has(hw,22,"26-46/67"));
+    app_key(app,KEY_PGUP);
+    assert(row_has(hw,22,"5-25/67"));
+    app_key(app,KEY_HOME);
+    assert(row_has(hw,22,"1-21/67") && !review_mark(hw,1,'\x18'));
+
+    /* BIOS: dedicated Home/PgUp/End/PgDn; keypad 3 (NumLock on) stays a digit. */
+    assert(app_bios_key(0,71)==KEY_HOME && app_bios_key(0xE0,73)==KEY_PGUP);
+    assert(app_bios_key(0,79)==KEY_END && app_bios_key(0,81)==KEY_PGDN);
+    app_key(app,KEY_ESCAPE); assert(app_screen(app)==SCR_HOME);
+    app_key(app,app_bios_key('3',0x51)); assert(app_screen(app)==SCR_KANBAN);
+    app_key(app,KEY_ESCAPE);
+
+    /* TAB/SPACE return to the same offset and markers. */
+    app_key(app,'5');
+    app_key(app,KEY_PGDN);
+    assert(row_has(hw,22,"22-42/67") && review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+    frame_of(hw,before);
+    app_key(app,KEY_TAB); app_key(app,KEY_TAB);
+    assert(app_screen(app)==SCR_DAILY_REVIEW && frame_is(hw,before) && row_has(hw,22,"22-42/67"));
+    app_key(app,' '); app_key(app,' ');
+    assert(app_screen(app)==SCR_DAILY_REVIEW && frame_is(hw,before) && review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+
+    /* Offset resets when the review is opened again. */
+    app_key(app,KEY_ESCAPE); app_key(app,'5');
+    assert(row_has(hw,22,"1-21/67") && !review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+
+    /* Content shrinks: offset is clamped (here the list fits again). */
+    app_key(app,KEY_END);
+    assert(row_has(hw,22,"47-67/67"));
+    st=(State*)app_state(app);
+    st->taskCount=0; memset(st->tasks,0,sizeof(st->tasks));
+    st->today.flags=0;
+    app_render(app);
+    assert(row_has(hw,22,"1-15/15") && !row_has(hw,22,"Up/Down: scroll"));
+    assert(!review_mark(hw,1,'\x18') && !review_mark(hw,21,'\x19'));
+    assert(row_has(hw,1,"Thursday 17 September 2026 - Week 38") && row_has(hw,15,"No activity"));
+
+    /* Archived day: no KANBAN, still scrolls when the frozen names overflow,
+     * meals stay -- (no per-day snapshot). 5+banner+6+1+30 = 43 lines. */
+    app_key(app,KEY_ESCAPE);
+    fill_max_today_review(app);
+    app_key(app,'8'); app_key(app,KEY_ENTER); app_key(app,KEY_ENTER);
+    app_key(app,KEY_LEFT);
+    app_host_go(app,SCR_DAILY_REVIEW);
+    assert(app_screen(app)==SCR_DAILY_REVIEW);
+    assert(any_row(hw,"ARCHIVED DAY") && !any_row(hw,"KANBAN") && !any_row(hw,"Card 01"));
+    assert(any_row(hw,"Drinks: --") && any_row(hw,"Next: --"));
+    assert(row_has(hw,22,"Up/Down: scroll  1-21/43  Esc back"));
+    assert(!review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+    app_key(app,KEY_END);
+    assert(row_has(hw,22,"23-43/43") && review_mark(hw,1,'\x18') && !review_mark(hw,21,'\x19'));
+    assert(any_row(hw,"  Extra 30"));
+
+    /* French footer when it overflows. */
+    app_key(app,KEY_ESCAPE); app_key(app,KEY_RIGHT);
+    app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'2'); app_key(app,'4');
+    app_key(app,'5');
+    /* Today after close is empty (15 lines); go back to the archive. */
+    app_key(app,KEY_ESCAPE); app_key(app,KEY_LEFT);
+    app_host_go(app,SCR_DAILY_REVIEW);
+    assert(row_has(hw,22,"Haut/Bas : défiler  1-21/43") && row_has(hw,22,"Échap retour"));
+    french_screen_ok(hw,"daily review scroll FR");
+}
+
 static void check_kanban_focus(const char *dir){
     static unsigned char store[16384]; static State loaded, dec; static Blob wire;
     App *app=(App*)store; Platform *hw; uint32_t check=0, gen=0; int active=-1;
@@ -2534,10 +2683,11 @@ int main(void){
     check_home_filtered(tmpdir);
     check_full_date(tmpdir);
     check_daily_review_layout(tmpdir);
+    check_daily_review_scroll(tmpdir);
     check_kanban_focus(tmpdir);
     assert(orphan_hits>0); /* some edit took a name history had stored */
 
-    printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, Daily Review full date (FR/EN, year-boundary weeks, CGA 40-col fold), Daily Review layout (focus, meals, next, archive, -- weight), ROSARY.DAT load/missing/damaged, title v1.15, menu 0-8 without notepad or Config, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
+    printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, Daily Review full date (FR/EN, year-boundary weeks, CGA 40-col fold), Daily Review layout (focus, meals, next, archive, -- weight), Daily Review scroll (markers, clamp, reset, archive, overlays), ROSARY.DAT load/missing/damaged, title v1.15, menu 0-8 without notepad or Config, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
     printf("%s", " unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture),");
     printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), MEALSCGA.DAT (13 CGA pictures, colours, checksums, damaged/missing, EGA/CGA independent), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical),");
     printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR, MEALSCGA.DAT messages), CGA played card (checkerboard grey-out masks, PLAYED/JOUEE label sizes), Kanban focus (F toggle, * marker, cleared on DONE, kept on reorder/move, JSON focus:true, wire unchanged), fixture decode (%u captures)\n", 0);

@@ -56,6 +56,10 @@ typedef uint64_t lps_tick_t;
 #define KEY_F3 1007
 #define KEY_F4 1008
 #define KEY_F5 1009
+#define KEY_HOME 1010
+#define KEY_END 1011
+#define KEY_PGUP 1012
+#define KEY_PGDN 1013
 /* LPS-DOS-115-CHG06b: a key on the main keyboard's top row (BIOS scan codes
  * 02h-0Bh) carries its character and the digit printed on the key, whatever
  * the layout and Shift: AZERTY é (scan 03h) is digit 2. Screens keyed by

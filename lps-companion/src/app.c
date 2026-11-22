@@ -339,8 +339,8 @@ static const char *task_status_name(const App *a, int status){
     return a->state.language==LANG_FR?fr[status]:en[status];
 }
 
-/* LPS116-FEAT02-CHG04: Daily Review is a list of lines, drawn from reviewOffset.
- * CHG05 will add scroll markers; the offset and Up/Down already move the window. */
+/* LPS116-FEAT02-CHG04/CHG05: Daily Review is a list of lines, drawn from
+ * reviewOffset, with Up/Down scrolling and ↑/↓ markers when it overflows. */
 enum {
     RL_DATE, RL_ARCHIVE, RL_BLANK, RL_TITLE, RL_WEIGHT, RL_KANBAN,
     RL_CARD, RL_NO_FOCUS, RL_MEALS, RL_COUNT, RL_NEXT, RL_ACT,
@@ -407,6 +407,14 @@ static void review_build(const App *a){
     if(!got) review_add(RL_NO_ACT,0);
 }
 static unsigned review_rows(const App *a){ review_build(a); return g_review_n; }
+static unsigned review_max_offset(const App *a){
+    unsigned rows=review_rows(a);
+    return rows>REVIEW_PAGE?rows-REVIEW_PAGE:0;
+}
+static void review_clamp(App *a){
+    unsigned m=review_max_offset(a);
+    if(a->reviewOffset>m) a->reviewOffset=m;
+}
 static void review_line(App *a, unsigned index, char *out, size_t size){
     const ReviewItem *it; const Day *day=app_viewed_day(a);
     char weight[16], food[40], drink[40];
@@ -526,10 +534,7 @@ static void return_to(App *a, ReturnPoint r){
         unsigned pages=rosary_pages(rosary_text(a->state.language,a->rosaryMode,a->rosarySet,a->rosaryDecade,a->rosaryStep));
         if(pages && a->rosaryPage>=pages) a->rosaryPage=pages-1;
     }
-    if(a->screen==SCR_DAILY_REVIEW){
-        unsigned rows=review_rows(a), maximum=rows>REVIEW_PAGE?rows-REVIEW_PAGE:0;
-        if(a->reviewOffset>maximum) a->reviewOffset=maximum;
-    }
+    if(a->screen==SCR_DAILY_REVIEW) review_clamp(a);
 }
 /* LPS-DOS-115-CHG10 (PicoCalc commit, LPS-115-CHG03): when Config's write
  * fails, the settings keep their old values, the pending choice stays and
@@ -777,6 +782,10 @@ int app_bios_key(unsigned ascii, unsigned scan){
         case 61: return KEY_F3;
         case 62: return KEY_F4;
         case 63: return KEY_F5;
+        case 71: return KEY_HOME;
+        case 73: return KEY_PGUP;
+        case 79: return KEY_END;
+        case 81: return KEY_PGDN;
         default: return -1;
         }
     }
@@ -1011,11 +1020,17 @@ void app_key(App *a, int k){
             }
         }else edit_text(a->taskDraft,TASK_NAME_LENGTH,k);
     }else if(a->screen==SCR_DAILY_REVIEW){
-        unsigned maximum=review_rows(a)>REVIEW_PAGE?review_rows(a)-REVIEW_PAGE:0;
+        /* LPS116-FEAT02-CHG05: Up/Down one line, no wrap. Left/Right page as
+         * in v1.15; PgUp/PgDn do the same; Home/End jump to the ends. */
+        unsigned maximum;
+        review_clamp(a);
+        maximum=review_max_offset(a);
         if(k==KEY_DOWN && a->reviewOffset<maximum) a->reviewOffset++;
         else if(k==KEY_UP && a->reviewOffset) a->reviewOffset--;
-        else if(k==KEY_RIGHT) a->reviewOffset=(a->reviewOffset+REVIEW_PAGE<maximum)?a->reviewOffset+REVIEW_PAGE:maximum;
-        else if(k==KEY_LEFT) a->reviewOffset=a->reviewOffset>REVIEW_PAGE?a->reviewOffset-REVIEW_PAGE:0;
+        else if(k==KEY_RIGHT||k==KEY_PGDN) a->reviewOffset=(a->reviewOffset+REVIEW_PAGE<maximum)?a->reviewOffset+REVIEW_PAGE:maximum;
+        else if(k==KEY_LEFT||k==KEY_PGUP) a->reviewOffset=a->reviewOffset>REVIEW_PAGE?a->reviewOffset-REVIEW_PAGE:0;
+        else if(k==KEY_HOME) a->reviewOffset=0;
+        else if(k==KEY_END) a->reviewOffset=maximum;
     }else if(a->screen==SCR_CONFIG){
         /* LPS-DOS-115-CHG10 (PicoCalc LPS-115-CHG03): 1 Language, 2 Colors,
          * 3 Activities (home entries), 4 Save. */
@@ -1367,14 +1382,31 @@ void app_render(App *a){
         line(a,13,tr(a,"Enter: save task","Entrée : enregistrer la tâche"),0);
         line(a,15,tr(a,"Backspace: erase  Esc: cancel","Retour: effacer  Échap: annuler"),0);
     }else if(a->screen==SCR_DAILY_REVIEW){
-        unsigned total=review_rows(a);
+        unsigned total, last;
+        char mark[2];
+        review_clamp(a);
+        total=review_rows(a);
+        last=0;
         for(i=0;i<REVIEW_PAGE && a->reviewOffset+i<total;i++){
             review_line(a,a->reviewOffset+i,b,sizeof(b));
             if(review_centered(g_review[a->reviewOffset+i].kind)) center_line(a,REVIEW_TOP+(int)i,b,0);
             else line(a,REVIEW_TOP+(int)i,b,0);
+            last=i;
         }
-        sprintf(b,tr(a,"Up/Down scroll  %u-%u/%u  Esc back","Haut/Bas défiler  %u-%u/%u  Échap retour"),
-            a->reviewOffset+1, (a->reviewOffset+REVIEW_PAGE<total?a->reviewOffset+REVIEW_PAGE:total), total); line(a,22,b,0);
+        /* CP437 ↑ 0x18 / ↓ 0x19 at the right edge: visible on EGA, CGA text
+         * and Hercules mono, no translated text. Only when more content sits
+         * above or below the 21-row window. */
+        mark[1]=0;
+        if(a->reviewOffset){ mark[0]=''; a->hw->text(a->hw,REVIEW_TOP,COLUMNS-1,mark,0); }
+        if(total && a->reviewOffset+REVIEW_PAGE<total){ mark[0]=''; a->hw->text(a->hw,REVIEW_TOP+(int)last,COLUMNS-1,mark,0); }
+        if(total>REVIEW_PAGE){
+            sprintf(b,tr(a,"Up/Down: scroll  %u-%u/%u  Esc back","Haut/Bas : défiler  %u-%u/%u  Échap retour"),
+                a->reviewOffset+1, (a->reviewOffset+REVIEW_PAGE<total?a->reviewOffset+REVIEW_PAGE:total), total);
+        }else{
+            sprintf(b,tr(a,"%u-%u/%u  Esc back","%u-%u/%u  Échap retour"),
+                total?a->reviewOffset+1:0, total, total);
+        }
+        line(a,22,b,0);
     }else if(a->screen==SCR_CONFIG){
         center_line(a,3,tr(a,"CONFIGURATION","CONFIGURATION"),0);
         sprintf(b,"%s: %s", tr(a,"1  Language","1  Langue"), a->pendingLanguage==LANG_EN?"English":"Français"); line(a,6,b,a->selection==0);

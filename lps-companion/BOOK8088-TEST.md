@@ -12,7 +12,7 @@ Dans un meme dossier (par exemple `C:\LPSCOMP\`), depuis la racine du depot :
 
 | Fichier | Taille | Role |
 |---|---|---|
-| `LPSCOMP.EXE` | 108 646 o | programme |
+| `LPSCOMP.EXE` | 108 980 o | programme |
 | `ROSARY.DAT` | 10 217 o | textes du chapelet |
 | `MEALS.DAT` | 199 964 o | images du planificateur de repas (EGA/VGA) |
 | `MEALSCGA.DAT` | 49 996 o | images du planificateur de repas (CGA, LPS-DOS-115-CHG14) |
@@ -90,7 +90,7 @@ l'horloge avance par pas de 55 ms.
 
 # Book 8088 – real-device checklist (EN, short)
 
-Copy `LPSCOMP.EXE` (108,646 B), `ROSARY.DAT` (10,217 B),
+Copy `LPSCOMP.EXE` (108,980 B), `ROSARY.DAT` (10,217 B),
 `MEALS.DAT` (199,964 B) and `MEALSCGA.DAT` (49,996 B) into one folder; data
 goes to `C:\LPS\`. Check against the DOSBox 8088-speed reference times (section 7
 above; DOSBox disk reads are near-instant, so real first reads take longer):
