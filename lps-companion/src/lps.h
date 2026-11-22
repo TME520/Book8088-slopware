@@ -1,4 +1,4 @@
-/* LPS Companion MS-DOS port - shared types (Companion v1.15 parity). C89. */
+/* LPS Companion MS-DOS port - shared types (v1.16; PicoCalc v1.15 files). C89. */
 #ifndef LPS_H
 #define LPS_H
 
@@ -15,7 +15,7 @@ typedef unsigned long  lps_tick_t;
 typedef uint64_t lps_tick_t;
 #endif
 
-#define LPS_VERSION_STR "1.15" /* LPS-DOS-115-CHG12, as PicoCalc LPS-115-CHG06 */
+#define LPS_VERSION_STR "1.16" /* LPS116-CHG07 */
 #define NOTE_LENGTH 96 /* legacy notes: kept in SAVE and ICS, no editor since LPS-DOS-115-CHG02 */
 #define HISTORY_LENGTH 31
 #define TASK_NAME_LENGTH 32
@@ -56,6 +56,10 @@ typedef uint64_t lps_tick_t;
 #define KEY_F3 1007
 #define KEY_F4 1008
 #define KEY_F5 1009
+#define KEY_HOME 1010
+#define KEY_END 1011
+#define KEY_PGUP 1012
+#define KEY_PGDN 1013
 /* LPS-DOS-115-CHG06b: a key on the main keyboard's top row (BIOS scan codes
  * 02h-0Bh) carries its character and the digit printed on the key, whatever
  * the layout and Shift: AZERTY é (scan 03h) is digit 2. Screens keyed by
@@ -115,8 +119,12 @@ typedef struct {
     char note[NOTE_LENGTH + 1];
 } Day;
 /* User texts (task names, reminder texts, notes, activity names) are the
- * files' UTF-8 bytes, unchanged (LPS-DOS-115-CHG06d); limits are UTF-8 bytes. */
-typedef struct { uint8_t status; char name[TASK_NAME_LENGTH + 1]; } Task;
+ * files' UTF-8 bytes, unchanged (LPS-DOS-115-CHG06d); limits are UTF-8 bytes.
+ * LPS116-FEAT01-CHG02: a focused card is written as "focus":true after name
+ * in the JSON save (only when focused). Focus is not in the binary wire
+ * (WIRE_V5 / WIRE_SIZE): the app writes JSON only, and a day's archive does
+ * not snapshot the kanban. */
+typedef struct { uint8_t status; uint8_t focus; char name[TASK_NAME_LENGTH + 1]; } Task;
 /* One catalog entry. Names are UTF-8, as in the save; the screen shows them
  * through utf8_to_cp437. The French name (or the English one when French is
  * empty) is the identity a day stores. */
@@ -190,6 +198,11 @@ struct Platform {
     /* LPS-DOS-115-CHG08: rewrites EXPORT\MPYYMMDD.CSV for s->today
      * (meal_csv_export); 0 on failure. NULL: nothing to write. */
     int  (*export_meal_csv)(Platform *self, const State *s);
+    /* LPS116-CHG07b: scroll a text rectangle. lines>0 moves content up
+     * (blank lines appear at the bottom); lines<0 moves it down. Rows
+     * top..bottom and columns left..right are inclusive. NULL: the app
+     * redraws the window. */
+    void (*scroll_text)(Platform *self, int top, int left, int bottom, int right, int lines);
     void *user;
 };
 
@@ -281,6 +294,7 @@ uint32_t day_index(Date d);
 unsigned weekday(Date d); /* 0=Sunday */
 unsigned iso_week(Date d); /* ISO 8601, 1..53 */
 void long_date_text(Date d, int language, char *out, size_t n);
+void full_date_text(Date d, int language, char *out, size_t n); /* Daily Review: "Monday 16 November 2026 - Week 47" / "Lundi 16 novembre 2026 - Semaine 47" */
 
 /* ICS / CSV */
 int ics_escape_append(char *dst, size_t cap, size_t *used, const char *text);

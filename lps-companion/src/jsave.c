@@ -14,6 +14,9 @@
  *   "crc32":"xxxxxxxx"}
  *   DAY {"date":"YYYY-MM-DD"|null,"number":N,"activities":["Marche",...],
  *        "expected":grams|null,"actual":grams|null,"note":"..."}
+ *   TASK {"status":"todo"|"doing"|"done","name":"..."} and, when focused,
+ *        "focus":true after name (LPS116-FEAT01-CHG02). Absent or false:
+ *        not focused. A focus on a DONE card is dropped on load.
  *
  * The activity catalog lives in the State and each day's stored names in
  * lps_day_names (LPS-DOS-115-CHG05): a day's flags are resolved from its
@@ -238,6 +241,14 @@ static int read_choice(const char *const *names, unsigned count, uint8_t *out){
     for(i=0;i<count;i++) if(!strcmp(J.text,names[i])){ *out=(uint8_t)i; return 1; }
     return 0;
 }
+/* LPS116-FEAT01-CHG02: true/false only; any other value damages the save,
+ * as a bad "status" string does. */
+static int read_bool(uint8_t *out){
+    int t=next();
+    if(t==T_TRUE){ *out=1; return 1; }
+    if(t==T_FALSE){ *out=0; return 1; }
+    return 0;
+}
 static int read_day(int first, Day *d, DayNames *e){
     char key[24]; int st=1, r, t;
     if(first!=T_OBJ) return 0;
@@ -316,9 +327,11 @@ static int read_state(State *s){
                 while((r=member(&ms,key))>0){
                     if(!strcmp(key,"status")){ if(!read_choice(STATUSES,3,&task->status)) return 0; }
                     else if(!strcmp(key,"name")){ if(!read_text(TASK_NAME_LENGTH+1,1)) return 0; text_copy(task->name); named=1; }
+                    else if(!strcmp(key,"focus")){ if(!read_bool(&task->focus)) return 0; }
                     else if(!skip(next())) return 0;
                 }
                 if(r<0||!named) return 0;
+                if(task->status==TASK_DONE) task->focus=0; /* DONE is never focused */
                 s->taskCount++;
             }
             if(r<0) return 0;
@@ -570,7 +583,10 @@ int jsave_write(const char *path, const State *s, uint32_t generation, uint32_t 
     for(i=0;i<s->taskCount;i++){
         if(i) put(',');
         raw("\n{"); key("status"); text(STATUSES[s->tasks[i].status<3?s->tasks[i].status:0]);
-        put(','); key("name"); text(s->tasks[i].name); put('}');
+        put(','); key("name"); text(s->tasks[i].name);
+        /* LPS116-FEAT01-CHG02: "focus":true only on a focused, non-DONE card. */
+        if(s->tasks[i].focus && s->tasks[i].status!=TASK_DONE){ put(','); key("focus"); raw("true"); }
+        put('}');
     }
     raw("],\n"); key("reminders"); put('[');
     for(i=0;i<s->reminderCount;i++){

@@ -82,7 +82,17 @@ static const int HOME_SCREENS[HOME_ENTRY_COUNT]={SCR_DATE,SCR_ACTIVITIES,SCR_WEI
 /* LPS-DOS-115-CHG11 (PicoCalc LPS-115-CHG04): today's home menu lists the
  * entries not hidden, in order, numbered 0..n-1 by position. Date (first)
  * and Close the day (last) are locked, so the menu is never empty and always
- * ends with Close the day. The archive menu (1-2) is not filtered. */
+ * ends with Close the day. The archive menu is not filtered.
+ * LPS116-FEAT02-CHG06: 1 Activities, 2 Weight tracker, 3 Daily review.
+ * PicoCalc v1.15 still has only 1-2; 3 is a DOS v1.16 addition. */
+#define ARCHIVE_MENU_COUNT 3
+static const unsigned ARCHIVE_ENTRIES[ARCHIVE_MENU_COUNT]={1,2,5};
+static const int ARCHIVE_SCREENS[ARCHIVE_MENU_COUNT]={SCR_ACTIVITIES,SCR_WEIGHT,SCR_DAILY_REVIEW};
+static unsigned archive_menu_index(int screen){
+    unsigned i;
+    for(i=0;i<ARCHIVE_MENU_COUNT;i++) if(ARCHIVE_SCREENS[i]==screen) return i;
+    return 0;
+}
 static uint16_t hidden_home_mask(const App *a){ return (uint16_t)(a->state.hiddenHome&HOME_ALL&~HOME_LOCKED); }
 static unsigned home_visible_count(const App *a){
     unsigned i, n=0; uint16_t m=hidden_home_mask(a);
@@ -145,7 +155,8 @@ static void center_line(App *a, int row, const char *text, int reverse){
         a->hw->text(a->hw, row, col, text, 0);
     }
 }
-#define REVIEW_PAGE 15
+#define REVIEW_PAGE 21
+#define REVIEW_TOP 1
 #define ROSARY_LINES 16
 /* Rosary pages: ROSARY_LINES word-wrapped lines each (LPS-DOS-115-CHG03c). */
 static unsigned rosary_pages(const char *text){
@@ -337,29 +348,222 @@ static const char *task_status_name(const App *a, int status){
     static const char *fr[]={"À FAIRE","EN COURS","FINI"};
     return a->state.language==LANG_FR?fr[status]:en[status];
 }
-static unsigned review_rows(const App *a){
-    return 3+count_flags(a->state.today.flags)+tasks_in(a,TASK_TODO)+tasks_in(a,TASK_DOING)
-        +(count_flags(a->state.today.flags)==0)+(tasks_in(a,TASK_TODO)==0)+(tasks_in(a,TASK_DOING)==0);
-}
+
+/* LPS116-FEAT02-CHG04/CHG05: Daily Review is a list of lines, drawn from
+ * reviewOffset, with Up/Down scrolling and ↑/↓ markers when it overflows. */
+enum {
+    RL_DATE, RL_ARCHIVE, RL_BLANK, RL_TITLE, RL_WEIGHT, RL_KANBAN,
+    RL_CARD, RL_NO_FOCUS, RL_MEALS, RL_COUNT, RL_NEXT, RL_ACT,
+    RL_ACTIVITY, RL_STORED, RL_NO_ACT
+};
+#define REVIEW_CAP 80
+typedef struct { uint8_t kind, arg; } ReviewItem;
+static ReviewItem g_review[REVIEW_CAP];
+static unsigned g_review_n;
+static unsigned g_review_ok; /* LPS116-CHG07b: build once, not on every line */
 static const char *shown(const char *utf8); /* CHG06d: UTF-8 user text to CP437 */
-static void review_line(App *a, unsigned index, char *out, size_t size){
-    unsigned activities=count_flags(a->state.today.flags); unsigned i; int status;
-    if(index==0){ sprintf(out, tr(a,"ACTIVITIES (%u)","ACTIVITÉS (%u)"), activities); return; }
-    --index;
-    for(i=0;i<a->state.activityCount;i++) if(FLAG_BIT(a->state.today.flags,i)){
-        if(index--==0){ sprintf(out,"  %s", a->label[i]); return; }
-    }
-    if(!activities){ if(index--==0){ sprintf(out,"  %s", tr(a,"None selected","Aucune sélectionnée")); return; } }
-    for(status=TASK_TODO; status<=TASK_DOING; status++){
-        unsigned n=tasks_in(a,status);
-        if(index--==0){ sprintf(out,"%s (%u)", task_status_name(a,status), n); return; }
-        for(i=0;i<a->state.taskCount;i++) if(a->state.tasks[i].status==status){
-            if(index--==0){ sprintf(out,"  %s", shown(a->state.tasks[i].name)); return; }
-        }
-        if(!n && index--==0){ sprintf(out,"  %s", tr(a,"None","Aucune")); return; }
-    }
-    out[0]=0; (void)size;
+
+static int review_centered(unsigned kind){
+    return kind==RL_DATE||kind==RL_ARCHIVE||kind==RL_TITLE||kind==RL_KANBAN||kind==RL_MEALS||kind==RL_ACT;
 }
+static unsigned meal_row_total(unsigned row){ return (unsigned)(MEAL_ROW_FIRST[row+1]-MEAL_ROW_FIRST[row]); }
+static unsigned meal_row_played(const State *s, unsigned row){
+    unsigned i,n=0;
+    for(i=0;i<s->mealCount;i++) if(s->meals[i]<MEAL_CARD_COUNT && MEAL_DECK[s->meals[i]].row==row) n++;
+    return n;
+}
+static int meal_first_unplayed_row(const State *s, unsigned row){
+    unsigned i, first=MEAL_ROW_FIRST[row], last=MEAL_ROW_FIRST[row+1];
+    for(i=first;i<last;i++) if(!meal_play_position(s,i)) return (int)i;
+    return -1;
+}
+static void review_add(uint8_t kind, uint8_t arg){
+    if(g_review_n<REVIEW_CAP){ g_review[g_review_n].kind=kind; g_review[g_review_n].arg=arg; g_review_n++; }
+}
+static void review_build(const App *a){
+    const Day *day=app_viewed_day(a);
+    const DayNames *dn=day_names(viewed_slot(a));
+    unsigned i, got=0, focused=0;
+    g_review_n=0;
+    review_add(RL_DATE,0);
+    if(a->daysBack) review_add(RL_ARCHIVE,0);
+    review_add(RL_BLANK,0);
+    review_add(RL_TITLE,0);
+    review_add(RL_WEIGHT,0);
+    review_add(RL_BLANK,0);
+    if(!a->daysBack){
+        review_add(RL_KANBAN,0);
+        for(i=0;i<a->state.taskCount;i++) if(a->state.tasks[i].focus && a->state.tasks[i].status!=TASK_DONE){
+            review_add(RL_CARD,(uint8_t)i); focused++;
+        }
+        if(!focused) review_add(RL_NO_FOCUS,0);
+        review_add(RL_BLANK,0); /* LPS116-CHG07c: blank before MEAL PLANNER */
+    }
+    review_add(RL_MEALS,0);
+    review_add(RL_COUNT,MEAL_DRINKS);
+    review_add(RL_COUNT,MEAL_FOOD);
+    review_add(RL_COUNT,MEAL_BLANK);
+    review_add(RL_NEXT,0);
+    review_add(RL_BLANK,0);
+    review_add(RL_ACT,0);
+    if(a->daysBack && dn->count){
+        for(i=0;i<dn->count;i++){
+            unsigned k=activity_index(&a->state,dn->names[i]);
+            if(k<a->state.activityCount) review_add(RL_ACTIVITY,(uint8_t)k);
+            else review_add(RL_STORED,(uint8_t)i);
+            got++;
+        }
+    }else{
+        for(i=0;i<a->state.activityCount;i++) if(FLAG_BIT(day->flags,i)){ review_add(RL_ACTIVITY,(uint8_t)i); got++; }
+    }
+    if(!got) review_add(RL_NO_ACT,0);
+}
+static void review_invalidate(void){ g_review_ok=0; }
+static void review_ensure(const App *a){ if(!g_review_ok){ review_build(a); g_review_ok=1; } }
+static unsigned review_rows(const App *a){ review_ensure(a); return g_review_n; }
+static unsigned review_max_offset(const App *a){
+    unsigned rows=review_rows(a);
+    return rows>REVIEW_PAGE?rows-REVIEW_PAGE:0;
+}
+static void review_clamp(App *a){
+    unsigned m=review_max_offset(a);
+    if(a->reviewOffset>m) a->reviewOffset=m;
+}
+static void review_line(App *a, unsigned index, char *out, size_t size){
+    const ReviewItem *it; const Day *day=app_viewed_day(a);
+    char weight[16], food[40], drink[40];
+    int fi,di, fr=a->state.language==LANG_FR;
+    const MealCard *card;
+    review_ensure(a);
+    out[0]=0; if(index>=g_review_n){ (void)size; return; }
+    it=&g_review[index];
+    switch(it->kind){
+    case RL_DATE:
+        if(valid_date(day->date)) full_date_text(day->date,a->state.language,out,size);
+        break;
+    case RL_ARCHIVE:
+        strcpy(out,tr(a,"ARCHIVED DAY - READ ONLY","JOUR ARCHIVÉ - LECTURE SEULE"));
+        break;
+    case RL_BLANK: break;
+    case RL_TITLE:
+        strcpy(out,tr(a,"DAILY REVIEW","REVUE JOURNALIÈRE"));
+        break;
+    case RL_WEIGHT:
+        weight_text(day->actual,weight,sizeof(weight));
+        sprintf(out,tr(a,"Actual weight: %s Kg","Poids effectif : %s Kg"),weight);
+        break;
+    case RL_KANBAN: strcpy(out,"KANBAN"); break;
+    case RL_CARD:
+        sprintf(out,"  %s",shown(a->state.tasks[it->arg].name));
+        break;
+    case RL_NO_FOCUS:
+        strcpy(out,tr(a,"No focused card","Aucune carte en focus"));
+        break;
+    case RL_MEALS:
+        strcpy(out,tr(a,"MEAL PLANNER","PLANIFICATEUR DE REPAS"));
+        break;
+    case RL_COUNT:
+        if(a->daysBack) sprintf(out,fr?"%s : --":"%s: --",meal_row_name(it->arg,a->state.language));
+        else sprintf(out,fr?"%s : %u/%u":"%s: %u/%u",meal_row_name(it->arg,a->state.language),
+            meal_row_played(&a->state,it->arg),meal_row_total(it->arg));
+        break;
+    case RL_NEXT:
+        if(a->daysBack){ strcpy(out,tr(a,"Next: --","Prochain : --")); break; }
+        fi=meal_first_unplayed_row(&a->state,MEAL_FOOD);
+        di=meal_first_unplayed_row(&a->state,MEAL_DRINKS);
+        /* MEAL_DECK names are already CP437 from the compile step, like the planner. */
+        if(fi<0) strcpy(food,"--");
+        else{ card=&MEAL_DECK[fi]; strcpy(food,fr?card->fr:card->en); }
+        if(di<0) strcpy(drink,"--");
+        else{ card=&MEAL_DECK[di]; strcpy(drink,fr?card->fr:card->en); }
+        sprintf(out,tr(a,"Next: %s (%s)","Prochain : %s (%s)"),food,drink);
+        break;
+    case RL_ACT:
+        strcpy(out,tr(a,"ACTIVITIES","ACTIVITÉS"));
+        break;
+    case RL_ACTIVITY:
+        sprintf(out,"  %s",a->label[it->arg]);
+        break;
+    case RL_STORED:
+        sprintf(out,"  %s",shown(day_names(viewed_slot(a))->names[it->arg]));
+        break;
+    case RL_NO_ACT:
+        strcpy(out,tr(a,"No activity","Aucune activité"));
+        break;
+    }
+}
+
+/* LPS116-CHG07b: paint the 21 content rows, markers and the range footer
+ * without clearing the title bar or the global footer. A one-line Up/Down
+ * scrolls the window in video RAM and draws only the newly exposed row. */
+static void review_put_line(App *a, int row, const char *text, int centered){
+    char b[COLUMNS+1]; int n,col,i;
+    for(i=0;i<COLUMNS;i++) b[i]=' ';
+    b[COLUMNS]=0;
+    n=(int)strlen(text);
+    if(n>COLUMNS) n=COLUMNS;
+    col=centered?(COLUMNS-n)/2:0;
+    if(n) memcpy(b+col,text,(size_t)n);
+    a->hw->text(a->hw,row,0,b,0);
+}
+static void review_put_markers(App *a, unsigned total){
+    char mark[2];
+    unsigned last=0;
+    mark[1]=0;
+    if(total>a->reviewOffset){
+        last=total-a->reviewOffset;
+        if(last>REVIEW_PAGE) last=REVIEW_PAGE;
+        last--;
+    }
+    if(a->reviewOffset){ mark[0]='\x18'; a->hw->text(a->hw,REVIEW_TOP,COLUMNS-1,mark,0); }
+    if(total && a->reviewOffset+REVIEW_PAGE<total){ mark[0]='\x19'; a->hw->text(a->hw,REVIEW_TOP+(int)last,COLUMNS-1,mark,0); }
+}
+static void review_put_footer(App *a, unsigned total){
+    char b[128];
+    if(total>REVIEW_PAGE){
+        sprintf(b,tr(a,"Up/Down: scroll  %u-%u/%u  Esc back","Haut/Bas : défiler  %u-%u/%u  Échap retour"),
+            a->reviewOffset+1, (a->reviewOffset+REVIEW_PAGE<total?a->reviewOffset+REVIEW_PAGE:total), total);
+    }else{
+        sprintf(b,tr(a,"%u-%u/%u  Esc back","%u-%u/%u  Échap retour"),
+            total?a->reviewOffset+1:0, total, total);
+    }
+    review_put_line(a,22,b,0);
+}
+static void review_paint_body(App *a, int do_present){
+    char b[128];
+    unsigned total,i;
+    review_ensure(a);
+    review_clamp(a);
+    total=g_review_n;
+    for(i=0;i<REVIEW_PAGE;i++){
+        if(a->reviewOffset+i<total){
+            review_line(a,a->reviewOffset+i,b,sizeof(b));
+            review_put_line(a,REVIEW_TOP+(int)i,b,review_centered(g_review[a->reviewOffset+i].kind));
+        }else review_put_line(a,REVIEW_TOP+(int)i,"",0);
+    }
+    review_put_markers(a,total);
+    review_put_footer(a,total);
+    if(!a->message[0] && !a->missingStorage) review_put_line(a,23,"",0);
+    if(do_present) a->hw->present(a->hw);
+}
+static void review_scroll_step(App *a, int step){
+    char b[128];
+    unsigned total, index;
+    int exposed;
+    review_ensure(a);
+    total=g_review_n;
+    /* Leave column 79 (the arrow column) unmoved; it is updated below. */
+    a->hw->scroll_text(a->hw,REVIEW_TOP,0,REVIEW_TOP+(int)REVIEW_PAGE-1,COLUMNS-2,step);
+    if(step>0){ exposed=REVIEW_TOP+(int)REVIEW_PAGE-1; index=a->reviewOffset+REVIEW_PAGE-1; }
+    else { exposed=REVIEW_TOP; index=a->reviewOffset; }
+    review_line(a,index,b,sizeof(b));
+    review_put_line(a,exposed,b,review_centered(g_review[index].kind));
+    review_put_markers(a,total);
+    review_put_footer(a,total);
+    if(!a->message[0] && !a->missingStorage) review_put_line(a,23,"",0);
+    a->hw->present(a->hw);
+}
+
 static int rem_expired(const App *a, const Reminder *r){
     return valid_date(a->state.today.date) && day_index(a->state.today.date)>=day_index(r->from)+r->duration;
 }
@@ -415,10 +619,7 @@ static void return_to(App *a, ReturnPoint r){
         unsigned pages=rosary_pages(rosary_text(a->state.language,a->rosaryMode,a->rosarySet,a->rosaryDecade,a->rosaryStep));
         if(pages && a->rosaryPage>=pages) a->rosaryPage=pages-1;
     }
-    if(a->screen==SCR_DAILY_REVIEW){
-        unsigned rows=review_rows(a), maximum=rows>REVIEW_PAGE?rows-REVIEW_PAGE:0;
-        if(a->reviewOffset>maximum) a->reviewOffset=maximum;
-    }
+    if(a->screen==SCR_DAILY_REVIEW) review_clamp(a);
 }
 /* LPS-DOS-115-CHG10 (PicoCalc commit, LPS-115-CHG03): when Config's write
  * fails, the settings keep their old values, the pending choice stays and
@@ -552,6 +753,7 @@ static void move_task_to(App *a, int target){
     if(index>=a->state.taskCount) return;
     if(a->state.tasks[index].status==target){ say(a,tr(a,"Task is already in this column","Tâche déjà dans cette colonne")); return; }
     g_scratch=a->state; moved=g_scratch.tasks[index]; moved.status=(uint8_t)target;
+    if(target==TASK_DONE) moved.focus=0; /* LPS116-FEAT01-CHG01: DONE drops focus */
     for(i=index;i+1<g_scratch.taskCount;i++) g_scratch.tasks[i]=g_scratch.tasks[i+1];
     g_scratch.tasks[g_scratch.taskCount-1]=moved;
     if(commit(a,&g_scratch)){ a->kanbanColumn=target; a->selection=tasks_in(a,target)-1; say(a,tr(a,"Task moved","Tâche déplacée")); }
@@ -665,6 +867,10 @@ int app_bios_key(unsigned ascii, unsigned scan){
         case 61: return KEY_F3;
         case 62: return KEY_F4;
         case 63: return KEY_F5;
+        case 71: return KEY_HOME;
+        case 73: return KEY_PGUP;
+        case 79: return KEY_END;
+        case 81: return KEY_PGDN;
         default: return -1;
         }
     }
@@ -718,7 +924,14 @@ void app_key(App *a, int k){
                ||from==SCR_REWARD||from==SCR_TIMER_SELECT)){
             flush_save(a);
         }
-        go(a,target); app_render(a); return;
+        { int restore=-1;
+          if(a->daysBack && target==SCR_HOME
+             && (from==SCR_ACTIVITIES||from==SCR_WEIGHT||from==SCR_DAILY_REVIEW))
+              restore=(int)archive_menu_index(from);
+          go(a,target);
+          if(restore>=0) a->selection=(unsigned)restore;
+        }
+        app_render(a); return;
     }
     if(k==KEY_TAB||k==' '){
         /* TAB closes Config entirely, from any of its screens; SPACE does
@@ -734,9 +947,9 @@ void app_key(App *a, int k){
     if(a->screen==SCR_REMINDER_POPUP){ go(a,SCR_HOME);
     }else if(a->screen==SCR_HOME){
         /* LPS-DOS-115-CHG02 (PicoCalc LPS-112-CHG05): no notepad. LPS-DOS-115-CHG10
-         * (PicoCalc LPS-115-CHG01): no Config entry; 0-8 today, 1-2 on an
-         * archived day. */
-        unsigned menuCount=a->daysBack?2u:home_visible_count(a); /* CHG11: shown entries only */
+         * (PicoCalc LPS-115-CHG01): no Config entry; 0-8 today.
+         * LPS116-FEAT02-CHG06: archived day is 1-3 (PicoCalc v1.15 is 1-2). */
+        unsigned menuCount=a->daysBack?ARCHIVE_MENU_COUNT:home_visible_count(a); /* CHG11: shown entries only */
         if(k==KEY_LEFT){
             if(a->daysBack<a->state.count){ a->daysBack++; a->selection=0; a->page=0; }
             else say(a, a->state.count?tr(a,"Oldest saved day","Plus ancien jour conservé"):tr(a,"No archived days","Aucun jour archivé"));
@@ -745,12 +958,11 @@ void app_key(App *a, int k){
         if(k==KEY_UP) a->selection=(a->selection+menuCount-1)%menuCount;
         if(k==KEY_DOWN) a->selection=(a->selection+1)%menuCount;
         if(!a->daysBack && k=='0'){ a->selection=0; k=KEY_ENTER; }
-        else if(a->daysBack && k>='1' && k<='2'){ a->selection=(unsigned)(k-'1'); k=KEY_ENTER; }
+        else if(a->daysBack && k>='1' && k<'1'+ARCHIVE_MENU_COUNT){ a->selection=(unsigned)(k-'1'); k=KEY_ENTER; }
         else if(!a->daysBack && k>='1' && (unsigned)(k-'0')<menuCount){ a->selection=(unsigned)(k-'0'); k=KEY_ENTER; }
-        if((k=='0'||(k>='3'&&(unsigned)(k-'0')<HOME_ENTRY_COUNT)) && a->daysBack) read_only(a);
+        if(a->daysBack && k>='0'&&k<='9' && (k<'1'||k>='1'+ARCHIVE_MENU_COUNT)) read_only(a);
         if(k==KEY_ENTER){
-            static const int archiveScreens[]={SCR_ACTIVITIES,SCR_WEIGHT};
-            int target=a->daysBack?archiveScreens[a->selection]:HOME_SCREENS[home_entry_at(a,a->selection)];
+            int target=a->daysBack?ARCHIVE_SCREENS[a->selection]:HOME_SCREENS[home_entry_at(a,a->selection)];
             if(target==SCR_KANBAN) a->kanbanColumn=TASK_TODO;
             if(target==SCR_REMINDERS) prune_reminders(a);
             go(a,target);
@@ -875,6 +1087,17 @@ void app_key(App *a, int k){
         else if((k=='1'||k=='2'||k=='3') && n) move_task_to(a, k-'1');
         else if(k==KEY_F4 || k=='-'){ if(n) reorder_task(a,0); }
         else if(k==KEY_F5 || k=='+'){ if(n) reorder_task(a,1); }
+        else if((k=='f'||k=='F') && n){
+            /* LPS116-FEAT01-CHG02: F toggles focus and marks the save dirty
+             * through commit, like the other Kanban edits. A DONE card stays
+             * unfocused. */
+            unsigned index=task_at(a,a->kanbanColumn,a->selection);
+            if(index<a->state.taskCount && a->state.tasks[index].status!=TASK_DONE){
+                g_scratch=a->state;
+                g_scratch.tasks[index].focus=(uint8_t)!g_scratch.tasks[index].focus;
+                commit(a,&g_scratch);
+            }
+        }
     }else if(a->screen==SCR_TASK_EDIT){
         if(k==KEY_ENTER){
             if(!a->taskDraft[0]) say(a,tr(a,"Task name cannot be empty","Le nom ne peut pas être vide"));
@@ -883,17 +1106,39 @@ void app_key(App *a, int k){
                 g_scratch=a->state;
                 if(a->editedTask<TASK_CAPACITY) memcpy(g_scratch.tasks[a->editedTask].name,a->taskDraft,TASK_NAME_LENGTH+1);
                 else if(g_scratch.taskCount>=TASK_CAPACITY){ say(a,tr(a,"Kanban is full (24 tasks)","Kanban complet (24 tâches)")); app_render(a); return; }
-                else { destination=g_scratch.taskCount; g_scratch.tasks[g_scratch.taskCount].status=(uint8_t)a->kanbanColumn; memcpy(g_scratch.tasks[g_scratch.taskCount].name,a->taskDraft,TASK_NAME_LENGTH+1); g_scratch.taskCount++; }
+                else { destination=g_scratch.taskCount; memset(&g_scratch.tasks[destination],0,sizeof(Task)); g_scratch.tasks[destination].status=(uint8_t)a->kanbanColumn; memcpy(g_scratch.tasks[destination].name,a->taskDraft,TASK_NAME_LENGTH+1); g_scratch.taskCount++; }
                 if(commit(a,&g_scratch)){ a->editedTask=destination; a->selection=task_position(a,a->kanbanColumn,a->editedTask); a->screen=SCR_KANBAN; a->message[0]=0; }
             }
         }else edit_text(a->taskDraft,TASK_NAME_LENGTH,k);
     }else if(a->screen==SCR_DAILY_REVIEW){
-        unsigned maximum=review_rows(a)>REVIEW_PAGE?review_rows(a)-REVIEW_PAGE:0;
+        /* LPS116-FEAT02-CHG05: Up/Down one line, no wrap. Left/Right page as
+         * in v1.15; PgUp/PgDn do the same; Home/End jump to the ends.
+         * LPS116-CHG07b: a one-line step scrolls video RAM and redraws only
+         * the new row, the markers and the footer; a page jump repaints the
+         * body without the title bar or the global footer. */
+        unsigned maximum, old;
+        int step;
+        review_ensure(a);
+        review_clamp(a);
+        maximum=review_max_offset(a);
+        old=a->reviewOffset;
         if(k==KEY_DOWN && a->reviewOffset<maximum) a->reviewOffset++;
         else if(k==KEY_UP && a->reviewOffset) a->reviewOffset--;
-        else if(k==KEY_RIGHT) a->reviewOffset=(a->reviewOffset+REVIEW_PAGE<maximum)?a->reviewOffset+REVIEW_PAGE:maximum;
-        else if(k==KEY_LEFT) a->reviewOffset=a->reviewOffset>REVIEW_PAGE?a->reviewOffset-REVIEW_PAGE:0;
+        else if(k==KEY_RIGHT||k==KEY_PGDN) a->reviewOffset=(a->reviewOffset+REVIEW_PAGE<maximum)?a->reviewOffset+REVIEW_PAGE:maximum;
+        else if(k==KEY_LEFT||k==KEY_PGUP) a->reviewOffset=a->reviewOffset>REVIEW_PAGE?a->reviewOffset-REVIEW_PAGE:0;
+        else if(k==KEY_HOME) a->reviewOffset=0;
+        else if(k==KEY_END) a->reviewOffset=maximum;
+        if(a->reviewOffset!=old){
+            step=(int)a->reviewOffset-(int)old;
+            if((step==1||step==-1) && a->hw->scroll_text) review_scroll_step(a,step);
+            else review_paint_body(a,1);
+        }else{
+            review_put_line(a,23,"",0);
+            a->hw->present(a->hw);
+        }
+        return;
     }else if(a->screen==SCR_CONFIG){
+
         /* LPS-DOS-115-CHG10 (PicoCalc LPS-115-CHG03): 1 Language, 2 Colors,
          * 3 Activities (home entries), 4 Save. */
         if(k==KEY_UP) a->selection=(a->selection+3)%4;
@@ -1062,12 +1307,16 @@ void app_render(App *a){
         a->hw->text(a->hw, 0, 0, bar, 1);
     }
     /* LPS-DOS-115-CHG01: row 1 of every screen shows the long date and ISO
-     * week of the viewed day (blank for an undated day). No XP anywhere. */
-    if(valid_date(day->date)){ long_date_text(day->date,a->state.language,b,sizeof(b)); center_line(a,1,b,0); }
-    if(a->daysBack) center_line(a,2,tr(a,"ARCHIVED DAY - READ ONLY","JOUR ARCHIVÉ - LECTURE SEULE"),0);
+     * week of the viewed day (blank for an undated day). No XP anywhere.
+     * LPS116-FEAT02-CHG04: Daily Review draws its own list (full date first,
+     * then the archived-day banner when needed), so the common header is skipped. */
+    if(a->screen!=SCR_DAILY_REVIEW){
+        if(valid_date(day->date)){ long_date_text(day->date,a->state.language,b,sizeof(b)); center_line(a,1,b,0); }
+        if(a->daysBack) center_line(a,2,tr(a,"ARCHIVED DAY - READ ONLY","JOUR ARCHIVÉ - LECTURE SEULE"),0);
+    }
 
     if(a->screen==SCR_HOME){
-        unsigned total=a->daysBack?2u:home_visible_count(a);
+        unsigned total=a->daysBack?ARCHIVE_MENU_COUNT:home_visible_count(a);
         char wexp[16], wact[16];
         int gutter;
         field(a,4,1,37, a->daysBack?tr(a,"CLOSED DAY","JOUR TERMINÉ"):tr(a,"TODAY","AUJOURD'HUI"), 0);
@@ -1075,10 +1324,10 @@ void app_render(App *a){
         field(a,5,1,37,b,0);
         /* LPS-DOS-115-CHG10 (PicoCalc LPS-115-CHG01): Config left the menu (TAB
          * opens it). LPS-DOS-115-CHG11 (PicoCalc LPS-115-CHG04): only the entries
-         * shown, renumbered without gaps; the archive keeps 1 and 2. */
+         * shown, renumbered without gaps. LPS116-FEAT02-CHG06: archive is 1-3. */
         for(i=0;i<total;i++){
-            unsigned entry=a->daysBack?1u+i:home_entry_at(a,i);
-            sprintf(b,"%u  %s",a->daysBack?entry:i,home_label(a,entry)); field(a,7+(int)i,1,37,b,i==a->selection);
+            unsigned entry=a->daysBack?ARCHIVE_ENTRIES[i]:home_entry_at(a,i);
+            sprintf(b,"%u  %s",a->daysBack?1u+i:i,home_label(a,entry)); field(a,7+(int)i,1,37,b,i==a->selection);
         }
         field(a,18,1,37,tr(a,"<- Previous day   -> Current day","<- Jour précédent   -> Jour actuel"),0);
         /* Right pane, tightened after the notepad left (LPS-DOS-115-CHG02):
@@ -1222,13 +1471,15 @@ void app_render(App *a){
                 end=first+visible<n?first+visible:n;
                 for(position=first; position<end; position++){
                     unsigned index=task_at(a,col,position);
-                    sprintf(b,"%2u %-22s", position+1, shown(a->state.tasks[index].name));
+                    /* LPS116-FEAT01-CHG01: '*' takes the padding space: " 1*Name". */
+                    sprintf(b, a->state.tasks[index].focus?"%2u*%-22s":"%2u %-22s",
+                        position+1, shown(a->state.tasks[index].name));
                     field(a,7+(int)(position-first), starts[col], 26, b, active && position==a->selection);
                 }
             }
         }
         line(a,20,tr(a,"N New  Enter Edit  Del Delete","N Nouveau Entrée Modifier Suppr Effacer"),0);
-        line(a,21,tr(a,"F1 TODO  F2 DOING  F3 DONE","F1 À FAIRE F2 EN COURS F3 FINI"),0);
+        line(a,21,tr(a,"F1 TODO  F2 DOING  F3 DONE  F Focus","F1 À FAIRE F2 EN COURS F3 FINI  F Focus"),0);
         line(a,22,tr(a,"F4 Up F5 Down  <- -> Columns","F4 Monter F5 Descendre <- -> Colonnes"),0);
     }else if(a->screen==SCR_TASK_EDIT){
         center_line(a,3, a->editedTask<TASK_CAPACITY?tr(a,"EDIT TASK","MODIFIER LA TÂCHE"):tr(a,"NEW TASK","NOUVELLE TÂCHE"),0);
@@ -1238,13 +1489,10 @@ void app_render(App *a){
         line(a,13,tr(a,"Enter: save task","Entrée : enregistrer la tâche"),0);
         line(a,15,tr(a,"Backspace: erase  Esc: cancel","Retour: effacer  Échap: annuler"),0);
     }else if(a->screen==SCR_DAILY_REVIEW){
-        char weight[20]; unsigned total=review_rows(a);
-        sprintf(b,"%s  %s", tr(a,"DAILY REVIEW","REVUE JOURNALIÈRE"), date); center_line(a,3,b,0);
-        weight_text(a->state.today.actual,weight,sizeof(weight));
-        sprintf(b,tr(a,"Actual weight: %s kg","Poids effectif : %s kg"), weight); line(a,4,b,0);
-        for(i=0;i<REVIEW_PAGE && a->reviewOffset+i<total;i++){ review_line(a,a->reviewOffset+i,b,sizeof(b)); line(a,6+(int)i,b,0); }
-        sprintf(b,tr(a,"Up/Down scroll  %u-%u/%u  Esc back","Haut/Bas défiler  %u-%u/%u  Échap retour"),
-            a->reviewOffset+1, (a->reviewOffset+REVIEW_PAGE<total?a->reviewOffset+REVIEW_PAGE:total), total); line(a,22,b,0);
+        /* LPS116-CHG07b: rebuild once, then paint only the body. Title and
+         * the global footer were already written; present() skips them. */
+        review_invalidate();
+        review_paint_body(a,0);
     }else if(a->screen==SCR_CONFIG){
         center_line(a,3,tr(a,"CONFIGURATION","CONFIGURATION"),0);
         sprintf(b,"%s: %s", tr(a,"1  Language","1  Langue"), a->pendingLanguage==LANG_EN?"English":"Français"); line(a,6,b,a->selection==0);
