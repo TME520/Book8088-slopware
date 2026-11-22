@@ -60,6 +60,12 @@ static int any_xp(Platform *hw){
     int r; for(r=0;r<ROWS;r++) if(strstr(plat_host_row(hw,r),"XP")) return 1; return 0;
 }
 static int row_has(Platform *hw, int row, const char *text){ return strstr(plat_host_row(hw,row),text)!=NULL; }
+static int row_spaces(Platform *hw, int row){
+    const char *s=plat_host_row(hw,row); unsigned i;
+    if(!s) return 0;
+    for(i=0;s[i];i++) if(s[i]!=' ') return 0;
+    return i>0;
+}
 
 /* Independent ISO 8601 check: the week's Thursday decides the ISO year,
  * and its ordinal day gives the week number. Covers 2000-01-01..2099-12-31. */
@@ -2036,10 +2042,11 @@ static void check_full_date(const char *dir){
     assert(row_has(hw,3,"DAILY REVIEW") && !strstr(plat_host_row(hw,3),"2026"));
     assert(row_has(hw,4,"Actual weight: -- Kg"));
     assert(row_has(hw,6,"KANBAN") && row_has(hw,7,"No focused card"));
-    assert(row_has(hw,8,"MEAL PLANNER"));
-    assert(row_has(hw,9,"Drinks: 0/6") && row_has(hw,10,"Food: 0/8") && row_has(hw,11,"Blank: 0/2"));
-    assert(row_has(hw,12,"Next: Light Cheese Wrap (Coffee (Latte))"));
-    assert(row_has(hw,14,"ACTIVITIES") && row_has(hw,15,"No activity"));
+    assert(row_spaces(hw,8));
+    assert(row_has(hw,9,"MEAL PLANNER"));
+    assert(row_has(hw,10,"Drinks: 0/6") && row_has(hw,11,"Food: 0/8") && row_has(hw,12,"Blank: 0/2"));
+    assert(row_has(hw,13,"Next: Light Cheese Wrap (Coffee (Latte))"));
+    assert(row_has(hw,15,"ACTIVITIES") && row_has(hw,16,"No activity"));
     app_key(app,KEY_ESCAPE); assert(app_screen(app)==SCR_HOME);
     assert(row_has(hw,1,"Thursday 17 September 2026 (week 38)"));
     app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'2'); app_key(app,'4');
@@ -2050,10 +2057,11 @@ static void check_full_date(const char *dir){
     assert(any_row(hw,"REVUE JOURNALI") && !strstr(plat_host_row(hw,3),"2026"));
     assert(row_has(hw,4,"Poids effectif : -- Kg"));
     assert(row_has(hw,6,"KANBAN") && row_has(hw,7,"Aucune carte en focus"));
-    assert(row_has(hw,8,"PLANIFICATEUR DE REPAS"));
-    assert(row_has(hw,9,"Boissons : 0/6") && row_has(hw,10,"Nourriture : 0/8") && row_has(hw,11,"Blank : 0/2"));
-    assert(row_has(hw,12,"Prochain : Wrap fromage léger (Café (Latte))"));
-    assert(any_row(hw,"ACTIVIT") && row_has(hw,15,"Aucune activité"));
+    assert(row_spaces(hw,8));
+    assert(row_has(hw,9,"PLANIFICATEUR DE REPAS"));
+    assert(row_has(hw,10,"Boissons : 0/6") && row_has(hw,11,"Nourriture : 0/8") && row_has(hw,12,"Blank : 0/2"));
+    assert(row_has(hw,13,"Prochain : Wrap fromage léger (Café (Latte))"));
+    assert(any_row(hw,"ACTIVIT") && row_has(hw,16,"Aucune activité"));
     french_screen_ok(hw,"daily review full date");
 }
 
@@ -2105,11 +2113,12 @@ static void check_daily_review_layout(const char *dir){
     assert(row_has(hw,4,"Actual weight: 81.200 Kg"));
     assert(row_has(hw,6,"KANBAN"));
     assert(row_has(hw,7,"  Write docs") && row_has(hw,8,"  Fix bike"));
-    assert(row_has(hw,9,"MEAL PLANNER"));
-    assert(row_has(hw,10,"Drinks: 3/6") && row_has(hw,11,"Food: 4/8") && row_has(hw,12,"Blank: 0/2"));
-    assert(row_has(hw,13,"Next: Light Cheese Wrap (Tea)"));
-    assert(row_has(hw,15,"ACTIVITIES"));
-    assert(row_has(hw,16,"  Walk") && row_has(hw,17,"  Bible") && row_has(hw,18,"  Sport"));
+    assert(row_spaces(hw,9));
+    assert(row_has(hw,10,"MEAL PLANNER"));
+    assert(row_has(hw,11,"Drinks: 3/6") && row_has(hw,12,"Food: 4/8") && row_has(hw,13,"Blank: 0/2"));
+    assert(row_has(hw,14,"Next: Light Cheese Wrap (Tea)"));
+    assert(row_has(hw,16,"ACTIVITIES"));
+    assert(row_has(hw,17,"  Walk") && row_has(hw,18,"  Bible") && row_has(hw,19,"  Sport"));
 
     /* Exhausted drinks: play Tea, Mint Tea, Light Juice; Next keeps the wrap and (--). */
     app_key(app,KEY_ESCAPE); app_key(app,' '); /* opens on Tea, first unplayed */
@@ -2117,7 +2126,7 @@ static void check_daily_review_layout(const char *dir){
     app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER);
     app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER);
     app_key(app,KEY_ESCAPE); app_key(app,'5');
-    assert(row_has(hw,10,"Drinks: 6/6") && row_has(hw,13,"Next: Light Cheese Wrap (--)"));
+    assert(row_has(hw,11,"Drinks: 6/6") && row_has(hw,14,"Next: Light Cheese Wrap (--)"));
 
     /* Exhaust remaining food: two wraps, salad, then skip already-played cards to Soup. */
     app_key(app,KEY_ESCAPE); app_key(app,' '); /* opens on first wrap */
@@ -2130,7 +2139,7 @@ static void check_daily_review_layout(const char *dir){
     app_key(app,KEY_RIGHT);
     app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER); /* Soup */
     app_key(app,KEY_ESCAPE); app_key(app,'5');
-    assert(row_has(hw,11,"Food: 8/8") && row_has(hw,13,"Next: -- (--)"));
+    assert(row_has(hw,12,"Food: 8/8") && row_has(hw,14,"Next: -- (--)"));
 
     /* French wording and planner names. */
     app_key(app,KEY_ESCAPE);
@@ -2139,10 +2148,11 @@ static void check_daily_review_layout(const char *dir){
     assert(row_has(hw,1,"Jeudi 17 septembre 2026 - Semaine 38"));
     assert(row_has(hw,4,"Poids effectif : 81.200 Kg"));
     assert(row_has(hw,7,"  Write docs") && row_has(hw,8,"  Fix bike"));
-    assert(row_has(hw,9,"PLANIFICATEUR DE REPAS"));
-    assert(row_has(hw,10,"Boissons : 6/6") && row_has(hw,11,"Nourriture : 8/8") && row_has(hw,12,"Blank : 0/2"));
-    assert(row_has(hw,13,"Prochain : -- (--)"));
-    assert(row_has(hw,16,"  Marche") && row_has(hw,17,"  Bible") && row_has(hw,18,"  Sport"));
+    assert(row_spaces(hw,9));
+    assert(row_has(hw,10,"PLANIFICATEUR DE REPAS"));
+    assert(row_has(hw,11,"Boissons : 6/6") && row_has(hw,12,"Nourriture : 8/8") && row_has(hw,13,"Blank : 0/2"));
+    assert(row_has(hw,14,"Prochain : -- (--)"));
+    assert(row_has(hw,17,"  Marche") && row_has(hw,18,"  Bible") && row_has(hw,19,"  Sport"));
     french_screen_ok(hw,"daily review layout FR");
 
     /* Archived day: no KANBAN; meal lines are -- (the save does not snapshot
@@ -2156,8 +2166,9 @@ static void check_daily_review_layout(const char *dir){
     assert(row_has(hw,1,"Jeudi 17 septembre 2026 - Semaine 38"));
     assert(any_row(hw,"JOUR ARCHIV"));
     assert(row_has(hw,5,"Poids effectif : 81.200 Kg"));
+    assert(row_spaces(hw,6));
     assert(!any_row(hw,"KANBAN") && !any_row(hw,"Write docs") && !any_row(hw,"Fix bike"));
-    assert(any_row(hw,"PLANIFICATEUR DE REPAS"));
+    assert(row_has(hw,7,"PLANIFICATEUR DE REPAS"));
     assert(any_row(hw,"Boissons : --") && any_row(hw,"Nourriture : --") && any_row(hw,"Blank : --") && any_row(hw,"Prochain : --"));
     assert(any_row(hw,"  Marche") && any_row(hw,"  Bible") && any_row(hw,"  Sport"));
 
@@ -2188,7 +2199,7 @@ static void host_refresh_labels(App *app){
     st->language=(uint8_t)(st->language==LANG_EN?LANG_FR:LANG_EN);
     app_render(app);
 }
-/* 24 focused cards + 30 ticked activities: 67 lines today (5 + 1+24 + 6 + 1+30). */
+/* 24 focused cards + 30 ticked activities: 68 lines today (5 + 1+24 + 1 + 6 + 1+30). */
 static void fill_max_today_review(App *app){
     State *st=(State*)app_state(app);
     unsigned i; uint32_t flags=0;
@@ -2225,16 +2236,16 @@ static void check_daily_review_scroll(const char *dir){
 
     /* Fits on one page: no arrows, footer has the range but not the scroll hint. */
     app_key(app,'5'); assert(app_screen(app)==SCR_DAILY_REVIEW);
-    assert(row_has(hw,22,"1-15/15") && row_has(hw,22,"Esc back") && !row_has(hw,22,"Up/Down: scroll"));
+    assert(row_has(hw,22,"1-16/16") && row_has(hw,22,"Esc back") && !row_has(hw,22,"Up/Down: scroll"));
     assert(!review_mark(hw,1,'\x18') && !review_mark(hw,21,'\x19'));
     app_key(app,KEY_DOWN); app_key(app,KEY_UP); app_key(app,KEY_END); app_key(app,KEY_PGDN);
-    assert(row_has(hw,1,"Thursday 17 September 2026 - Week 38") && row_has(hw,22,"1-15/15"));
+    assert(row_has(hw,1,"Thursday 17 September 2026 - Week 38") && row_has(hw,22,"1-16/16"));
 
-    /* 67-line today. */
+    /* 68-line today. */
     app_key(app,KEY_ESCAPE);
     fill_max_today_review(app);
     app_key(app,'5');
-    assert(row_has(hw,22,"Up/Down: scroll  1-21/67  Esc back"));
+    assert(row_has(hw,22,"Up/Down: scroll  1-21/68  Esc back"));
     assert(!review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
     assert(row_has(hw,1,"Thursday 17 September 2026 - Week 38"));
     /* Last visible line at the top is a focused card (items 0..20: header+kanban+cards). */
@@ -2242,30 +2253,30 @@ static void check_daily_review_scroll(const char *dir){
 
     /* Up at the top does not wrap. */
     app_key(app,KEY_UP); app_key(app,KEY_PGUP); app_key(app,KEY_HOME); app_key(app,KEY_LEFT);
-    assert(row_has(hw,22,"1-21/67") && !review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+    assert(row_has(hw,22,"1-21/68") && !review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
 
     /* One line down, then a page (Right / PgDn, as in v1.15). */
     app_key(app,KEY_DOWN);
-    assert(row_has(hw,22,"2-22/67") && review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+    assert(row_has(hw,22,"2-22/68") && review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
     app_key(app,KEY_RIGHT);
-    assert(row_has(hw,22,"23-43/67") && review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+    assert(row_has(hw,22,"23-43/68") && review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
     app_key(app,KEY_PGDN);
-    assert(row_has(hw,22,"44-64/67") && review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+    assert(row_has(hw,22,"44-64/68") && review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
 
     /* End / clamp at the bottom. */
     app_key(app,KEY_END);
-    assert(row_has(hw,22,"47-67/67") && review_mark(hw,1,'\x18') && !review_mark(hw,21,'\x19'));
+    assert(row_has(hw,22,"48-68/68") && review_mark(hw,1,'\x18') && !review_mark(hw,21,'\x19'));
     assert(any_row(hw,"  Extra 30") && !any_row(hw,"  Card 01"));
     app_key(app,KEY_DOWN); app_key(app,KEY_PGDN); app_key(app,KEY_RIGHT);
-    assert(row_has(hw,22,"47-67/67") && review_mark(hw,1,'\x18') && !review_mark(hw,21,'\x19'));
+    assert(row_has(hw,22,"48-68/68") && review_mark(hw,1,'\x18') && !review_mark(hw,21,'\x19'));
 
     /* Left / PgUp page back, Home returns to the top. */
     app_key(app,KEY_LEFT);
-    assert(row_has(hw,22,"26-46/67"));
+    assert(row_has(hw,22,"27-47/68"));
     app_key(app,KEY_PGUP);
-    assert(row_has(hw,22,"5-25/67"));
+    assert(row_has(hw,22,"6-26/68"));
     app_key(app,KEY_HOME);
-    assert(row_has(hw,22,"1-21/67") && !review_mark(hw,1,'\x18'));
+    assert(row_has(hw,22,"1-21/68") && !review_mark(hw,1,'\x18'));
 
     /* BIOS: dedicated Home/PgUp/End/PgDn; keypad 3 (NumLock on) stays a digit. */
     assert(app_bios_key(0,71)==KEY_HOME && app_bios_key(0xE0,73)==KEY_PGUP);
@@ -2277,16 +2288,16 @@ static void check_daily_review_scroll(const char *dir){
     /* TAB/SPACE return to the same offset and markers. */
     app_key(app,'5');
     app_key(app,KEY_PGDN);
-    assert(row_has(hw,22,"22-42/67") && review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+    assert(row_has(hw,22,"22-42/68") && review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
     frame_of(hw,before);
     app_key(app,KEY_TAB); app_key(app,KEY_TAB);
-    assert(app_screen(app)==SCR_DAILY_REVIEW && frame_is(hw,before) && row_has(hw,22,"22-42/67"));
+    assert(app_screen(app)==SCR_DAILY_REVIEW && frame_is(hw,before) && row_has(hw,22,"22-42/68"));
     app_key(app,' '); app_key(app,' ');
     assert(app_screen(app)==SCR_DAILY_REVIEW && frame_is(hw,before) && review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
 
     /* Offset resets when the review is opened again. */
     app_key(app,KEY_ESCAPE); app_key(app,'5');
-    assert(row_has(hw,22,"1-21/67") && !review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
+    assert(row_has(hw,22,"1-21/68") && !review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
 
     /* LPS116-CHG07b: a one-line step does not clear the screen or rewrite
      * the title bar / the global footer. */
@@ -2296,28 +2307,28 @@ static void check_daily_review_scroll(const char *dir){
         memcpy(foot,plat_host_row(hw,24),COLUMNS+1);
         plat_host_reset_counts(hw);
         app_key(app,KEY_DOWN);
-        assert(row_has(hw,22,"2-22/67") && review_mark(hw,1,0x18) && review_mark(hw,21,0x19));
+        assert(row_has(hw,22,"2-22/68") && review_mark(hw,1,0x18) && review_mark(hw,21,0x19));
         assert(plat_host_clear_count(hw)==0);
         assert(plat_host_row_text_count(hw,0)==0);
         assert(plat_host_row_text_count(hw,24)==0);
         assert(!memcmp(title,plat_host_row(hw,0),COLUMNS+1));
         assert(!memcmp(foot,plat_host_row(hw,24),COLUMNS+1));
         app_key(app,KEY_UP);
-        assert(row_has(hw,22,"1-21/67") && !review_mark(hw,1,0x18) && review_mark(hw,21,0x19));
+        assert(row_has(hw,22,"1-21/68") && !review_mark(hw,1,0x18) && review_mark(hw,21,0x19));
         assert(!memcmp(title,plat_host_row(hw,0),COLUMNS+1));
         assert(!memcmp(foot,plat_host_row(hw,24),COLUMNS+1));
     }
 
     /* Content shrinks: offset is clamped (here the list fits again). */
     app_key(app,KEY_END);
-    assert(row_has(hw,22,"47-67/67"));
+    assert(row_has(hw,22,"48-68/68"));
     st=(State*)app_state(app);
     st->taskCount=0; memset(st->tasks,0,sizeof(st->tasks));
     st->today.flags=0;
     app_render(app);
-    assert(row_has(hw,22,"1-15/15") && !row_has(hw,22,"Up/Down: scroll"));
+    assert(row_has(hw,22,"1-16/16") && !row_has(hw,22,"Up/Down: scroll"));
     assert(!review_mark(hw,1,'\x18') && !review_mark(hw,21,'\x19'));
-    assert(row_has(hw,1,"Thursday 17 September 2026 - Week 38") && row_has(hw,15,"No activity"));
+    assert(row_has(hw,1,"Thursday 17 September 2026 - Week 38") && row_has(hw,16,"No activity"));
 
     /* Archived day: no KANBAN, still scrolls when the frozen names overflow,
      * meals stay -- (no per-day snapshot). 5+banner+6+1+30 = 43 lines. */
@@ -2339,7 +2350,7 @@ static void check_daily_review_scroll(const char *dir){
     app_key(app,KEY_ESCAPE); app_key(app,KEY_RIGHT);
     app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'2'); app_key(app,'4');
     app_key(app,'5');
-    /* Today after close is empty (15 lines); go back to the archive. */
+    /* Today after close is empty (16 lines); go back to the archive. */
     app_key(app,KEY_ESCAPE); app_key(app,KEY_LEFT);
     app_key(app,'3');
     assert(row_has(hw,22,"Haut/Bas : défiler  1-21/43") && row_has(hw,22,"Échap retour"));
@@ -2362,6 +2373,7 @@ static void check_archive_daily_review(const char *dir){
     assert(row_has(hw,1,"Thursday 17 September 2026 - Week 38"));
     assert(any_row(hw,"ARCHIVED DAY - READ ONLY"));
     assert(row_has(hw,5,"Actual weight: -- Kg"));
+    assert(row_spaces(hw,6) && row_has(hw,7,"MEAL PLANNER"));
     assert(!any_row(hw,"KANBAN") && any_row(hw,"Drinks: --") && any_row(hw,"Food: --") && any_row(hw,"Blank: --") && any_row(hw,"Next: --"));
     assert(row_has(hw,13,"ACTIVITIES") && row_has(hw,14,"No activity"));
     app_key(app,KEY_TAB); assert(app_screen(app)==SCR_DAILY_REVIEW && row_has(hw,23,"Archived day: read-only"));

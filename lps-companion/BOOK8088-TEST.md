@@ -1,7 +1,7 @@
 # Book 8088 – liste de tests sur le vrai materiel (LPS COMPANION v1.16)
 
 Tests a faire sur le Book 8088 (8088, ecran CGA) avec la version finale
-LPS116-CHG07b. Les temps de reference viennent de DOSBox Staging a la
+LPS116-CHG07c. Les temps de reference viennent de DOSBox Staging a la
 vitesse d'un 8088 (`cycles=fixed 300`, section 7) ; noter le
 temps reel a cote. DOSBox Staging 0.83.1 n'accepte pas `cputype=8086`
 ni `cputype=8088` et retombe sur `auto` : la vitesse est bien celle des
@@ -67,8 +67,8 @@ aller-retour PicoCalc, copier aussi `SAVE_A.JSN` / `SAVE_B.JSN` de la carte SD.
 
 | # | Test | Attendu | Ref. DOSBox | Resultat |
 |---|---|---|---|---|
-| R1 | 5 depuis l'accueil (jour en cours) | date complete et semaine ISO (`Monday 16 November 2026 - Week 47` / `Lundi 16 novembre 2026 - Semaine 47`) ; titre **DAILY REVIEW** / **REVUE JOURNALIÈRE** sans `YYYY-MM-DD` ; poids `Actual weight: … Kg` / `Poids effectif : … Kg` ou `-- Kg` ; section KANBAN avec les cartes en focus (ou `No focused card` / `Aucune carte en focus`) ; compteurs Boissons/Nourriture/Blank 6/8/2 et `Next:` / `Prochain :` (premiere Nourriture puis Boisson, ou `--`) ; activites cochees | ouverture, cas 67 lignes : 0,30 s (EGA), 0,29 s (CGA), 0,28 s (Hercules) | |
-| R2 | Liste plus longue que 21 lignes : Haut/Bas, PgUp/PgDn, Debut/Fin, Gauche/Droite | une ligne sans boucler ; page de 21 ; Debut en haut, Fin en bas ; fleches CP437 ↑/↓ a droite ; pied `Up/Down: scroll` / `Haut/Bas : défiler` et la plage (`1-21/67`) seulement s'il faut defiler | un pas Bas : 0,11 s (EGA, CGA, Hercules) | |
+| R1 | 5 depuis l'accueil (jour en cours) | date complete et semaine ISO (`Monday 16 November 2026 - Week 47` / `Lundi 16 novembre 2026 - Semaine 47`) ; titre **DAILY REVIEW** / **REVUE JOURNALIÈRE** sans `YYYY-MM-DD` ; poids `Actual weight: … Kg` / `Poids effectif : … Kg` ou `-- Kg` ; section KANBAN avec les cartes en focus (ou `No focused card` / `Aucune carte en focus`), une ligne vide, puis le planificateur ; compteurs Boissons/Nourriture/Blank 6/8/2 et `Next:` / `Prochain :` (premiere Nourriture puis Boisson, ou `--`) ; activites cochees | ouverture, cas 68 lignes : 0,30 s (EGA), 0,29 s (CGA), 0,28 s (Hercules) | |
+| R2 | Liste plus longue que 21 lignes : Haut/Bas, PgUp/PgDn, Debut/Fin, Gauche/Droite | une ligne sans boucler ; page de 21 ; Debut en haut, Fin en bas ; fleches CP437 ↑/↓ a droite ; pied `Up/Down: scroll` / `Haut/Bas : défiler` et la plage (`1-21/68`) seulement s'il faut defiler | un pas Bas : 0,11 s (EGA, CGA, Hercules) | |
 | R3 | Jour archive : entree **3 Revue journaliere** / **3 Daily review**, puis cette revue | le menu a 3 entrees (la PicoCalc v1.15 n'en a que 1–2) ; date du jour archive, bandeau, poids du jour, pas de KANBAN, repas en `--` (y compris Prochain), activites figees ; Echap revient au menu, curseur sur 3 ; Tab/Espace restent en lecture seule | – | |
 
 ## 7. Fichiers et aller-retour PicoCalc
@@ -88,12 +88,13 @@ dur), et tout caractere mal affiche (les capitales À È Ê Ô Â sont sans acce
 normal). Sur un jour archive, la revue n'a pas de KANBAN et les lignes de repas
 sont toujours `--` : une sauvegarde des repas par jour est reportee.
 
-## 9. Temps de reference DOSBox (LPS116-CHG07b)
+## 9. Temps de reference DOSBox (LPS116-CHG07c)
 
 DOSBox Staging 0.83.1, `cputype=auto`, `cycles=fixed 300`, sauvegarde courte ;
 l'horloge avance par pas de 55 ms. Les temps du planificateur (CHG16) n'ont pas
-ete remesures. Ceux de la revue journaliere (67 lignes, pire cas) l'ont ete
-dans LPS116-CHG07b : duree jusqu'a la derniere modification de l'image
+ete remesures. Ceux de la revue journaliere (68 lignes, pire cas ; LPS116-CHG07c ajoute une ligne vide
+entre le KANBAN et le PLANIFICATEUR DE REPAS) l'ont ete
+dans LPS116-CHG07b et revus dans LPS116-CHG07c : duree jusqu'a la derniere modification de l'image
 (`cycles=fixed 300`) ; une confirmation de 0,12 s n'est pas comptee.
 
 | Action | EGA | CGA | Hercules (texte) |
@@ -108,7 +109,7 @@ dans LPS116-CHG07b : duree jusqu'a la derniere modification de l'image
 | Aller sur une carte jouee | 0,22 s | 0,33 s | 0,11 s |
 | TAB → Config / → planificateur | 0,17 / 0,33 s | 0,17 / 0,39 s | 0,11 / 0,11 s |
 | Echap, planificateur → accueil (sauvegarde + CSV) | 0,72 s | 0,72 s | 0,66 s |
-| Ouvrir la revue journaliere (67 lignes) | 0,30 s | 0,29 s | 0,28 s |
+| Ouvrir la revue journaliere (68 lignes) | 0,30 s | 0,29 s | 0,28 s |
 | Un pas de defilement (Bas) | 0,11 s | 0,11 s | 0,11 s |
 
 ---
@@ -132,7 +133,7 @@ above; DOSBox disk reads are near-instant, so real first reads take longer):
 4. EGA/VGA, if available: EGA pictures, played card in grey. Mono: text-mode planner.
 5. `KEYB FR`: top-row digits unshifted, é è ç à typed in Kanban.
 6. Kanban focus: **F** toggles a `*` before the name; Esc, Q, reload keeps it; moving the card to DONE clears it; **F** on DONE does nothing.
-7. Daily Review: full date and ISO week, counters 6/8/2, Next/Prochain, focused cards; Up/Down (one line, no wrap), PgUp/PgDn, Home/End, scroll markers and the range in the footer. Opening the 67-line worst case takes 0.30 s (EGA), 0.29 s (CGA), 0.28 s (Hercules); each Down step 0.11 s on all three.
+7. Daily Review: full date and ISO week, counters 6/8/2, Next/Prochain, focused cards, a blank line between the last KANBAN line (or No focused card) and MEAL PLANNER (archived days have no KANBAN and no extra blank); Up/Down (one line, no wrap), PgUp/PgDn, Home/End, scroll markers and the range in the footer. Opening the 68-line worst case takes 0.30 s (EGA), 0.29 s (CGA), 0.28 s (Hercules); each Down step 0.11 s on all three.
 8. Archived day: menu entry **3 Daily review** (PicoCalc v1.15 still has only 1–2); no KANBAN, meal lines `--`, Esc returns with the cursor on that entry.
 9. Exports: `EXPORT\YYYYMMDD.ICS`, `WEIGHTS\YYYY.csv`, `EXPORT\MPYYMMDD.CSV`.
 10. PicoCalc round-trip without focus: SD save -> DOS -> edit -> back to SD, byte-identical. A DOS save with `"focus":true` opens on PicoCalc v1.15; a PicoCalc resave drops the key.

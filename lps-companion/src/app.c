@@ -397,6 +397,7 @@ static void review_build(const App *a){
             review_add(RL_CARD,(uint8_t)i); focused++;
         }
         if(!focused) review_add(RL_NO_FOCUS,0);
+        review_add(RL_BLANK,0); /* LPS116-CHG07c: blank before MEAL PLANNER */
     }
     review_add(RL_MEALS,0);
     review_add(RL_COUNT,MEAL_DRINKS);
