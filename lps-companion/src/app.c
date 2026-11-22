@@ -82,7 +82,17 @@ static const int HOME_SCREENS[HOME_ENTRY_COUNT]={SCR_DATE,SCR_ACTIVITIES,SCR_WEI
 /* LPS-DOS-115-CHG11 (PicoCalc LPS-115-CHG04): today's home menu lists the
  * entries not hidden, in order, numbered 0..n-1 by position. Date (first)
  * and Close the day (last) are locked, so the menu is never empty and always
- * ends with Close the day. The archive menu (1-2) is not filtered. */
+ * ends with Close the day. The archive menu is not filtered.
+ * LPS116-FEAT02-CHG06: 1 Activities, 2 Weight tracker, 3 Daily review.
+ * PicoCalc v1.15 still has only 1-2; 3 is a DOS v1.16 addition. */
+#define ARCHIVE_MENU_COUNT 3
+static const unsigned ARCHIVE_ENTRIES[ARCHIVE_MENU_COUNT]={1,2,5};
+static const int ARCHIVE_SCREENS[ARCHIVE_MENU_COUNT]={SCR_ACTIVITIES,SCR_WEIGHT,SCR_DAILY_REVIEW};
+static unsigned archive_menu_index(int screen){
+    unsigned i;
+    for(i=0;i<ARCHIVE_MENU_COUNT;i++) if(ARCHIVE_SCREENS[i]==screen) return i;
+    return 0;
+}
 static uint16_t hidden_home_mask(const App *a){ return (uint16_t)(a->state.hiddenHome&HOME_ALL&~HOME_LOCKED); }
 static unsigned home_visible_count(const App *a){
     unsigned i, n=0; uint16_t m=hidden_home_mask(a);
@@ -839,7 +849,14 @@ void app_key(App *a, int k){
                ||from==SCR_REWARD||from==SCR_TIMER_SELECT)){
             flush_save(a);
         }
-        go(a,target); app_render(a); return;
+        { int restore=-1;
+          if(a->daysBack && target==SCR_HOME
+             && (from==SCR_ACTIVITIES||from==SCR_WEIGHT||from==SCR_DAILY_REVIEW))
+              restore=(int)archive_menu_index(from);
+          go(a,target);
+          if(restore>=0) a->selection=(unsigned)restore;
+        }
+        app_render(a); return;
     }
     if(k==KEY_TAB||k==' '){
         /* TAB closes Config entirely, from any of its screens; SPACE does
@@ -855,9 +872,9 @@ void app_key(App *a, int k){
     if(a->screen==SCR_REMINDER_POPUP){ go(a,SCR_HOME);
     }else if(a->screen==SCR_HOME){
         /* LPS-DOS-115-CHG02 (PicoCalc LPS-112-CHG05): no notepad. LPS-DOS-115-CHG10
-         * (PicoCalc LPS-115-CHG01): no Config entry; 0-8 today, 1-2 on an
-         * archived day. */
-        unsigned menuCount=a->daysBack?2u:home_visible_count(a); /* CHG11: shown entries only */
+         * (PicoCalc LPS-115-CHG01): no Config entry; 0-8 today.
+         * LPS116-FEAT02-CHG06: archived day is 1-3 (PicoCalc v1.15 is 1-2). */
+        unsigned menuCount=a->daysBack?ARCHIVE_MENU_COUNT:home_visible_count(a); /* CHG11: shown entries only */
         if(k==KEY_LEFT){
             if(a->daysBack<a->state.count){ a->daysBack++; a->selection=0; a->page=0; }
             else say(a, a->state.count?tr(a,"Oldest saved day","Plus ancien jour conservé"):tr(a,"No archived days","Aucun jour archivé"));
@@ -866,12 +883,11 @@ void app_key(App *a, int k){
         if(k==KEY_UP) a->selection=(a->selection+menuCount-1)%menuCount;
         if(k==KEY_DOWN) a->selection=(a->selection+1)%menuCount;
         if(!a->daysBack && k=='0'){ a->selection=0; k=KEY_ENTER; }
-        else if(a->daysBack && k>='1' && k<='2'){ a->selection=(unsigned)(k-'1'); k=KEY_ENTER; }
+        else if(a->daysBack && k>='1' && k<'1'+ARCHIVE_MENU_COUNT){ a->selection=(unsigned)(k-'1'); k=KEY_ENTER; }
         else if(!a->daysBack && k>='1' && (unsigned)(k-'0')<menuCount){ a->selection=(unsigned)(k-'0'); k=KEY_ENTER; }
-        if((k=='0'||(k>='3'&&(unsigned)(k-'0')<HOME_ENTRY_COUNT)) && a->daysBack) read_only(a);
+        if(a->daysBack && k>='0'&&k<='9' && (k<'1'||k>='1'+ARCHIVE_MENU_COUNT)) read_only(a);
         if(k==KEY_ENTER){
-            static const int archiveScreens[]={SCR_ACTIVITIES,SCR_WEIGHT};
-            int target=a->daysBack?archiveScreens[a->selection]:HOME_SCREENS[home_entry_at(a,a->selection)];
+            int target=a->daysBack?ARCHIVE_SCREENS[a->selection]:HOME_SCREENS[home_entry_at(a,a->selection)];
             if(target==SCR_KANBAN) a->kanbanColumn=TASK_TODO;
             if(target==SCR_REMINDERS) prune_reminders(a);
             go(a,target);
@@ -1209,7 +1225,7 @@ void app_render(App *a){
     }
 
     if(a->screen==SCR_HOME){
-        unsigned total=a->daysBack?2u:home_visible_count(a);
+        unsigned total=a->daysBack?ARCHIVE_MENU_COUNT:home_visible_count(a);
         char wexp[16], wact[16];
         int gutter;
         field(a,4,1,37, a->daysBack?tr(a,"CLOSED DAY","JOUR TERMINÉ"):tr(a,"TODAY","AUJOURD'HUI"), 0);
@@ -1217,10 +1233,10 @@ void app_render(App *a){
         field(a,5,1,37,b,0);
         /* LPS-DOS-115-CHG10 (PicoCalc LPS-115-CHG01): Config left the menu (TAB
          * opens it). LPS-DOS-115-CHG11 (PicoCalc LPS-115-CHG04): only the entries
-         * shown, renumbered without gaps; the archive keeps 1 and 2. */
+         * shown, renumbered without gaps. LPS116-FEAT02-CHG06: archive is 1-3. */
         for(i=0;i<total;i++){
-            unsigned entry=a->daysBack?1u+i:home_entry_at(a,i);
-            sprintf(b,"%u  %s",a->daysBack?entry:i,home_label(a,entry)); field(a,7+(int)i,1,37,b,i==a->selection);
+            unsigned entry=a->daysBack?ARCHIVE_ENTRIES[i]:home_entry_at(a,i);
+            sprintf(b,"%u  %s",a->daysBack?1u+i:i,home_label(a,entry)); field(a,7+(int)i,1,37,b,i==a->selection);
         }
         field(a,18,1,37,tr(a,"<- Previous day   -> Current day","<- Jour précédent   -> Jour actuel"),0);
         /* Right pane, tightened after the notepad left (LPS-DOS-115-CHG02):
@@ -1540,6 +1556,3 @@ void app_render(App *a){
 
 int app_flush_save(App *app){ return flush_save(app); }
 int app_is_dirty(const App *app){ return app->dirty; }
-#ifdef LPS_HOST
-void app_host_go(App *app, int screen){ go(app,screen); app_render(app); }
-#endif

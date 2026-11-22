@@ -152,7 +152,7 @@ static void check_rosary_dat(const char *tmpdir){
     rosary_unload(); rosary_set_path(ROSARY_DAT_NAME);
 }
 
-/* LPS-DOS-115-CHG02 (PicoCalc LPS-112-CHG05): no notepad, archive menu 1-2,
+/* LPS-DOS-115-CHG02 (PicoCalc LPS-112-CHG05): no notepad, archive menu 1-3 since LPS116-FEAT02-CHG06,
  * legacy notes kept in the save and exported to the ICS. LPS-DOS-115-CHG10
  * (PicoCalc LPS-115-CHG01): no Config entry, menu 0-8, footer Tab:Config. */
 static int any_row(Platform *hw, const char *text){
@@ -203,14 +203,22 @@ static void check_menu_and_legacy_note(const char *tmpdir){
         sprintf(p2,"%s/EXPORT\\2026-09-17_LPS-Companion.ics",tmpdir);
         f=fopen(p2,"rb"); assert(!f);
     }
-    /* Archived day: 1 Activities, 2 Weight; other digits are read-only. */
+    /* Archived day (LPS116-FEAT02-CHG06): 1 Activities, 2 Weight, 3 Daily review. */
     app_key(a,KEY_LEFT);
-    assert(strstr(plat_host_row(hw,7),"1  Activities") && strstr(plat_host_row(hw,8),"2  Weight tracker") && !strstr(plat_host_row(hw,9),"Kanban"));
-    assert(!any_row(hw,"Legacy note"));
-    app_key(a,'3'); assert(app_screen(a)==SCR_HOME && strstr(plat_host_row(hw,23),"read-only"));
+    assert(strstr(plat_host_row(hw,7),"1  Activities") && strstr(plat_host_row(hw,8),"2  Weight tracker") && strstr(plat_host_row(hw,9),"3  Daily review") && !strstr(plat_host_row(hw,9),"Kanban"));
+    assert(!any_row(hw,"Legacy note") && !strstr(plat_host_row(hw,10),"4  "));
+    app_key(a,'4'); assert(app_screen(a)==SCR_HOME && strstr(plat_host_row(hw,23),"read-only"));
+    app_key(a,'0'); assert(app_screen(a)==SCR_HOME && strstr(plat_host_row(hw,23),"read-only"));
+    app_key(a,'3'); assert(app_screen(a)==SCR_DAILY_REVIEW);
+    assert(row_has(hw,1,"Thursday 17 September 2026 - Week 38"));
+    assert(any_row(hw,"ARCHIVED DAY") && !any_row(hw,"KANBAN"));
+    assert(row_has(hw,5,"Actual weight: -- Kg")); /* no weight recorded that day */
+    app_key(a,KEY_ESCAPE);
+    assert(app_screen(a)==SCR_HOME && plat_host_rev(hw,9,1) && strstr(plat_host_row(hw,9),"3  Daily review"));
     app_key(a,'1'); assert(app_screen(a)==SCR_ACTIVITIES); app_key(a,KEY_ESCAPE);
     app_key(a,'2'); assert(app_screen(a)==SCR_WEIGHT); app_key(a,KEY_ESCAPE);
-    app_key(a,KEY_DOWN); app_key(a,KEY_DOWN); app_key(a,KEY_ENTER); assert(app_screen(a)==SCR_ACTIVITIES); /* 2 entries wrap */
+    /* Esc from Weight leaves the cursor on 2; two Downs wrap to 1 Activities. */
+    app_key(a,KEY_DOWN); app_key(a,KEY_DOWN); app_key(a,KEY_ENTER); assert(app_screen(a)==SCR_ACTIVITIES);
     app_key(a,KEY_ESCAPE); app_key(a,KEY_RIGHT);
 }
 
@@ -1855,8 +1863,8 @@ static void check_home_filtered(const char *dir){
     he_hide(app,act_weight,2); assert(menu_is(hw,7,"0  Date") && menu_is(hw,8,"1  Kanban"));
     app_key(app,'0'); app_key(app,KEY_ENTER); app_key(app,KEY_ESCAPE); /* keep the date */
     app_key(app,KEY_UP); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_FINISH); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD); app_key(app,KEY_ENTER);
-    app_key(app,KEY_LEFT); assert(menu_is(hw,7,"1  Activities") && menu_is(hw,8,"2  Weight tracker") && menu_is(hw,9,""));
-    app_key(app,'3'); assert(row_has(hw,23,"Archived day: read-only"));
+    app_key(app,KEY_LEFT); assert(menu_is(hw,7,"1  Activities") && menu_is(hw,8,"2  Weight tracker") && menu_is(hw,9,"3  Daily review") && menu_is(hw,10,""));
+    app_key(app,'4'); assert(row_has(hw,23,"Archived day: read-only"));
     app_key(app,'1'); assert(app_screen(app)==SCR_ACTIVITIES && any_row(hw,"[x]")); app_key(app,KEY_ESCAPE); app_key(app,KEY_RIGHT);
     assert(menu_is(hw,8,"1  Kanban"));
     /* The timer keeps running while its entry is hidden. */
@@ -2139,7 +2147,7 @@ static void check_daily_review_layout(const char *dir){
     app_key(app,'8'); app_key(app,KEY_ENTER); app_key(app,KEY_ENTER); /* close, reward, new home */
     app_key(app,KEY_LEFT);
     assert(row_has(hw,2,"JOUR ARCHIV"));
-    app_host_go(app,SCR_DAILY_REVIEW);
+    app_key(app,'3');
     assert(app_screen(app)==SCR_DAILY_REVIEW);
     assert(row_has(hw,1,"Jeudi 17 septembre 2026 - Semaine 38"));
     assert(any_row(hw,"JOUR ARCHIV"));
@@ -2293,7 +2301,7 @@ static void check_daily_review_scroll(const char *dir){
     fill_max_today_review(app);
     app_key(app,'8'); app_key(app,KEY_ENTER); app_key(app,KEY_ENTER);
     app_key(app,KEY_LEFT);
-    app_host_go(app,SCR_DAILY_REVIEW);
+    app_key(app,'3');
     assert(app_screen(app)==SCR_DAILY_REVIEW);
     assert(any_row(hw,"ARCHIVED DAY") && !any_row(hw,"KANBAN") && !any_row(hw,"Card 01"));
     assert(any_row(hw,"Drinks: --") && any_row(hw,"Next: --"));
@@ -2309,9 +2317,68 @@ static void check_daily_review_scroll(const char *dir){
     app_key(app,'5');
     /* Today after close is empty (15 lines); go back to the archive. */
     app_key(app,KEY_ESCAPE); app_key(app,KEY_LEFT);
-    app_host_go(app,SCR_DAILY_REVIEW);
+    app_key(app,'3');
     assert(row_has(hw,22,"Haut/Bas : défiler  1-21/43") && row_has(hw,22,"Échap retour"));
     french_screen_ok(hw,"daily review scroll FR");
+}
+
+
+/* LPS116-FEAT02-CHG06: Daily Review on the archived-day menu (entry 3). */
+static void check_archive_daily_review(const char *dir){
+    static unsigned char store[16384];
+    App *app=(App*)store; Platform *hw; State *st;
+
+    /* An empty closed day: no activities, no weight, meals --, no KANBAN. */
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    app_key(app,'8'); app_key(app,KEY_ENTER); app_key(app,KEY_ENTER);
+    app_key(app,KEY_LEFT);
+    assert(app_screen(app)==SCR_HOME && any_row(hw,"CLOSED DAY") && any_row(hw,"ARCHIVED DAY"));
+    assert(row_has(hw,7,"1  Activities") && row_has(hw,8,"2  Weight tracker") && row_has(hw,9,"3  Daily review"));
+    app_key(app,'3'); assert(app_screen(app)==SCR_DAILY_REVIEW);
+    assert(row_has(hw,1,"Thursday 17 September 2026 - Week 38"));
+    assert(any_row(hw,"ARCHIVED DAY - READ ONLY"));
+    assert(row_has(hw,5,"Actual weight: -- Kg"));
+    assert(!any_row(hw,"KANBAN") && any_row(hw,"Drinks: --") && any_row(hw,"Food: --") && any_row(hw,"Blank: --") && any_row(hw,"Next: --"));
+    assert(row_has(hw,13,"ACTIVITIES") && row_has(hw,14,"No activity"));
+    app_key(app,KEY_TAB); assert(app_screen(app)==SCR_DAILY_REVIEW && row_has(hw,23,"Archived day: read-only"));
+    app_key(app,' '); assert(app_screen(app)==SCR_DAILY_REVIEW && row_has(hw,23,"Archived day: read-only"));
+    app_key(app,KEY_ESCAPE);
+    assert(app_screen(app)==SCR_HOME && plat_host_rev(hw,9,1));
+
+    /* A day with weight, activities, and a long list still opens the right date;
+     * TAB/SPACE stay on the review (archive is read-only, as on PicoCalc) and
+     * keep the scroll offset; AZERTY " is 3. */
+    app_key(app,KEY_RIGHT);
+    fill_max_today_review(app);
+    st=(State*)app_state(app);
+    st->today.actual=81200;
+    app_key(app,'8'); app_key(app,KEY_ENTER); app_key(app,KEY_ENTER);
+    app_key(app,KEY_LEFT);
+    app_key(app,plat_host_key(1,'"')); /* AZERTY 3 */
+    assert(app_screen(app)==SCR_DAILY_REVIEW);
+    assert(row_has(hw,1,"Friday 18 September 2026 - Week 38")); /* today was the 18th when we closed */
+    assert(row_has(hw,5,"Actual weight: 81.200 Kg"));
+    assert(!any_row(hw,"KANBAN") && any_row(hw,"Next: --") && any_row(hw,"  Walk") && !any_row(hw,"  Extra 30"));
+    assert(row_has(hw,22,"Up/Down: scroll  1-21/43  Esc back"));
+    app_key(app,KEY_PGDN);
+    assert(row_has(hw,22,"22-42/43") && review_mark(hw,1,'\x18'));
+    app_key(app,KEY_TAB); assert(app_screen(app)==SCR_DAILY_REVIEW && row_has(hw,22,"22-42/43") && row_has(hw,23,"Archived day: read-only"));
+    app_key(app,' '); assert(app_screen(app)==SCR_DAILY_REVIEW && row_has(hw,22,"22-42/43") && review_mark(hw,1,'\x18'));
+    app_key(app,KEY_END); assert(row_has(hw,22,"23-43/43") && any_row(hw,"  Extra 30"));
+    app_key(app,KEY_ESCAPE);
+    assert(app_screen(app)==SCR_HOME && plat_host_rev(hw,9,1) && row_has(hw,9,"3  Daily review"));
+
+    /* French labels (TAB/Config only works on today). */
+    app_key(app,KEY_RIGHT);
+    app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'2'); app_key(app,'4');
+    app_key(app,KEY_LEFT);
+    assert(row_has(hw,7,"1  Activités") && row_has(hw,8,"2  Suivi du poids") && row_has(hw,9,"3  Revue journalière"));
+    app_key(app,'3');
+    assert(row_has(hw,1,"Vendredi 18 septembre 2026 - Semaine 38"));
+    assert(any_row(hw,"JOUR ARCHIV") && any_row(hw,"Poids effectif : 81.200 Kg"));
+    assert(any_row(hw,"Boissons : --") && any_row(hw,"Prochain : --") && !any_row(hw,"KANBAN"));
+    french_screen_ok(hw,"archived daily review FR");
+    app_key(app,KEY_ESCAPE); assert(plat_host_rev(hw,9,1) && row_has(hw,9,"3  Revue journalière"));
 }
 
 static void check_kanban_focus(const char *dir){
@@ -2684,10 +2751,11 @@ int main(void){
     check_full_date(tmpdir);
     check_daily_review_layout(tmpdir);
     check_daily_review_scroll(tmpdir);
+    check_archive_daily_review(tmpdir);
     check_kanban_focus(tmpdir);
     assert(orphan_hits>0); /* some edit took a name history had stored */
 
-    printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, Daily Review full date (FR/EN, year-boundary weeks, CGA 40-col fold), Daily Review layout (focus, meals, next, archive, -- weight), Daily Review scroll (markers, clamp, reset, archive, overlays), ROSARY.DAT load/missing/damaged, title v1.15, menu 0-8 without notepad or Config, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
+    printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, Daily Review full date (FR/EN, year-boundary weeks, CGA 40-col fold), Daily Review layout (focus, meals, next, archive, -- weight), Daily Review scroll (markers, clamp, reset, archive, overlays), Daily Review on archived-day menu (entry 3, read-only, Esc cursor), ROSARY.DAT load/missing/damaged, title v1.15, menu 0-8 without notepad or Config, archive menu 1-3, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
     printf("%s", " unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture),");
     printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), MEALSCGA.DAT (13 CGA pictures, colours, checksums, damaged/missing, EGA/CGA independent), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical),");
     printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR, MEALSCGA.DAT messages), CGA played card (checkerboard grey-out masks, PLAYED/JOUEE label sizes), Kanban focus (F toggle, * marker, cleared on DONE, kept on reorder/move, JSON focus:true, wire unchanged), fixture decode (%u captures)\n", 0);
