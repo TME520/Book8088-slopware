@@ -1960,6 +1960,77 @@ static void check_home_entries(const char *dir){
 
 /* LPS116-FEAT01-CHG01/CHG02: Kanban focus (F), "*" marker, cleared on DONE,
  * persisted in JSON as "focus":true only on focused cards. */
+
+/* LPS116-FEAT02-CHG03: Daily Review full date with ISO week, both languages.
+ * Home and the other screens keep the v1.15 long_date_text wording. */
+static void expect_full(Date d, int language, const char *want){
+    char t[64];
+    full_date_text(d,language,t,sizeof(t));
+    if(strcmp(t,want)!=0){ fprintf(stderr,"full_date_text got \"%s\" want \"%s\"\n",t,want); assert(0); }
+}
+static void check_full_date(const char *dir){
+    static unsigned char store[16384];
+    App *app=(App*)store; Platform *hw;
+    char cells[COLUMNS], folded[41], text[64];
+    unsigned char rev[COLUMNS], frev[40];
+    Date d; int col, n;
+
+    /* Requested year-boundary weeks, and the usual mid-year example. */
+    d.year=2026; d.month=11; d.day=16;
+    assert(iso_week(d)==47);
+    expect_full(d,LANG_EN,"Monday 16 November 2026 - Week 47");
+    expect_full(d,LANG_FR,"Lundi 16 novembre 2026 - Semaine 47");
+    d.year=2026; d.month=2; d.day=14;
+    expect_full(d,LANG_FR,"Samedi 14 février 2026 - Semaine 7");
+    d.year=2026; d.month=8; d.day=15;
+    expect_full(d,LANG_FR,"Samedi 15 août 2026 - Semaine 33");
+    d.year=2026; d.month=12; d.day=31; assert(iso_week(d)==53);
+    expect_full(d,LANG_EN,"Thursday 31 December 2026 - Week 53");
+    expect_full(d,LANG_FR,"Jeudi 31 décembre 2026 - Semaine 53");
+    d.year=2027; d.month=1; d.day=1; assert(iso_week(d)==53);
+    expect_full(d,LANG_EN,"Friday 1 January 2027 - Week 53");
+    expect_full(d,LANG_FR,"Vendredi 1 janvier 2027 - Semaine 53");
+    d.year=2020; d.month=12; d.day=31; assert(iso_week(d)==53);
+    expect_full(d,LANG_EN,"Thursday 31 December 2020 - Week 53");
+    d.year=2021; d.month=1; d.day=3; assert(iso_week(d)==53);
+    expect_full(d,LANG_EN,"Sunday 3 January 2021 - Week 53");
+    expect_full(d,LANG_FR,"Dimanche 3 janvier 2021 - Semaine 53");
+    d.year=2024; d.month=12; d.day=30; assert(iso_week(d)==1);
+    expect_full(d,LANG_EN,"Monday 30 December 2024 - Week 1");
+    expect_full(d,LANG_FR,"Lundi 30 décembre 2024 - Semaine 1");
+
+    /* Worst-case width: 39 CP437 cells, fits the CGA 40-column fold. */
+    d.year=2026; d.month=9; d.day=30; assert(iso_week(d)==40);
+    expect_full(d,LANG_FR,"Mercredi 30 septembre 2026 - Semaine 40");
+    expect_full(d,LANG_EN,"Wednesday 30 September 2026 - Week 40");
+    full_date_text(d,LANG_FR,text,sizeof(text));
+    assert(strlen(text)==39);
+    memset(cells,' ',COLUMNS); memset(rev,0,COLUMNS); cells[COLUMNS-1]=' '; /* stay in 80 cells */
+    n=(int)strlen(text); col=(COLUMNS-n)/2; memcpy(cells+col,text,(size_t)n);
+    lps_fold_row(cells,rev,40,folded,frev);
+    folded[40]=0;
+    assert(strstr(folded,"Mercredi 30 septembre 2026 - Semaine 40"));
+    /* The 39-cell line is fully visible; fold does not cut it. */
+    assert(strlen(text)==39 && memcmp(folded+((40-39)/2),text,39)==0);
+
+    /* Daily Review line 1 uses the new wording; Home keeps v1.15. */
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+    assert(app_state(app)->today.date.year==2026 && app_state(app)->today.date.month==9 && app_state(app)->today.date.day==17);
+    assert(row_has(hw,1,"Thursday 17 September 2026 (week 38)"));
+    app_key(app,'5'); assert(app_screen(app)==SCR_DAILY_REVIEW);
+    assert(row_has(hw,1,"Thursday 17 September 2026 - Week 38"));
+    assert(row_has(hw,3,"DAILY REVIEW"));
+    app_key(app,KEY_ESCAPE); assert(app_screen(app)==SCR_HOME);
+    assert(row_has(hw,1,"Thursday 17 September 2026 (week 38)"));
+    app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'2'); app_key(app,'4');
+    assert(app_state(app)->language==LANG_FR && app_screen(app)==SCR_HOME);
+    assert(row_has(hw,1,"Jeudi 17 Septembre 2026 (semaine 38)"));
+    app_key(app,'5'); assert(app_screen(app)==SCR_DAILY_REVIEW);
+    assert(row_has(hw,1,"Jeudi 17 septembre 2026 - Semaine 38"));
+    assert(any_row(hw,"REVUE JOURNALI"));
+    french_screen_ok(hw,"daily review full date");
+}
+
 static void check_kanban_focus(const char *dir){
     static unsigned char store[16384]; static State loaded, dec; static Blob wire;
     App *app=(App*)store; Platform *hw; uint32_t check=0, gen=0; int active=-1;
@@ -2327,10 +2398,11 @@ int main(void){
     check_overlay_keys(tmpdir);
     check_home_entries(tmpdir);
     check_home_filtered(tmpdir);
+    check_full_date(tmpdir);
     check_kanban_focus(tmpdir);
     assert(orphan_hits>0); /* some edit took a name history had stored */
 
-    printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, ROSARY.DAT load/missing/damaged, title v1.15, menu 0-8 without notepad or Config, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
+    printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, Daily Review full date (FR/EN, year-boundary weeks, CGA 40-col fold), ROSARY.DAT load/missing/damaged, title v1.15, menu 0-8 without notepad or Config, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
     printf("%s", " unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture),");
     printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), MEALSCGA.DAT (13 CGA pictures, colours, checksums, damaged/missing, EGA/CGA independent), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical),");
     printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR, MEALSCGA.DAT messages), CGA played card (checkerboard grey-out masks, PLAYED/JOUEE label sizes), Kanban focus (F toggle, * marker, cleared on DONE, kept on reorder/move, JSON focus:true, wire unchanged), fixture decode (%u captures)\n", 0);

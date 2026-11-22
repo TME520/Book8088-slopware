@@ -285,6 +285,7 @@ uint32_t day_index(Date d);
 unsigned weekday(Date d); /* 0=Sunday */
 unsigned iso_week(Date d); /* ISO 8601, 1..53 */
 void long_date_text(Date d, int language, char *out, size_t n);
+void full_date_text(Date d, int language, char *out, size_t n); /* Daily Review: "Monday 16 November 2026 - Week 47" / "Lundi 16 novembre 2026 - Semaine 47" */
 
 /* ICS / CSV */
 int ics_escape_append(char *dst, size_t cap, size_t *used, const char *text);

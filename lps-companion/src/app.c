@@ -1074,8 +1074,15 @@ void app_render(App *a){
         a->hw->text(a->hw, 0, 0, bar, 1);
     }
     /* LPS-DOS-115-CHG01: row 1 of every screen shows the long date and ISO
-     * week of the viewed day (blank for an undated day). No XP anywhere. */
-    if(valid_date(day->date)){ long_date_text(day->date,a->state.language,b,sizeof(b)); center_line(a,1,b,0); }
+     * week of the viewed day (blank for an undated day). No XP anywhere.
+     * LPS116-FEAT02-CHG03: Daily Review uses the full date with " - Week n"
+     * / " - Semaine n" and a lowercase French month, including when the
+     * viewed day is an archived day (same helper, viewed date). */
+    if(valid_date(day->date)){
+        if(a->screen==SCR_DAILY_REVIEW) full_date_text(day->date,a->state.language,b,sizeof(b));
+        else long_date_text(day->date,a->state.language,b,sizeof(b));
+        center_line(a,1,b,0);
+    }
     if(a->daysBack) center_line(a,2,tr(a,"ARCHIVED DAY - READ ONLY","JOUR ARCHIVÉ - LECTURE SEULE"),0);
 
     if(a->screen==SCR_HOME){

@@ -320,17 +320,44 @@ unsigned iso_week(Date d){
     if(week<1) return iso_weeks_in(d.year-1u);
     return (unsigned)week>iso_weeks_in(d.year)?1u:(unsigned)week;
 }
-/* Line 1 of every screen: "Sunday 8 November 2026 (week 45)".
- * French accents are ASCII-folded until CP437 output lands (LPS-DOS-115-CHG03). */
+/* Weekday and month names shared by the title-bar long date and the
+ * Daily Review full date (LPS116-FEAT02-CHG03). French accents stay in
+ * the source as UTF-8 and become CP437 at compile time (tools/cp437). */
+static const char *const WEEKDAY_EN[7]={"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"};
+static const char *const WEEKDAY_FR[7]={"Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"};
+static const char *const MONTH_EN[12]={"January","February","March","April","May","June","July","August","September","October","November","December"};
+static const char *const MONTH_FR[12]={"Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"};
+
+/* Line 1 of every screen except Daily Review: "Sunday 8 November 2026 (week 45)".
+ * French months stay capitalised, as in v1.15 / PicoCalc. */
 void long_date_text(Date d, int language, char *out, size_t n){
-    static const char *en_days[7]={"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"};
-    static const char *fr_days[7]={"Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"};
-    static const char *en_months[12]={"January","February","March","April","May","June","July","August","September","October","November","December"};
-    static const char *fr_months[12]={"Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"};
     int fr=language==LANG_FR; unsigned w=weekday(d);
     (void)n; /* longest: "Wednesday 30 September 2099 (week 40)" = 38 chars */
     sprintf(out, fr?"%s %u %s %u (semaine %u)":"%s %u %s %u (week %u)",
-        fr?fr_days[w]:en_days[w], (unsigned)d.day, fr?fr_months[d.month-1]:en_months[d.month-1], (unsigned)d.year, iso_week(d));
+        fr?WEEKDAY_FR[w]:WEEKDAY_EN[w], (unsigned)d.day, fr?MONTH_FR[d.month-1]:MONTH_EN[d.month-1], (unsigned)d.year, iso_week(d));
+}
+
+/* LPS116-FEAT02-CHG03: Daily Review line 1.
+ * EN: "Monday 16 November 2026 - Week 47"
+ * FR: "Lundi 16 novembre 2026 - Semaine 47" (capitalised weekday, lowercase month).
+ * Day and week have no leading zero; the ISO year is omitted even when the
+ * week belongs to the previous or next calendar year.
+ * Longest FR: "Mercredi 30 septembre 2026 - Semaine 40" = 39 cells, which
+ * fits the CGA 40-column fold with one cell to spare. */
+void full_date_text(Date d, int language, char *out, size_t n){
+    int fr=language==LANG_FR; unsigned w=weekday(d);
+    const char *month=fr?MONTH_FR[d.month-1]:MONTH_EN[d.month-1];
+    char lowered[16];
+    if(fr){
+        unsigned i=0;
+        while(month[i] && i<sizeof(lowered)-1){ lowered[i]=month[i]; i++; }
+        lowered[i]=0;
+        if(lowered[0]>='A' && lowered[0]<='Z') lowered[0]=(char)(lowered[0]+('a'-'A'));
+        month=lowered;
+    }
+    (void)n; /* 39 cells at most; callers pass a row-sized or larger buffer */
+    sprintf(out, fr?"%s %u %s %u - Semaine %u":"%s %u %s %u - Week %u",
+        fr?WEEKDAY_FR[w]:WEEKDAY_EN[w], (unsigned)d.day, month, (unsigned)d.year, iso_week(d));
 }
 void state_init(State *s){
     unsigned i;
