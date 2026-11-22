@@ -145,7 +145,8 @@ static void center_line(App *a, int row, const char *text, int reverse){
         a->hw->text(a->hw, row, col, text, 0);
     }
 }
-#define REVIEW_PAGE 15
+#define REVIEW_PAGE 21
+#define REVIEW_TOP 1
 #define ROSARY_LINES 16
 /* Rosary pages: ROSARY_LINES word-wrapped lines each (LPS-DOS-115-CHG03c). */
 static unsigned rosary_pages(const char *text){
@@ -337,29 +338,139 @@ static const char *task_status_name(const App *a, int status){
     static const char *fr[]={"À FAIRE","EN COURS","FINI"};
     return a->state.language==LANG_FR?fr[status]:en[status];
 }
-static unsigned review_rows(const App *a){
-    return 3+count_flags(a->state.today.flags)+tasks_in(a,TASK_TODO)+tasks_in(a,TASK_DOING)
-        +(count_flags(a->state.today.flags)==0)+(tasks_in(a,TASK_TODO)==0)+(tasks_in(a,TASK_DOING)==0);
-}
+
+/* LPS116-FEAT02-CHG04: Daily Review is a list of lines, drawn from reviewOffset.
+ * CHG05 will add scroll markers; the offset and Up/Down already move the window. */
+enum {
+    RL_DATE, RL_ARCHIVE, RL_BLANK, RL_TITLE, RL_WEIGHT, RL_KANBAN,
+    RL_CARD, RL_NO_FOCUS, RL_MEALS, RL_COUNT, RL_NEXT, RL_ACT,
+    RL_ACTIVITY, RL_STORED, RL_NO_ACT
+};
+#define REVIEW_CAP 80
+typedef struct { uint8_t kind, arg; } ReviewItem;
+static ReviewItem g_review[REVIEW_CAP];
+static unsigned g_review_n;
 static const char *shown(const char *utf8); /* CHG06d: UTF-8 user text to CP437 */
-static void review_line(App *a, unsigned index, char *out, size_t size){
-    unsigned activities=count_flags(a->state.today.flags); unsigned i; int status;
-    if(index==0){ sprintf(out, tr(a,"ACTIVITIES (%u)","ACTIVITÉS (%u)"), activities); return; }
-    --index;
-    for(i=0;i<a->state.activityCount;i++) if(FLAG_BIT(a->state.today.flags,i)){
-        if(index--==0){ sprintf(out,"  %s", a->label[i]); return; }
-    }
-    if(!activities){ if(index--==0){ sprintf(out,"  %s", tr(a,"None selected","Aucune sélectionnée")); return; } }
-    for(status=TASK_TODO; status<=TASK_DOING; status++){
-        unsigned n=tasks_in(a,status);
-        if(index--==0){ sprintf(out,"%s (%u)", task_status_name(a,status), n); return; }
-        for(i=0;i<a->state.taskCount;i++) if(a->state.tasks[i].status==status){
-            if(index--==0){ sprintf(out,"  %s", shown(a->state.tasks[i].name)); return; }
-        }
-        if(!n && index--==0){ sprintf(out,"  %s", tr(a,"None","Aucune")); return; }
-    }
-    out[0]=0; (void)size;
+
+static int review_centered(unsigned kind){
+    return kind==RL_DATE||kind==RL_ARCHIVE||kind==RL_TITLE||kind==RL_KANBAN||kind==RL_MEALS||kind==RL_ACT;
 }
+static unsigned meal_row_total(unsigned row){ return (unsigned)(MEAL_ROW_FIRST[row+1]-MEAL_ROW_FIRST[row]); }
+static unsigned meal_row_played(const State *s, unsigned row){
+    unsigned i,n=0;
+    for(i=0;i<s->mealCount;i++) if(s->meals[i]<MEAL_CARD_COUNT && MEAL_DECK[s->meals[i]].row==row) n++;
+    return n;
+}
+static int meal_first_unplayed_row(const State *s, unsigned row){
+    unsigned i, first=MEAL_ROW_FIRST[row], last=MEAL_ROW_FIRST[row+1];
+    for(i=first;i<last;i++) if(!meal_play_position(s,i)) return (int)i;
+    return -1;
+}
+static void review_add(uint8_t kind, uint8_t arg){
+    if(g_review_n<REVIEW_CAP){ g_review[g_review_n].kind=kind; g_review[g_review_n].arg=arg; g_review_n++; }
+}
+static void review_build(const App *a){
+    const Day *day=app_viewed_day(a);
+    const DayNames *dn=day_names(viewed_slot(a));
+    unsigned i, got=0, focused=0;
+    g_review_n=0;
+    review_add(RL_DATE,0);
+    if(a->daysBack) review_add(RL_ARCHIVE,0);
+    review_add(RL_BLANK,0);
+    review_add(RL_TITLE,0);
+    review_add(RL_WEIGHT,0);
+    review_add(RL_BLANK,0);
+    if(!a->daysBack){
+        review_add(RL_KANBAN,0);
+        for(i=0;i<a->state.taskCount;i++) if(a->state.tasks[i].focus && a->state.tasks[i].status!=TASK_DONE){
+            review_add(RL_CARD,(uint8_t)i); focused++;
+        }
+        if(!focused) review_add(RL_NO_FOCUS,0);
+    }
+    review_add(RL_MEALS,0);
+    review_add(RL_COUNT,MEAL_DRINKS);
+    review_add(RL_COUNT,MEAL_FOOD);
+    review_add(RL_COUNT,MEAL_BLANK);
+    review_add(RL_NEXT,0);
+    review_add(RL_BLANK,0);
+    review_add(RL_ACT,0);
+    if(a->daysBack && dn->count){
+        for(i=0;i<dn->count;i++){
+            unsigned k=activity_index(&a->state,dn->names[i]);
+            if(k<a->state.activityCount) review_add(RL_ACTIVITY,(uint8_t)k);
+            else review_add(RL_STORED,(uint8_t)i);
+            got++;
+        }
+    }else{
+        for(i=0;i<a->state.activityCount;i++) if(FLAG_BIT(day->flags,i)){ review_add(RL_ACTIVITY,(uint8_t)i); got++; }
+    }
+    if(!got) review_add(RL_NO_ACT,0);
+}
+static unsigned review_rows(const App *a){ review_build(a); return g_review_n; }
+static void review_line(App *a, unsigned index, char *out, size_t size){
+    const ReviewItem *it; const Day *day=app_viewed_day(a);
+    char weight[16], food[40], drink[40];
+    int fi,di, fr=a->state.language==LANG_FR;
+    const MealCard *card;
+    review_build(a);
+    out[0]=0; if(index>=g_review_n){ (void)size; return; }
+    it=&g_review[index];
+    switch(it->kind){
+    case RL_DATE:
+        if(valid_date(day->date)) full_date_text(day->date,a->state.language,out,size);
+        break;
+    case RL_ARCHIVE:
+        strcpy(out,tr(a,"ARCHIVED DAY - READ ONLY","JOUR ARCHIVÉ - LECTURE SEULE"));
+        break;
+    case RL_BLANK: break;
+    case RL_TITLE:
+        strcpy(out,tr(a,"DAILY REVIEW","REVUE JOURNALIÈRE"));
+        break;
+    case RL_WEIGHT:
+        weight_text(day->actual,weight,sizeof(weight));
+        sprintf(out,tr(a,"Actual weight: %s Kg","Poids effectif : %s Kg"),weight);
+        break;
+    case RL_KANBAN: strcpy(out,"KANBAN"); break;
+    case RL_CARD:
+        sprintf(out,"  %s",shown(a->state.tasks[it->arg].name));
+        break;
+    case RL_NO_FOCUS:
+        strcpy(out,tr(a,"No focused card","Aucune carte en focus"));
+        break;
+    case RL_MEALS:
+        strcpy(out,tr(a,"MEAL PLANNER","PLANIFICATEUR DE REPAS"));
+        break;
+    case RL_COUNT:
+        if(a->daysBack) sprintf(out,fr?"%s : --":"%s: --",meal_row_name(it->arg,a->state.language));
+        else sprintf(out,fr?"%s : %u/%u":"%s: %u/%u",meal_row_name(it->arg,a->state.language),
+            meal_row_played(&a->state,it->arg),meal_row_total(it->arg));
+        break;
+    case RL_NEXT:
+        if(a->daysBack){ strcpy(out,tr(a,"Next: --","Prochain : --")); break; }
+        fi=meal_first_unplayed_row(&a->state,MEAL_FOOD);
+        di=meal_first_unplayed_row(&a->state,MEAL_DRINKS);
+        /* MEAL_DECK names are already CP437 from the compile step, like the planner. */
+        if(fi<0) strcpy(food,"--");
+        else{ card=&MEAL_DECK[fi]; strcpy(food,fr?card->fr:card->en); }
+        if(di<0) strcpy(drink,"--");
+        else{ card=&MEAL_DECK[di]; strcpy(drink,fr?card->fr:card->en); }
+        sprintf(out,tr(a,"Next: %s (%s)","Prochain : %s (%s)"),food,drink);
+        break;
+    case RL_ACT:
+        strcpy(out,tr(a,"ACTIVITIES","ACTIVITÉS"));
+        break;
+    case RL_ACTIVITY:
+        sprintf(out,"  %s",a->label[it->arg]);
+        break;
+    case RL_STORED:
+        sprintf(out,"  %s",shown(day_names(viewed_slot(a))->names[it->arg]));
+        break;
+    case RL_NO_ACT:
+        strcpy(out,tr(a,"No activity","Aucune activité"));
+        break;
+    }
+}
+
 static int rem_expired(const App *a, const Reminder *r){
     return valid_date(a->state.today.date) && day_index(a->state.today.date)>=day_index(r->from)+r->duration;
 }
@@ -1075,15 +1186,12 @@ void app_render(App *a){
     }
     /* LPS-DOS-115-CHG01: row 1 of every screen shows the long date and ISO
      * week of the viewed day (blank for an undated day). No XP anywhere.
-     * LPS116-FEAT02-CHG03: Daily Review uses the full date with " - Week n"
-     * / " - Semaine n" and a lowercase French month, including when the
-     * viewed day is an archived day (same helper, viewed date). */
-    if(valid_date(day->date)){
-        if(a->screen==SCR_DAILY_REVIEW) full_date_text(day->date,a->state.language,b,sizeof(b));
-        else long_date_text(day->date,a->state.language,b,sizeof(b));
-        center_line(a,1,b,0);
+     * LPS116-FEAT02-CHG04: Daily Review draws its own list (full date first,
+     * then the archived-day banner when needed), so the common header is skipped. */
+    if(a->screen!=SCR_DAILY_REVIEW){
+        if(valid_date(day->date)){ long_date_text(day->date,a->state.language,b,sizeof(b)); center_line(a,1,b,0); }
+        if(a->daysBack) center_line(a,2,tr(a,"ARCHIVED DAY - READ ONLY","JOUR ARCHIVÉ - LECTURE SEULE"),0);
     }
-    if(a->daysBack) center_line(a,2,tr(a,"ARCHIVED DAY - READ ONLY","JOUR ARCHIVÉ - LECTURE SEULE"),0);
 
     if(a->screen==SCR_HOME){
         unsigned total=a->daysBack?2u:home_visible_count(a);
@@ -1259,11 +1367,12 @@ void app_render(App *a){
         line(a,13,tr(a,"Enter: save task","Entrée : enregistrer la tâche"),0);
         line(a,15,tr(a,"Backspace: erase  Esc: cancel","Retour: effacer  Échap: annuler"),0);
     }else if(a->screen==SCR_DAILY_REVIEW){
-        char weight[20]; unsigned total=review_rows(a);
-        sprintf(b,"%s  %s", tr(a,"DAILY REVIEW","REVUE JOURNALIÈRE"), date); center_line(a,3,b,0);
-        weight_text(a->state.today.actual,weight,sizeof(weight));
-        sprintf(b,tr(a,"Actual weight: %s kg","Poids effectif : %s kg"), weight); line(a,4,b,0);
-        for(i=0;i<REVIEW_PAGE && a->reviewOffset+i<total;i++){ review_line(a,a->reviewOffset+i,b,sizeof(b)); line(a,6+(int)i,b,0); }
+        unsigned total=review_rows(a);
+        for(i=0;i<REVIEW_PAGE && a->reviewOffset+i<total;i++){
+            review_line(a,a->reviewOffset+i,b,sizeof(b));
+            if(review_centered(g_review[a->reviewOffset+i].kind)) center_line(a,REVIEW_TOP+(int)i,b,0);
+            else line(a,REVIEW_TOP+(int)i,b,0);
+        }
         sprintf(b,tr(a,"Up/Down scroll  %u-%u/%u  Esc back","Haut/Bas défiler  %u-%u/%u  Échap retour"),
             a->reviewOffset+1, (a->reviewOffset+REVIEW_PAGE<total?a->reviewOffset+REVIEW_PAGE:total), total); line(a,22,b,0);
     }else if(a->screen==SCR_CONFIG){
@@ -1399,3 +1508,6 @@ void app_render(App *a){
 
 int app_flush_save(App *app){ return flush_save(app); }
 int app_is_dirty(const App *app){ return app->dirty; }
+#ifdef LPS_HOST
+void app_host_go(App *app, int screen){ go(app,screen); app_render(app); }
+#endif

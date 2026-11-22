@@ -702,7 +702,7 @@ static void check_activities(const char *dir){
     app_key(app,KEY_LEFT); app_key(app,plat_host_key(1,'&')); assert(app_state(app)->today.flags==((1ul<<21)|(1ul<<10)|1ul)); /* AZERTY 1 */
     app_key(app,'1'); app_key(app,KEY_ESCAPE);
     assert(app_screen(app)==SCR_HOME && row_has(hw,5,"2/22 activities"));
-    app_key(app,'5'); assert(any_row(hw,"ACTIVITIES (2)") && any_row(hw,"  Weekend") && any_row(hw,"  Meditation")); app_key(app,KEY_ESCAPE);
+    app_key(app,'5'); assert(any_row(hw,"ACTIVITIES") && any_row(hw,"  Weekend") && any_row(hw,"  Meditation") && !any_row(hw,"ACTIVITIES (")); app_key(app,KEY_ESCAPE);
     /* Closing the day: the ICS lists the ticks in catalog order, as the PicoCalc. */
     app_key(app,'8'); app_key(app,KEY_ENTER); assert(app_screen(app)==SCR_REWARD); app_key(app,KEY_ENTER);
     read_ics(dir,"20260917",got,sizeof(got));
@@ -2019,7 +2019,13 @@ static void check_full_date(const char *dir){
     assert(row_has(hw,1,"Thursday 17 September 2026 (week 38)"));
     app_key(app,'5'); assert(app_screen(app)==SCR_DAILY_REVIEW);
     assert(row_has(hw,1,"Thursday 17 September 2026 - Week 38"));
-    assert(row_has(hw,3,"DAILY REVIEW"));
+    assert(row_has(hw,3,"DAILY REVIEW") && !strstr(plat_host_row(hw,3),"2026"));
+    assert(row_has(hw,4,"Actual weight: -- Kg"));
+    assert(row_has(hw,6,"KANBAN") && row_has(hw,7,"No focused card"));
+    assert(row_has(hw,8,"MEAL PLANNER"));
+    assert(row_has(hw,9,"Drinks: 0/6") && row_has(hw,10,"Food: 0/8") && row_has(hw,11,"Blank: 0/2"));
+    assert(row_has(hw,12,"Next: Light Cheese Wrap (Coffee (Latte))"));
+    assert(row_has(hw,14,"ACTIVITIES") && row_has(hw,15,"No activity"));
     app_key(app,KEY_ESCAPE); assert(app_screen(app)==SCR_HOME);
     assert(row_has(hw,1,"Thursday 17 September 2026 (week 38)"));
     app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'2'); app_key(app,'4');
@@ -2027,8 +2033,136 @@ static void check_full_date(const char *dir){
     assert(row_has(hw,1,"Jeudi 17 Septembre 2026 (semaine 38)"));
     app_key(app,'5'); assert(app_screen(app)==SCR_DAILY_REVIEW);
     assert(row_has(hw,1,"Jeudi 17 septembre 2026 - Semaine 38"));
-    assert(any_row(hw,"REVUE JOURNALI"));
+    assert(any_row(hw,"REVUE JOURNALI") && !strstr(plat_host_row(hw,3),"2026"));
+    assert(row_has(hw,4,"Poids effectif : -- Kg"));
+    assert(row_has(hw,6,"KANBAN") && row_has(hw,7,"Aucune carte en focus"));
+    assert(row_has(hw,8,"PLANIFICATEUR DE REPAS"));
+    assert(row_has(hw,9,"Boissons : 0/6") && row_has(hw,10,"Nourriture : 0/8") && row_has(hw,11,"Blank : 0/2"));
+    assert(row_has(hw,12,"Prochain : Wrap fromage léger (Café (Latte))"));
+    assert(any_row(hw,"ACTIVIT") && row_has(hw,15,"Aucune activité"));
     french_screen_ok(hw,"daily review full date");
+}
+
+
+/* LPS116-FEAT02-CHG04: Daily Review layout, meals, focus, archive. */
+static void check_daily_review_layout(const char *dir){
+    static unsigned char store[16384];
+    App *app=(App*)store; Platform *hw;
+    char cells[COLUMNS], folded[41];
+    unsigned char rev[COLUMNS], frev[40];
+
+    fresh_dir(dir); hw=plat_host_create(0); app_init(app,hw); app_start(app);
+
+    /* Weight, three activities, two focused cards, some meals played. */
+    app_key(app,'2'); type_text(app,"81.000"); app_key(app,KEY_DOWN); type_text(app,"81.200"); app_key(app,KEY_ENTER);
+    assert(app_state(app)->today.actual==81200);
+
+    app_key(app,'1');
+    app_key(app,'1'); /* Walk */
+    app_key(app,'3'); /* Bible */
+    app_key(app,KEY_RIGHT); app_key(app,KEY_RIGHT); app_key(app,'1'); /* Sport */
+    app_key(app,KEY_ESCAPE);
+    assert(app_state(app)->today.flags==(FLAG_MASK(0)|FLAG_MASK(2)|FLAG_MASK(16)));
+
+    app_key(app,'3');
+    app_key(app,'n'); type_text(app,"Write docs"); app_key(app,KEY_ENTER);
+    app_key(app,'n'); type_text(app,"Fix bike"); app_key(app,KEY_ENTER);
+    app_key(app,KEY_UP); app_key(app,'f'); /* Write docs */
+    app_key(app,KEY_DOWN); app_key(app,'f'); /* Fix bike */
+    app_key(app,KEY_F2); /* Fix bike -> DOING, keeps focus */
+    app_key(app,KEY_ESCAPE);
+
+    /* Enter toggles the current card and stays on it; Right moves. */
+    app_key(app,' ');
+    app_key(app,KEY_ENTER); /* Coffee (Latte) */
+    app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER);
+    app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER); /* two Coffee (Black) */
+    app_key(app,KEY_RIGHT); app_key(app,KEY_DOWN); /* Tea -> Biscuit */
+    app_key(app,KEY_ENTER);
+    app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER);
+    app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER);
+    app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER); /* Cheese, Apple, Orange */
+    app_key(app,KEY_ESCAPE);
+    assert(app_state(app)->mealCount==7);
+
+    app_key(app,'5'); assert(app_screen(app)==SCR_DAILY_REVIEW);
+    assert(row_has(hw,1,"Thursday 17 September 2026 - Week 38"));
+    assert(row_has(hw,3,"DAILY REVIEW") && !strstr(plat_host_row(hw,3),"2026-"));
+    assert(row_has(hw,4,"Actual weight: 81.200 Kg"));
+    assert(row_has(hw,6,"KANBAN"));
+    assert(row_has(hw,7,"  Write docs") && row_has(hw,8,"  Fix bike"));
+    assert(row_has(hw,9,"MEAL PLANNER"));
+    assert(row_has(hw,10,"Drinks: 3/6") && row_has(hw,11,"Food: 4/8") && row_has(hw,12,"Blank: 0/2"));
+    assert(row_has(hw,13,"Next: Light Cheese Wrap (Tea)"));
+    assert(row_has(hw,15,"ACTIVITIES"));
+    assert(row_has(hw,16,"  Walk") && row_has(hw,17,"  Bible") && row_has(hw,18,"  Sport"));
+
+    /* Exhausted drinks: play Tea, Mint Tea, Light Juice; Next keeps the wrap and (--). */
+    app_key(app,KEY_ESCAPE); app_key(app,' '); /* opens on Tea, first unplayed */
+    app_key(app,KEY_ENTER);
+    app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER);
+    app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER);
+    app_key(app,KEY_ESCAPE); app_key(app,'5');
+    assert(row_has(hw,10,"Drinks: 6/6") && row_has(hw,13,"Next: Light Cheese Wrap (--)"));
+
+    /* Exhaust remaining food: two wraps, salad, then skip already-played cards to Soup. */
+    app_key(app,KEY_ESCAPE); app_key(app,' '); /* opens on first wrap */
+    app_key(app,KEY_ENTER);
+    app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER);
+    app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER); /* salad */
+    app_key(app,KEY_RIGHT); /* Biscuit, already played */
+    app_key(app,KEY_RIGHT);
+    app_key(app,KEY_RIGHT);
+    app_key(app,KEY_RIGHT);
+    app_key(app,KEY_RIGHT); app_key(app,KEY_ENTER); /* Soup */
+    app_key(app,KEY_ESCAPE); app_key(app,'5');
+    assert(row_has(hw,11,"Food: 8/8") && row_has(hw,13,"Next: -- (--)"));
+
+    /* French wording and planner names. */
+    app_key(app,KEY_ESCAPE);
+    app_key(app,KEY_TAB); app_key(app,'1'); app_key(app,'2'); app_key(app,'4');
+    app_key(app,'5');
+    assert(row_has(hw,1,"Jeudi 17 septembre 2026 - Semaine 38"));
+    assert(row_has(hw,4,"Poids effectif : 81.200 Kg"));
+    assert(row_has(hw,7,"  Write docs") && row_has(hw,8,"  Fix bike"));
+    assert(row_has(hw,9,"PLANIFICATEUR DE REPAS"));
+    assert(row_has(hw,10,"Boissons : 6/6") && row_has(hw,11,"Nourriture : 8/8") && row_has(hw,12,"Blank : 0/2"));
+    assert(row_has(hw,13,"Prochain : -- (--)"));
+    assert(row_has(hw,16,"  Marche") && row_has(hw,17,"  Bible") && row_has(hw,18,"  Sport"));
+    french_screen_ok(hw,"daily review layout FR");
+
+    /* Archived day: no KANBAN; meal lines are -- (the save does not snapshot
+     * the deck per day); activities and weight come from the closed day. */
+    app_key(app,KEY_ESCAPE);
+    app_key(app,'8'); app_key(app,KEY_ENTER); app_key(app,KEY_ENTER); /* close, reward, new home */
+    app_key(app,KEY_LEFT);
+    assert(row_has(hw,2,"JOUR ARCHIV"));
+    app_host_go(app,SCR_DAILY_REVIEW);
+    assert(app_screen(app)==SCR_DAILY_REVIEW);
+    assert(row_has(hw,1,"Jeudi 17 septembre 2026 - Semaine 38"));
+    assert(any_row(hw,"JOUR ARCHIV"));
+    assert(row_has(hw,5,"Poids effectif : 81.200 Kg"));
+    assert(!any_row(hw,"KANBAN") && !any_row(hw,"Write docs") && !any_row(hw,"Fix bike"));
+    assert(any_row(hw,"PLANIFICATEUR DE REPAS"));
+    assert(any_row(hw,"Boissons : --") && any_row(hw,"Nourriture : --") && any_row(hw,"Blank : --") && any_row(hw,"Prochain : --"));
+    assert(any_row(hw,"  Marche") && any_row(hw,"  Bible") && any_row(hw,"  Sport"));
+
+    /* CGA 40-col fold (planner graphics only; Daily Review stays 80-col text).
+     * A 32-character card name with a 2-space indent has its indent halved
+     * and still fits. The longest Next line is 47 cells and would be cut. */
+    memset(cells,' ',COLUMNS); memset(rev,0,COLUMNS);
+    memcpy(cells,"  12345678901234567890123456789012",34);
+    lps_fold_row(cells,rev,40,folded,frev); folded[40]=0;
+    assert(strstr(folded,"12345678901234567890123456789012"));
+    assert(folded[39]==' '); /* 1-space indent + 32-byte name: 33 cells */
+    memset(cells,' ',COLUMNS);
+    {
+        const char *next="Prochain : Wrap fromage léger (Thé à la menthe)";
+        assert(strlen(next)==47);
+        memcpy(cells,next,47);
+        lps_fold_row(cells,rev,40,folded,frev); folded[40]=0;
+        assert(!memcmp(folded,next,40) && folded[39]==next[39]);
+    }
 }
 
 static void check_kanban_focus(const char *dir){
@@ -2399,10 +2533,11 @@ int main(void){
     check_home_entries(tmpdir);
     check_home_filtered(tmpdir);
     check_full_date(tmpdir);
+    check_daily_review_layout(tmpdir);
     check_kanban_focus(tmpdir);
     assert(orphan_hits>0); /* some edit took a name history had stored */
 
-    printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, Daily Review full date (FR/EN, year-boundary weeks, CGA 40-col fold), ROSARY.DAT load/missing/damaged, title v1.15, menu 0-8 without notepad or Config, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
+    printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, Daily Review full date (FR/EN, year-boundary weeks, CGA 40-col fold), Daily Review layout (focus, meals, next, archive, -- weight), ROSARY.DAT load/missing/damaged, title v1.15, menu 0-8 without notepad or Config, archive menu 1-2, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
     printf("%s", " unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture),");
     printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), MEALSCGA.DAT (13 CGA pictures, colours, checksums, damaged/missing, EGA/CGA independent), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical),");
     printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR, MEALSCGA.DAT messages), CGA played card (checkerboard grey-out masks, PLAYED/JOUEE label sizes), Kanban focus (F toggle, * marker, cleared on DONE, kept on reorder/move, JSON focus:true, wire unchanged), fixture decode (%u captures)\n", 0);

@@ -328,6 +328,9 @@ unsigned app_selection(const App *app); /* cursor of the current screen */
 const Day *app_viewed_day(const App *app);
 int app_flush_save(App *app);
 int app_is_dirty(const App *app);
+#ifdef LPS_HOST
+void app_host_go(App *app, int screen); /* tests: open a screen on the viewed day */
+#endif
 
 /* paths helpers */
 void lps_set_data_dir(const char *dir);
