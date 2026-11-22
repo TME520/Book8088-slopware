@@ -171,7 +171,7 @@ static void check_menu_and_legacy_note(const char *tmpdir){
     assert(save_store(tmpdir,&s,&gen,&active));
     hw=plat_host_create(0); app_init(a,hw); app_start(a);
     assert(app_screen(a)==SCR_HOME);
-    assert(row_has(hw,0,"LPS COMPANION v1.15") && !strcmp(LPS_VERSION_STR,"1.15")); /* LPS-DOS-115-CHG12 */
+    assert(row_has(hw,0,"LPS COMPANION v1.16") && !strcmp(LPS_VERSION_STR,"1.16")); /* LPS116-CHG07 */
     for(i=0;i<9;i++) assert(strstr(plat_host_row(hw,7+(int)i),labels[i]));
     for(i=7;i<=17;i++) assert(!strstr(plat_host_row(hw,(int)i),"Config") && !strstr(plat_host_row(hw,(int)i),"9  "));
     assert(row_has(hw,24,"Up/Down  Enter:OK  Tab:Config"));
@@ -1437,9 +1437,9 @@ static void check_cga_fold(const char *dir){
     static unsigned char store[16384]; App *app=(App*)store; Platform *hw;
     char b[COLUMNS+1], o[41]; unsigned char rev[COLUMNS], orev[40]; int i;
     /* Centred title + date at the right edge, reversed end to end. */
-    row80(b,rev,1); memcpy(b+30,"LPS COMPANION v1.15",19); memcpy(b+70,"2026-11-16",10);
+    row80(b,rev,1); memcpy(b+30,"LPS COMPANION v1.16",19); memcpy(b+70,"2026-11-16",10);
     fold_text(b,rev,o,orev);
-    assert(!strcmp(o,"          LPS COMPANION v1.15 2026-11-16"));
+    assert(!strcmp(o,"          LPS COMPANION v1.16 2026-11-16"));
     for(i=0;i<40;i++) assert(orev[i]==1);
     /* Label on the left (indent halved), counter at the right edge, not reversed. */
     row80(b,rev,0); memcpy(b+1,"MEAL PLANNER",12); memcpy(b+79-9,"PLAYED #1",9);
@@ -1460,7 +1460,7 @@ static void check_cga_fold(const char *dir){
     hw->meal_open=fake_meal_open; hw->meal_card=fake_meal_card; hw->meal_close=fake_meal_close;
     fake_open_result=MEALS_OK; fake_card_result=MEALS_OK;
     app_key(app,' '); assert(app_screen(app)==SCR_MEAL_PLANNER);
-    fold_host_row(hw,0,o,orev); assert(!strncmp(o+10,"LPS COMPANION v1.15",19) && orev[0] && orev[39]);
+    fold_host_row(hw,0,o,orev); assert(!strncmp(o+10,"LPS COMPANION v1.16",19) && orev[0] && orev[39]);
     fold_host_row(hw,3,o,orev); assert(!strcmp(o,"MEAL PLANNER                            "));
     fold_host_row(hw,4,o,orev); assert(!strcmp(o,"Drinks 1/6                    16/16 left"));
     fold_host_row(hw,22,o,orev); assert(!strcmp(o,"        <- -> Card   Up/Down Row        "));
@@ -2755,7 +2755,7 @@ int main(void){
     check_kanban_focus(tmpdir);
     assert(orphan_hits>0); /* some edit took a name history had stored */
 
-    printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, Daily Review full date (FR/EN, year-boundary weeks, CGA 40-col fold), Daily Review layout (focus, meals, next, archive, -- weight), Daily Review scroll (markers, clamp, reset, archive, overlays), Daily Review on archived-day menu (entry 3, read-only, Esc cursor), ROSARY.DAT load/missing/damaged, title v1.15, menu 0-8 without notepad or Config, archive menu 1-3, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
+    printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, Daily Review full date (FR/EN, year-boundary weeks, CGA 40-col fold), Daily Review layout (focus, meals, next, archive, -- weight), Daily Review scroll (markers, clamp, reset, archive, overlays), Daily Review on archived-day menu (entry 3, read-only, Esc cursor), ROSARY.DAT load/missing/damaged, title v1.16, menu 0-8 without notepad or Config, archive menu 1-3, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
     printf("%s", " unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture),");
     printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), MEALSCGA.DAT (13 CGA pictures, colours, checksums, damaged/missing, EGA/CGA independent), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical),");
     printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR, MEALSCGA.DAT messages), CGA played card (checkerboard grey-out masks, PLAYED/JOUEE label sizes), Kanban focus (F toggle, * marker, cleared on DONE, kept on reorder/move, JSON focus:true, wire unchanged), fixture decode (%u captures)\n", 0);

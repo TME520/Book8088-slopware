@@ -18,6 +18,9 @@ Since LPS-DOS-115-CHG04 the data folder (`C:\LPS\`) holds the same JSON saves as
 
 Sources and rebuild instructions are in [`lps-companion/`](lps-companion/). A local `make dos rosary meals mealscga hello` writes new copies there; those copies stay untracked. The root files above are the ones to download.
 
+Version 1.16 (LPS116-CHG07) keeps PicoCalc v1.15 file compatibility when no Kanban card is focused, and adds **F** to focus a card (a `*` marker, `"focus":true` in the JSON; moving the card to DONE clears it; PicoCalc v1.15 reads the key and drops it on resave) and a rewritten Daily Review (full date and ISO week, focused cards, Meal Planner counters and Next/Prochain, Up/Down/PgUp/PgDn/Home/End scrolling, and **3 Daily review** on an archived day — a deliberate divergence from PicoCalc v1.15, which still has only 1–2). Archived days have no KANBAN section and show meal lines as **--**; a per-day meal snapshot is postponed. Details and the Book 8088 checklist are in [`lps-companion/README.md`](lps-companion/README.md) and [`lps-companion/BOOK8088-TEST.md`](lps-companion/BOOK8088-TEST.md).
+
+
 | Program | Directory | What it is |
 |---|---|---|
-| LPS Companion | [`lps-companion/`](lps-companion/) | MS-DOS port of [LPS Companion v1.15](https://github.com/TME520/LPS-Companion-PicoCalc) (Open Watcom, real-mode 8086, 80×25 text, EGA and CGA Meal Planner). Run [`LPSCOMP.EXE`](LPSCOMP.EXE) (with [`ROSARY.DAT`](ROSARY.DAT), [`MEALS.DAT`](MEALS.DAT) and [`MEALSCGA.DAT`](MEALSCGA.DAT) beside it) and [`HELLO.EXE`](HELLO.EXE) from this repository root. |
+| LPS Companion | [`lps-companion/`](lps-companion/) | MS-DOS port of [LPS Companion](https://github.com/TME520/LPS-Companion-PicoCalc), now at **v1.16** (PicoCalc v1.15 files; Open Watcom, real-mode 8086, 80×25 text, EGA and CGA Meal Planner). Run [`LPSCOMP.EXE`](LPSCOMP.EXE) (with [`ROSARY.DAT`](ROSARY.DAT), [`MEALS.DAT`](MEALS.DAT) and [`MEALSCGA.DAT`](MEALSCGA.DAT) beside it) and [`HELLO.EXE`](HELLO.EXE) from this repository root. |

@@ -2,7 +2,7 @@
 
 **English** | [Francais](#lps-companion-pour-ms-dos)
 
-A full port of [LPS Companion v1.15](https://github.com/TME520/LPS-Companion-PicoCalc) (PicoCalc) to real-mode 16-bit MS-DOS
+A full port of [LPS Companion v1.15](https://github.com/TME520/LPS-Companion-PicoCalc) (PicoCalc) to real-mode 16-bit MS-DOS, now at **v1.16**
 for Intel **8088**-class PCs with **640 KB** conventional memory. Keyboard only
 (no mouse). Text mode **80×25** (content laid out in 40 columns, same as the
 Companion). Data lives under `C:\LPS\` by default and uses the **same**
@@ -270,6 +270,19 @@ The last CGA change. A full regression run with the root files of this commit, i
   | TAB → Config / → planner | 0.17 / 0.33 s | 0.17 / 0.39 s | 0.11 / 0.11 s |
   | Esc, planner → Home (save + CSV) | 0.72 s | 0.72 s | 0.66 s |
 
+### Version 1.16 (LPS116-CHG07)
+
+The title bar and the start-up banner read **LPS COMPANION v1.16**. File compatibility with PicoCalc v1.15 is unchanged when no card is focused: JSON saves, ICS, the weights CSV and the Meal Planner CSV stay byte-identical. The screenshots in `captures/` were taken again under DOSBox (`cputype=8086`, `cycles=fixed 300`) with v1.16. The Book 8088 checklist is [`BOOK8088-TEST.md`](BOOK8088-TEST.md).
+
+**Kanban focus** (LPS116-FEAT01): **F** toggles focus on the selected card. A focused card shows a `*` before its name. Moving a card to DONE clears focus; **F** on a DONE card does nothing. Focus is a way to highlight priority cards and lasts only as long as the cards. In the JSON save a focused card is written as `"focus":true` after the name; an unfocused card stays in the v1.15 form, so a save with no focus is byte-identical to v1.15. PicoCalc v1.15 skips the unknown key and opens the file; a resave on the PicoCalc drops `"focus"`. Focus is not stored in archived days, not in the old `.BIN` wire, and not in the ICS or CSV exports.
+
+**Daily Review** (LPS116-FEAT02): the first line is the full date with the ISO week in the language in use, for example **Monday 16 November 2026 - Week 47** / **Lundi 16 novembre 2026 - Semaine 47** (weekday capitalised, French month in lowercase, no leading zero). Then **DAILY REVIEW** / **REVUE JOURNALIÈRE** (no short `YYYY-MM-DD` on the title), the day's actual weight as **Actual weight: 81.200 Kg** / **Poids effectif : 81.200 Kg** (or **-- Kg** if none), **KANBAN** and each focused card on its own line (**No focused card** / **Aucune carte en focus** if none), **MEAL PLANNER** / **PLANIFICATEUR DE REPAS** with **Drinks: 3/6**, **Food: 4/8**, **Blank: 1/2** (played/total; the deck has 6, 8 and 2 cards; French puts a space before the colon) and **Next: Light Cheese Wrap (Tea)** / **Prochain : Wrap fromage léger (Thé)** — the first unplayed Food card in deck order, then the first unplayed Drink in parentheses, using the planner's names, or **--** / **(--)** when a row is exhausted — then **ACTIVITIES** / **ACTIVITÉS** and one ticked activity per line (**No activity** / **Aucune activité** if none).
+
+When the list is longer than the 21 content rows, **Up/Down** move one line and do not wrap; **Left/Right** (as in v1.15), **PgUp** and **PgDn** move a page; **Home** / **End** jump to the ends. A CP437 arrow at the right of the first or last content row marks that more text sits above (↑) or below (↓). The footer reads **Up/Down: scroll** / **Haut/Bas : défiler** and the visible range only while scrolling is possible. Opening the review starts at the top; on today, TAB and SPACE overlays come back to the same place.
+
+An archived day has a third menu entry, **3 Daily review** / **3 Revue journalière** (PicoCalc v1.15 still has only 1–2). That review shows the archived day's full date, the archive banner, that day's weight, no KANBAN section, meal lines **--** (including **Next: --** / **Prochain : --**), and the frozen activity names (orphans as the archive shows them). Esc returns to the archived-day menu with the cursor on that entry. TAB and SPACE stay on the review and show the read-only notice. A per-day meal snapshot is postponed, so the meal lines of an archived day are always **--**, even if cards were played before the day was closed.
+
+
 ## Requirements
 
 - MS-DOS 3.3+ / FreeDOS / MS-DOS 7.x (FAT12/16)
@@ -291,8 +304,9 @@ The last CGA change. A full regression run with the root files of this commit, i
 | Notepad | Removed, as in v1.12 (legacy notes kept in SAVE and ICS) |
 | Weight expected/measured | Yes |
 | Kanban 24 tasks TODO/DOING/DONE | Yes |
+| Kanban focus (F, `*` marker, `"focus":true` in JSON) | Yes (LPS116-FEAT01; PicoCalc v1.15 reads the save and drops the key on resave) |
 | Christian Rosary (4 modes, FR/EN) | Yes (French accents in CP437) |
-| Daily review | Yes |
+| Daily review | Yes (v1.16 layout, ISO week, scroll, archive entry 3; LPS116-FEAT02) |
 | Config language EN/FR + 5 palettes, opened with TAB | Yes (text attributes; LPS-DOS-115-CHG10) |
 | Home entries shown/hidden (Config > Activities, `"homeHidden"`) | Yes (LPS-DOS-115-CHG10/CHG11) |
 | TAB/SPACE from every screen (Config, Meal Planner) | Yes (LPS-DOS-115-CHG09) |
@@ -472,7 +486,7 @@ Fixes kept in this tree:
   (`-k4096`), which is what `make dos` passes
 - Video: detect MDA vs CGA via BIOS equipment word + mode `0Fh`; use **B000**
   or **B800** accordingly; only set mode `03h`/`07h` if not already text
-- Early BIOS teletype banner (`LPS COMPANION v1.15` since LPS-DOS-115-CHG12) before dirs / UI
+- Early BIOS teletype banner (`LPS COMPANION v1.16` since LPS116-CHG07) before dirs / UI
 - Soft FP (`-fpc`) — no 8087 required
 - **`HELLO.EXE`** (built with `make hello`): tiny BIOS-only smoke test (prints mode / equipment)
 
@@ -653,10 +667,11 @@ byte-compatible with the firmware.
 - Saves are written when leaving a screen, confirming Date/Weight/Config, closing the day or quitting (**Q**), not after every change; the Meal Planner saves when it closes, not after each card. After a write DOS checks the CRC-32 only, not a full re-parse (8088 speed).
 - Meal Planner pictures are checked with a 32-bit sum instead of a CRC-32 (8088 speed). On CGA the planner is in 320×200 graphics with 4-colour dithered pictures (LPS-DOS-115-CHG14); a played card is greyed out by a checkerboard of the background colour, with PLAYED #n on a solid box (LPS-DOS-115-CHG15), where the EGA uses grey palette registers. Without colour EGA or CGA it is in text mode.
 - No low-battery warning (no such hardware). Config has no "SD import" entry: the DOS disk **is** the storage.
+- On an archived day the Daily Review has no KANBAN section and the meal lines show **--**; a per-day meal snapshot is postponed (LPS116-FEAT02). PicoCalc v1.15 still has only **1 Activities, 2 Weight tracker** on that menu; DOS v1.16 adds **3 Daily review**.
 
 ## Captures
 
-PNG screenshots under `captures/`, raw DOSBox grabs of v1.15 at 8088 speed (`cputype=8086`, `cycles=fixed 300`), checked pixel for pixel against the final EXE in LPS-DOS-115-CHG16. 01–09 are 640×350 (`machine=ega`, LPS-DOS-115-CHG12): Home EN/FR, Activities, Kanban, Rosary mode, Timer, a DOSBox Home grab and the EGA Meal Planner (EN, and FR with a played card); since LPS-DOS-115-CHG13 also two raw 320×200 grabs of the CGA planner (`machine=cga`), retaken with the `MEALSCGA.DAT` pictures in LPS-DOS-115-CHG14: `10-meal-planner-cga.png` (EN, Blue theme, Coffee (Latte)) and `11-meal-planner-cga-played-fr.png` (FR, Green theme, Biscuit played, greyed out as in LPS-DOS-115-CHG15). Text dumps are not stored; `make captures` rewrites
+PNG screenshots under `captures/`, raw DOSBox grabs of v1.16 at 8088 speed (`cputype=8086`, `cycles=fixed 300`), retaken in LPS116-CHG07. 01–09 are 640×350 (`machine=ega`): Home EN/FR, Activities, Kanban (with a focused card marked `*`), Rosary mode, Timer, a DOSBox Home grab and the EGA Meal Planner (EN, and FR with a played card). 10–11 are raw 320×200 CGA planner grabs: `10-meal-planner-cga.png` (EN, Blue theme, Coffee (Latte)) and `11-meal-planner-cga-played-fr.png` (FR, Green theme, Café (Latte) played, greyed out). 12–14 are 640×350 EGA: `12-daily-review.png` (the v1.16 layout), `13-archive-menu.png` (entries 1–3) and `14-archive-review.png`. Text dumps are not stored; `make captures` rewrites
 `captures/*.txt` from the host UI driver.
 
 ---
@@ -664,7 +679,7 @@ PNG screenshots under `captures/`, raw DOSBox grabs of v1.15 at 8088 speed (`cpu
 # LPS Companion pour MS-DOS
 
 Port complet de [LPS Companion v1.15](https://github.com/TME520/LPS-Companion-PicoCalc)
-vers MS-DOS 16 bits (8088, 640 Ko), clavier uniquement, mode texte 80×25.
+vers MS-DOS 16 bits (8088, 640 Ko), désormais en **v1.16**, clavier uniquement, mode texte 80×25.
 Memes formats `SAVE_A/B.JSN` (sauvegarde JSON, schema 2), ICS et CSV que le firmware PicoCalc v1.13 et suivants.
 
 Seul le nom du fichier ICS differe de la PicoCalc (LPS-DOS-115-CHG02c) : `EXPORT\YYYYMMDD.ICS`, par exemple `EXPORT\20260917.ICS`, au lieu de `YYYY-MM-DD_LPS-Companion.ics`. DOS ne garde que des noms 8.3 et coupait le nom long en `YYYY-MM-.ICS` : tous les jours d'un mois ecrasaient le meme fichier. Le contenu ne change pas, et les anciens fichiers deja dans `EXPORT\` restent en place. Sous Linux, un disque FAT affiche en general ces noms en majuscules : un lecteur qui ne cherche que `*.ics` ne les voit pas.
@@ -909,6 +924,19 @@ Dernière modification CGA. Passe de non-régression complète avec les fichiers
   | TAB → Config / → planificateur | 0,17 / 0,33 s | 0,17 / 0,39 s | 0,11 / 0,11 s |
   | Échap, planificateur → accueil (sauvegarde + CSV) | 0,72 s | 0,72 s | 0,66 s |
 
+### Version 1.16 (LPS116-CHG07)
+
+La barre de titre et la bannière de démarrage affichent **LPS COMPANION v1.16**. La compatibilité des fichiers avec la PicoCalc v1.15 est inchangée quand aucune carte n'est en focus : les sauvegardes JSON, l'ICS, le CSV des poids et le CSV du planificateur restent identiques à l'octet près. Les captures de `captures/` ont été refaites sous DOSBox (`cputype=8086`, `cycles=fixed 300`) avec la v1.16. La liste de tests pour le Book 8088 est dans [`BOOK8088-TEST.md`](BOOK8088-TEST.md).
+
+**Focus du Kanban** (LPS116-FEAT01) : **F** inverse le focus de la carte sélectionnée. Une carte en focus affiche un `*` devant son nom. La passer en FINI retire le focus ; **F** sur une carte FINI ne fait rien. Le focus sert à mettre en avant des cartes prioritaires et ne dure pas plus longtemps que les cartes. Dans la sauvegarde JSON, une carte en focus s'écrit `"focus":true` après le nom ; une carte sans focus garde la forme v1.15, donc une sauvegarde sans focus est identique à l'octet près à la v1.15. La PicoCalc v1.15 ignore la clé inconnue et ouvre le fichier ; une réécriture sur la PicoCalc retire `"focus"`. Le focus n'est pas stocké dans les jours archivés, ni dans l'ancien fil `.BIN`, ni dans les exports ICS ou CSV.
+
+**Revue journalière** (LPS116-FEAT02) : la première ligne est la date complète avec la semaine ISO dans la langue en cours, par exemple **Lundi 16 novembre 2026 - Semaine 47** / **Monday 16 November 2026 - Week 47** (jour capitalisé, mois français en minuscules, pas de zéro initial). Puis **REVUE JOURNALIÈRE** / **DAILY REVIEW** (sans le court `YYYY-MM-DD` sur le titre), le poids effectif du jour **Poids effectif : 81.200 Kg** / **Actual weight: 81.200 Kg** (ou **-- Kg** s'il manque), **KANBAN** et chaque carte en focus sur une ligne (**Aucune carte en focus** / **No focused card** s'il n'y en a pas), **PLANIFICATEUR DE REPAS** / **MEAL PLANNER** avec **Boissons : 3/6**, **Nourriture : 4/8**, **Blank : 1/2** (jouées/total ; le paquet a 6, 8 et 2 cartes ; l'anglais n'a pas d'espace avant le deux-points) et **Prochain : Wrap fromage léger (Thé)** / **Next: Light Cheese Wrap (Tea)** — la première carte Nourriture non jouée dans l'ordre du paquet, puis la première Boisson entre parenthèses, avec les noms du planificateur, ou **--** / **(--)** si une rangée est épuisée — puis **ACTIVITÉS** / **ACTIVITIES** et une activité cochée par ligne (**Aucune activité** / **No activity** s'il n'y en a pas).
+
+Quand la liste dépasse les 21 lignes utiles, **Haut/Bas** avancent d'une ligne sans boucler ; **Gauche/Droite** (comme en v1.15), **PgUp** et **PgDn** sautent une page ; **Début** / **Fin** vont aux extrémités. Une flèche CP437 à droite de la première ou de la dernière ligne utile indique qu'il reste du texte au-dessus (↑) ou en dessous (↓). Le pied affiche **Haut/Bas : défiler** / **Up/Down: scroll** et la plage visible seulement si le défilement est possible. Ouvrir la revue revient en haut ; pour le jour en cours, les calques TAB et ESPACE reviennent au même endroit.
+
+Un jour archivé a une troisième entrée de menu, **3 Revue journalière** / **3 Daily review** (la PicoCalc v1.15 n'a toujours que 1–2). Cette revue montre la date complète de ce jour, le bandeau d'archive, le poids du jour, pas de section KANBAN, les lignes de repas en **--** (y compris **Prochain : --** / **Next: --**), et les noms d'activités figés (orphelins comme l'archive les affiche). Échap ramène au menu du jour archivé, curseur sur cette entrée. TAB et ESPACE restent sur la revue et affichent l'avis de lecture seule. Une sauvegarde des repas par jour est reportée, donc les lignes de repas d'un jour archivé sont toujours **--**, même si des cartes ont été jouées avant la clôture.
+
+
 ## Configuration requise
 
 - MS-DOS 3.3+ / FreeDOS / MS-DOS 7.x (FAT12/16)
@@ -1053,10 +1081,14 @@ Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) p
 - Sauvegarde ecrite en quittant un ecran, en confirmant Date/Poids/Config, en
   cloturant le jour ou en quittant (**Q**), pas a chaque modification ; apres
   l'ecriture, DOS verifie le CRC-32 seulement, sans tout relire (vitesse 8088).
+- Sur un jour archivé, la Revue journalière n'a pas de section KANBAN et les lignes de repas affichent **--** ; une sauvegarde des repas par jour est reportée (LPS116-FEAT02). La PicoCalc v1.15 n'a toujours que **1 Activités, 2 Suivi du poids** sur ce menu ; DOS v1.16 ajoute **3 Revue journalière**.
 
 ## Captures
 
-Captures PNG dans `captures/`, prises brutes sous DOSBox de la v1.15 à la vitesse d'un 8088 (`cputype=8086`, `cycles=fixed 300`), vérifiées au pixel près avec l'EXE final dans LPS-DOS-115-CHG16 :
+Captures PNG dans `captures/`, prises brutes sous DOSBox de la v1.16 à la vitesse d'un 8088 (`cputype=8086`, `cycles=fixed 300`), refaites dans LPS116-CHG07 :
 
-- 01 à 09 : 640×350 (`machine=ega`) : accueil EN/FR, Activités, Kanban, mode du rosaire, minuteur, accueil sous DOSBox, planificateur EGA (EN, et FR avec une carte jouée).
-- 10 et 11 : 320×200 (`machine=cga`) : `10-meal-planner-cga.png` (EN, thème Bleu, Coffee (Latte)) et `11-meal-planner-cga-played-fr.png` (FR, thème Vert, Biscuit joué et grisé).
+- 01 à 09 : 640×350 (`machine=ega`) : accueil EN/FR, Activités, Kanban (avec une carte en focus marquée `*`), mode du rosaire, minuteur, accueil sous DOSBox, planificateur EGA (EN, et FR avec une carte jouée).
+- 10 et 11 : 320×200 (`machine=cga`) : `10-meal-planner-cga.png` (EN, thème Bleu, Coffee (Latte)) et `11-meal-planner-cga-played-fr.png` (FR, thème Vert, Café (Latte) joué et grisé).
+- 12 à 14 : 640×350 EGA : `12-daily-review.png` (présentation v1.16), `13-archive-menu.png` (entrées 1–3) et `14-archive-review.png`.
+
+Les dumps texte ne sont pas versionnés ; `make captures` réécrit `captures/*.txt` depuis le pilote d'interface hôte.

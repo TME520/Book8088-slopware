@@ -1,4 +1,4 @@
-/* LPS Companion MS-DOS port - shared types (Companion v1.15 parity). C89. */
+/* LPS Companion MS-DOS port - shared types (v1.16; PicoCalc v1.15 files). C89. */
 #ifndef LPS_H
 #define LPS_H
 
@@ -15,7 +15,7 @@ typedef unsigned long  lps_tick_t;
 typedef uint64_t lps_tick_t;
 #endif
 
-#define LPS_VERSION_STR "1.15" /* LPS-DOS-115-CHG12, as PicoCalc LPS-115-CHG06 */
+#define LPS_VERSION_STR "1.16" /* LPS116-CHG07 */
 #define NOTE_LENGTH 96 /* legacy notes: kept in SAVE and ICS, no editor since LPS-DOS-115-CHG02 */
 #define HISTORY_LENGTH 31
 #define TASK_NAME_LENGTH 32
