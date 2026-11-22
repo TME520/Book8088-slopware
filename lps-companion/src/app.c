@@ -360,6 +360,7 @@ enum {
 typedef struct { uint8_t kind, arg; } ReviewItem;
 static ReviewItem g_review[REVIEW_CAP];
 static unsigned g_review_n;
+static unsigned g_review_ok; /* LPS116-CHG07b: build once, not on every line */
 static const char *shown(const char *utf8); /* CHG06d: UTF-8 user text to CP437 */
 
 static int review_centered(unsigned kind){
@@ -416,7 +417,9 @@ static void review_build(const App *a){
     }
     if(!got) review_add(RL_NO_ACT,0);
 }
-static unsigned review_rows(const App *a){ review_build(a); return g_review_n; }
+static void review_invalidate(void){ g_review_ok=0; }
+static void review_ensure(const App *a){ if(!g_review_ok){ review_build(a); g_review_ok=1; } }
+static unsigned review_rows(const App *a){ review_ensure(a); return g_review_n; }
 static unsigned review_max_offset(const App *a){
     unsigned rows=review_rows(a);
     return rows>REVIEW_PAGE?rows-REVIEW_PAGE:0;
@@ -430,7 +433,7 @@ static void review_line(App *a, unsigned index, char *out, size_t size){
     char weight[16], food[40], drink[40];
     int fi,di, fr=a->state.language==LANG_FR;
     const MealCard *card;
-    review_build(a);
+    review_ensure(a);
     out[0]=0; if(index>=g_review_n){ (void)size; return; }
     it=&g_review[index];
     switch(it->kind){
@@ -487,6 +490,77 @@ static void review_line(App *a, unsigned index, char *out, size_t size){
         strcpy(out,tr(a,"No activity","Aucune activité"));
         break;
     }
+}
+
+/* LPS116-CHG07b: paint the 21 content rows, markers and the range footer
+ * without clearing the title bar or the global footer. A one-line Up/Down
+ * scrolls the window in video RAM and draws only the newly exposed row. */
+static void review_put_line(App *a, int row, const char *text, int centered){
+    char b[COLUMNS+1]; int n,col,i;
+    for(i=0;i<COLUMNS;i++) b[i]=' ';
+    b[COLUMNS]=0;
+    n=(int)strlen(text);
+    if(n>COLUMNS) n=COLUMNS;
+    col=centered?(COLUMNS-n)/2:0;
+    if(n) memcpy(b+col,text,(size_t)n);
+    a->hw->text(a->hw,row,0,b,0);
+}
+static void review_put_markers(App *a, unsigned total){
+    char mark[2];
+    unsigned last=0;
+    mark[1]=0;
+    if(total>a->reviewOffset){
+        last=total-a->reviewOffset;
+        if(last>REVIEW_PAGE) last=REVIEW_PAGE;
+        last--;
+    }
+    if(a->reviewOffset){ mark[0]='\x18'; a->hw->text(a->hw,REVIEW_TOP,COLUMNS-1,mark,0); }
+    if(total && a->reviewOffset+REVIEW_PAGE<total){ mark[0]='\x19'; a->hw->text(a->hw,REVIEW_TOP+(int)last,COLUMNS-1,mark,0); }
+}
+static void review_put_footer(App *a, unsigned total){
+    char b[128];
+    if(total>REVIEW_PAGE){
+        sprintf(b,tr(a,"Up/Down: scroll  %u-%u/%u  Esc back","Haut/Bas : défiler  %u-%u/%u  Échap retour"),
+            a->reviewOffset+1, (a->reviewOffset+REVIEW_PAGE<total?a->reviewOffset+REVIEW_PAGE:total), total);
+    }else{
+        sprintf(b,tr(a,"%u-%u/%u  Esc back","%u-%u/%u  Échap retour"),
+            total?a->reviewOffset+1:0, total, total);
+    }
+    review_put_line(a,22,b,0);
+}
+static void review_paint_body(App *a, int do_present){
+    char b[128];
+    unsigned total,i;
+    review_ensure(a);
+    review_clamp(a);
+    total=g_review_n;
+    for(i=0;i<REVIEW_PAGE;i++){
+        if(a->reviewOffset+i<total){
+            review_line(a,a->reviewOffset+i,b,sizeof(b));
+            review_put_line(a,REVIEW_TOP+(int)i,b,review_centered(g_review[a->reviewOffset+i].kind));
+        }else review_put_line(a,REVIEW_TOP+(int)i,"",0);
+    }
+    review_put_markers(a,total);
+    review_put_footer(a,total);
+    if(!a->message[0] && !a->missingStorage) review_put_line(a,23,"",0);
+    if(do_present) a->hw->present(a->hw);
+}
+static void review_scroll_step(App *a, int step){
+    char b[128];
+    unsigned total, index;
+    int exposed;
+    review_ensure(a);
+    total=g_review_n;
+    /* Leave column 79 (the arrow column) unmoved; it is updated below. */
+    a->hw->scroll_text(a->hw,REVIEW_TOP,0,REVIEW_TOP+(int)REVIEW_PAGE-1,COLUMNS-2,step);
+    if(step>0){ exposed=REVIEW_TOP+(int)REVIEW_PAGE-1; index=a->reviewOffset+REVIEW_PAGE-1; }
+    else { exposed=REVIEW_TOP; index=a->reviewOffset; }
+    review_line(a,index,b,sizeof(b));
+    review_put_line(a,exposed,b,review_centered(g_review[index].kind));
+    review_put_markers(a,total);
+    review_put_footer(a,total);
+    if(!a->message[0] && !a->missingStorage) review_put_line(a,23,"",0);
+    a->hw->present(a->hw);
 }
 
 static int rem_expired(const App *a, const Reminder *r){
@@ -1037,17 +1111,33 @@ void app_key(App *a, int k){
         }else edit_text(a->taskDraft,TASK_NAME_LENGTH,k);
     }else if(a->screen==SCR_DAILY_REVIEW){
         /* LPS116-FEAT02-CHG05: Up/Down one line, no wrap. Left/Right page as
-         * in v1.15; PgUp/PgDn do the same; Home/End jump to the ends. */
-        unsigned maximum;
+         * in v1.15; PgUp/PgDn do the same; Home/End jump to the ends.
+         * LPS116-CHG07b: a one-line step scrolls video RAM and redraws only
+         * the new row, the markers and the footer; a page jump repaints the
+         * body without the title bar or the global footer. */
+        unsigned maximum, old;
+        int step;
+        review_ensure(a);
         review_clamp(a);
         maximum=review_max_offset(a);
+        old=a->reviewOffset;
         if(k==KEY_DOWN && a->reviewOffset<maximum) a->reviewOffset++;
         else if(k==KEY_UP && a->reviewOffset) a->reviewOffset--;
         else if(k==KEY_RIGHT||k==KEY_PGDN) a->reviewOffset=(a->reviewOffset+REVIEW_PAGE<maximum)?a->reviewOffset+REVIEW_PAGE:maximum;
         else if(k==KEY_LEFT||k==KEY_PGUP) a->reviewOffset=a->reviewOffset>REVIEW_PAGE?a->reviewOffset-REVIEW_PAGE:0;
         else if(k==KEY_HOME) a->reviewOffset=0;
         else if(k==KEY_END) a->reviewOffset=maximum;
+        if(a->reviewOffset!=old){
+            step=(int)a->reviewOffset-(int)old;
+            if((step==1||step==-1) && a->hw->scroll_text) review_scroll_step(a,step);
+            else review_paint_body(a,1);
+        }else{
+            review_put_line(a,23,"",0);
+            a->hw->present(a->hw);
+        }
+        return;
     }else if(a->screen==SCR_CONFIG){
+
         /* LPS-DOS-115-CHG10 (PicoCalc LPS-115-CHG03): 1 Language, 2 Colors,
          * 3 Activities (home entries), 4 Save. */
         if(k==KEY_UP) a->selection=(a->selection+3)%4;
@@ -1398,31 +1488,10 @@ void app_render(App *a){
         line(a,13,tr(a,"Enter: save task","Entrée : enregistrer la tâche"),0);
         line(a,15,tr(a,"Backspace: erase  Esc: cancel","Retour: effacer  Échap: annuler"),0);
     }else if(a->screen==SCR_DAILY_REVIEW){
-        unsigned total, last;
-        char mark[2];
-        review_clamp(a);
-        total=review_rows(a);
-        last=0;
-        for(i=0;i<REVIEW_PAGE && a->reviewOffset+i<total;i++){
-            review_line(a,a->reviewOffset+i,b,sizeof(b));
-            if(review_centered(g_review[a->reviewOffset+i].kind)) center_line(a,REVIEW_TOP+(int)i,b,0);
-            else line(a,REVIEW_TOP+(int)i,b,0);
-            last=i;
-        }
-        /* CP437 ↑ 0x18 / ↓ 0x19 at the right edge: visible on EGA, CGA text
-         * and Hercules mono, no translated text. Only when more content sits
-         * above or below the 21-row window. */
-        mark[1]=0;
-        if(a->reviewOffset){ mark[0]=''; a->hw->text(a->hw,REVIEW_TOP,COLUMNS-1,mark,0); }
-        if(total && a->reviewOffset+REVIEW_PAGE<total){ mark[0]=''; a->hw->text(a->hw,REVIEW_TOP+(int)last,COLUMNS-1,mark,0); }
-        if(total>REVIEW_PAGE){
-            sprintf(b,tr(a,"Up/Down: scroll  %u-%u/%u  Esc back","Haut/Bas : défiler  %u-%u/%u  Échap retour"),
-                a->reviewOffset+1, (a->reviewOffset+REVIEW_PAGE<total?a->reviewOffset+REVIEW_PAGE:total), total);
-        }else{
-            sprintf(b,tr(a,"%u-%u/%u  Esc back","%u-%u/%u  Échap retour"),
-                total?a->reviewOffset+1:0, total, total);
-        }
-        line(a,22,b,0);
+        /* LPS116-CHG07b: rebuild once, then paint only the body. Title and
+         * the global footer were already written; present() skips them. */
+        review_invalidate();
+        review_paint_body(a,0);
     }else if(a->screen==SCR_CONFIG){
         center_line(a,3,tr(a,"CONFIGURATION","CONFIGURATION"),0);
         sprintf(b,"%s: %s", tr(a,"1  Language","1  Langue"), a->pendingLanguage==LANG_EN?"English":"Français"); line(a,6,b,a->selection==0);

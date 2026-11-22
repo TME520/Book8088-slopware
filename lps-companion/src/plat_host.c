@@ -19,18 +19,21 @@ typedef struct {
     int write_fault;
     int capture; /* if set, dump screens to captures/NN.txt */
     int capture_n;
+    unsigned nclear, ntext, row_text[ROWS]; /* LPS116-CHG07b */
 } HostPlat;
 
 static HostPlat *H(Platform *p){ return (HostPlat*)p->user; }
 
 static void h_clear(Platform *p){
     HostPlat *h=H(p); int r;
+    h->nclear++;
     for(r=0;r<ROWS;r++){ memset(h->rows[r],' ',COLUMNS); h->rows[r][COLUMNS]=0; memset(h->rev[r],0,COLUMNS); }
 }
 static void h_text(Platform *p, int row, int col, const char *s, int reverse){
     HostPlat *h=H(p); int c=col;
     if(row<0||row>=ROWS) return;
     if(c<0) c=0;
+    h->ntext++; if(row>=0&&row<ROWS) h->row_text[row]++;
     while(*s && c<COLUMNS){ h->rows[row][c]=*s++; h->rev[row][c]=(unsigned char)(reverse?1:0); c++; }
 }
 static void h_alert(Platform *p, int row, int col, const char *s){
@@ -100,6 +103,40 @@ static int h_meal_csv(Platform *p, const State *s){
     return meal_csv_export(d,s);
 }
 
+
+static void h_scroll_text(Platform *p, int top, int left, int bottom, int right, int lines){
+    HostPlat *h=H(p);
+    int r, n, len;
+    if(top<0) top=0;
+    if(bottom>=ROWS) bottom=ROWS-1;
+    if(left<0) left=0;
+    if(right>=COLUMNS) right=COLUMNS-1;
+    if(top>bottom||left>right||lines==0) return;
+    len=right-left+1;
+    if(lines>0){
+        if(lines>bottom-top+1) lines=bottom-top+1;
+        for(r=top;r<=bottom-lines;r++){
+            memmove(h->rows[r]+left,h->rows[r+lines]+left,(size_t)len);
+            memmove(h->rev[r]+left,h->rev[r+lines]+left,(size_t)len);
+        }
+        for(r=bottom-lines+1;r<=bottom;r++){
+            memset(h->rows[r]+left,' ',(size_t)len);
+            memset(h->rev[r]+left,0,(size_t)len);
+        }
+    }else{
+        n=-lines;
+        if(n>bottom-top+1) n=bottom-top+1;
+        for(r=bottom;r>=top+n;r--){
+            memmove(h->rows[r]+left,h->rows[r-n]+left,(size_t)len);
+            memmove(h->rev[r]+left,h->rev[r-n]+left,(size_t)len);
+        }
+        for(r=top;r<top+n;r++){
+            memset(h->rows[r]+left,' ',(size_t)len);
+            memset(h->rev[r]+left,0,(size_t)len);
+        }
+    }
+}
+
 Platform *plat_host_create(int capture){
     static HostPlat h;
     memset(&h,0,sizeof(h));
@@ -108,6 +145,7 @@ Platform *plat_host_create(int capture){
     h.iface.present=h_present; h.iface.set_palette=h_palette; h.iface.battery_low=h_batt;
     h.iface.load=h_load; h.iface.save=h_save; h.iface.export_ics=h_ics; h.iface.export_weight_csv=h_csv;
     h.iface.export_meal_csv=h_meal_csv;
+    h.iface.scroll_text=h_scroll_text;
     h.palette=PAL_GREEN; h.mounted=1; h.capture=capture;
     return &h.iface;
 }
@@ -131,4 +169,16 @@ int plat_host_key(int azerty, unsigned char ch){
     for(i=0;i<10;i++) if((unsigned char)plain[i]==ch || (unsigned char)shift[i]==ch) scan=0x02+i;
     if(ch==13) scan=0x1C;
     return app_bios_key(ch,scan);
+}
+
+void plat_host_reset_counts(Platform *p){
+    HostPlat *h=H(p); int r;
+    h->nclear=0; h->ntext=0;
+    for(r=0;r<ROWS;r++) h->row_text[r]=0;
+}
+unsigned plat_host_clear_count(Platform *p){ return H(p)->nclear; }
+unsigned plat_host_text_count(Platform *p){ return H(p)->ntext; }
+unsigned plat_host_row_text_count(Platform *p, int row){
+    if(row<0||row>=ROWS) return 0;
+    return H(p)->row_text[row];
 }

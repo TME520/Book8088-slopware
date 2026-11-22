@@ -287,7 +287,7 @@ An archived day has a third menu entry, **3 Daily review** / **3 Revue journali�
 
 - MS-DOS 3.3+ / FreeDOS / MS-DOS 7.x (FAT12/16)
 - Intel 8088 or compatible (EXE built with Open Watcom `-0`)
-- ~360 KB free disk for `LPSCOMP.EXE` (~107 KB), `ROSARY.DAT` (~10 KB), `MEALS.DAT` (~195 KB) and `MEALSCGA.DAT` (~49 KB); the data folder grows with history (each JSON save is up to about 10 KB)
+- ~360 KB free disk for `LPSCOMP.EXE` (~109 KB), `ROSARY.DAT` (~10 KB), `MEALS.DAT` (~195 KB) and `MEALSCGA.DAT` (~49 KB); the data folder grows with history (each JSON save is up to about 10 KB)
 - Colour text (CGA/EGA/VGA) for palettes; mono (MDA/Hercules) still readable
 - Meal Planner pictures: EGA (128 KB or more) or VGA in colour, with `MEALS.DAT`; or a colour CGA, such as the Book 8088's, with `MEALSCGA.DAT` (320×200, 4 colours, LPS-DOS-115-CHG13/14/15); on a mono screen the planner runs in text mode
 - 640 KB conventional memory recommended; the Meal Planner's pictures are read on demand into far memory and freed when it closes
@@ -941,7 +941,7 @@ Un jour archivé a une troisième entrée de menu, **3 Revue journalière** / **
 
 - MS-DOS 3.3+ / FreeDOS / MS-DOS 7.x (FAT12/16)
 - Intel 8088 ou compatible (EXE compilé avec Open Watcom `-0`)
-- ~360 Ko libres sur le disque pour `LPSCOMP.EXE` (~107 Ko), `ROSARY.DAT` (~10 Ko), `MEALS.DAT` (~195 Ko) et `MEALSCGA.DAT` (~49 Ko) ; le dossier de données grandit avec l'historique (une sauvegarde JSON fait 10 Ko au plus environ)
+- ~360 Ko libres sur le disque pour `LPSCOMP.EXE` (~109 Ko), `ROSARY.DAT` (~10 Ko), `MEALS.DAT` (~195 Ko) et `MEALSCGA.DAT` (~49 Ko) ; le dossier de données grandit avec l'historique (une sauvegarde JSON fait 10 Ko au plus environ)
 - Texte couleur (CGA/EGA/VGA) pour les palettes ; un écran mono (MDA/Hercules) reste lisible
 - Images du planificateur : EGA (128 Ko ou plus) ou VGA couleur, avec `MEALS.DAT` ; ou CGA couleur, comme celle du Book 8088, avec `MEALSCGA.DAT` (320×200, 4 couleurs, LPS-DOS-115-CHG13/14/15) ; sur écran mono, le planificateur passe en mode texte
 - 640 Ko de mémoire conventionnelle conseillés ; les images du planificateur sont lues à la demande en mémoire lointaine et libérées à sa fermeture
@@ -1059,7 +1059,7 @@ DOSBox-X / DOSBox Staging (`cputype=8086`, `cycles=fixed 300` ; `machine=cga` co
 
 ## Empreinte
 
-`LPSCOMP.EXE` fait environ **107 Ko** (modele large, 8086, pile 4 Ko), `ROSARY.DAT` environ **10 Ko**, `MEALS.DAT` environ **195 Ko** et `MEALSCGA.DAT` environ **49 Ko**. `HELLO.EXE` ~3 Ko.
+`LPSCOMP.EXE` fait environ **109 Ko** (modele large, 8086, pile 4 Ko), `ROSARY.DAT` environ **10 Ko**, `MEALS.DAT` environ **195 Ko** et `MEALSCGA.DAT` environ **49 Ko**. `HELLO.EXE` ~3 Ko.
 
 Depuis LPS-DOS-115-CHG03b, le segment DGROUP de 64 Ko (donnees proches + pile) passe d'environ 63 Ko a environ 14 Ko (17,3 Ko avec LPS-DOS-115-CHG06d, 18,5 Ko avec le planificateur EGA de LPS-DOS-115-CHG07, 19,1 Ko avec le planificateur CGA de LPS-DOS-115-CHG13, 19,5 Ko avec le lecteur de MEALSCGA.DAT de LPS-DOS-115-CHG14 (inchange avec la carte jouee CGA de LPS-DOS-115-CHG15), dont les images restent dans `MEALS.DAT` et la memoire lointaine) : les textes du rosaire sont dans `ROSARY.DAT`, charge en memoire lointaine a l'ouverture du rosaire, et les gros tampons (copies de `State`, sauvegarde, exports ICS/CSV) sont alloues en memoire lointaine au demarrage. Un `ROSARY.DAT` absent ou abime affiche un message, sans plantage.
 

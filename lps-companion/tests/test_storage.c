@@ -14,6 +14,10 @@ Platform *plat_host_create(int capture);
 const char *plat_host_row(Platform *p, int row);
 int plat_host_rev(Platform *p, int row, int col);
 int plat_host_key(int azerty, unsigned char ch);
+void plat_host_reset_counts(Platform *p);
+unsigned plat_host_clear_count(Platform *p);
+unsigned plat_host_text_count(Platform *p);
+unsigned plat_host_row_text_count(Platform *p, int row);
 
 static void put32(uint8_t *p, uint32_t v){
     p[0]=(uint8_t)v; p[1]=(uint8_t)(v>>8); p[2]=(uint8_t)(v>>16); p[3]=(uint8_t)(v>>24);
@@ -2284,6 +2288,26 @@ static void check_daily_review_scroll(const char *dir){
     app_key(app,KEY_ESCAPE); app_key(app,'5');
     assert(row_has(hw,22,"1-21/67") && !review_mark(hw,1,'\x18') && review_mark(hw,21,'\x19'));
 
+    /* LPS116-CHG07b: a one-line step does not clear the screen or rewrite
+     * the title bar / the global footer. */
+    {
+        char title[COLUMNS+1], foot[COLUMNS+1];
+        memcpy(title,plat_host_row(hw,0),COLUMNS+1);
+        memcpy(foot,plat_host_row(hw,24),COLUMNS+1);
+        plat_host_reset_counts(hw);
+        app_key(app,KEY_DOWN);
+        assert(row_has(hw,22,"2-22/67") && review_mark(hw,1,0x18) && review_mark(hw,21,0x19));
+        assert(plat_host_clear_count(hw)==0);
+        assert(plat_host_row_text_count(hw,0)==0);
+        assert(plat_host_row_text_count(hw,24)==0);
+        assert(!memcmp(title,plat_host_row(hw,0),COLUMNS+1));
+        assert(!memcmp(foot,plat_host_row(hw,24),COLUMNS+1));
+        app_key(app,KEY_UP);
+        assert(row_has(hw,22,"1-21/67") && !review_mark(hw,1,0x18) && review_mark(hw,21,0x19));
+        assert(!memcmp(title,plat_host_row(hw,0),COLUMNS+1));
+        assert(!memcmp(foot,plat_host_row(hw,24),COLUMNS+1));
+    }
+
     /* Content shrinks: offset is clamped (here the list fits again). */
     app_key(app,KEY_END);
     assert(row_has(hw,22,"47-67/67"));
@@ -2755,7 +2779,7 @@ int main(void){
     check_kanban_focus(tmpdir);
     assert(orphan_hits>0); /* some edit took a name history had stored */
 
-    printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, Daily Review full date (FR/EN, year-boundary weeks, CGA 40-col fold), Daily Review layout (focus, meals, next, archive, -- weight), Daily Review scroll (markers, clamp, reset, archive, overlays), Daily Review on archived-day menu (entry 3, read-only, Esc cursor), ROSARY.DAT load/missing/damaged, title v1.16, menu 0-8 without notepad or Config, archive menu 1-3, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
+    printf("%s", "PASS: storage, ICS (empty XP line), CSV, A/B, app close-day without XP, long date + ISO week 2000-2099, Daily Review full date (FR/EN, year-boundary weeks, CGA 40-col fold), Daily Review layout (focus, meals, next, archive, -- weight), Daily Review scroll (markers, clamp, reset, archive, overlays, no title rewrite on a step), Daily Review on archived-day menu (entry 3, read-only, Esc cursor), ROSARY.DAT load/missing/damaged, title v1.16, menu 0-8 without notepad or Config, archive menu 1-3, legacy note in ICS, timer 5/30/60 on keys 1-3, ICS 8.3 name YYYYMMDD.ICS, French CP437 screens + UTF-8 ICS, word wrap, JSON saves (round trip, PicoCalc fixtures byte-identical, BIN migration, damaged slot fallback,");
     printf("%s", " unknown keys, newer schema), activities (22 defaults, catalog from the save, 3 columns, keys per column, archive extras, 30 entries, pages), custom activities (rename per language, new, Del with confirm, F4/F5 wrap, frozen history, limits), top-row keys by BIOS scan code (AZERTY/US, keypad, text entry), accented tasks and reminders (32 UTF-8 bytes, PicoCalc fixture),");
     printf(" UTF-8 kept byte for byte (PicoCalc JSON/ICS/CSV with oe, A grave, euro, emoji), MEALS.DAT (13 pictures, checksums, damaged/missing), MEALSCGA.DAT (13 CGA pictures, colours, checksums, damaged/missing, EGA/CGA independent), Meal Planner (SPACE, wraps, play/put back, saves, archive read-only, new deck at close, text card, graphics hooks, FR, PicoCalc deck byte-identical),");
     printf(" Meal Planner CSV (MPYYMMDD.CSV byte-identical to PicoCalc, rules, failures, close day), TAB/SPACE overlays (identical return, text entry, Weight, confirmations, cross-open, archive, timer behind overlays + CSV), CGA 40-column fold (title/date, label/counter, blocks, overflow, reverse, planner rows EN/FR, MEALSCGA.DAT messages), CGA played card (checkerboard grey-out masks, PLAYED/JOUEE label sizes), Kanban focus (F toggle, * marker, cleared on DONE, kept on reorder/move, JSON focus:true, wire unchanged), fixture decode (%u captures)\n", 0);

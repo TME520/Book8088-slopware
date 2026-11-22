@@ -240,26 +240,59 @@ static void present_bios(DosPlat *d){
     }
 }
 
+
+/* LPS116-CHG07b: block-move character+attribute spans in text VRAM
+ * (REP MOVSB). A C loop through a far pointer is an order of magnitude
+ * slower on an 8088. No retrace wait: present_vram never had one. */
+static void vram_move(DosPlat *d, int dst_row, int dst_col, int src_row, int src_col, int nchars){
+    unsigned off_s=(unsigned)(src_row*COLUMNS+src_col)*2;
+    unsigned off_d=(unsigned)(dst_row*COLUMNS+dst_col)*2;
+    unsigned nbytes=(unsigned)nchars*2;
+#if defined(__WATCOMC__)
+    movedata(d->video_seg,off_s,d->video_seg,off_d,nbytes);
+#else
+    memcpy((char*)(((unsigned long)d->video_seg<<4)+off_d),
+           (char*)(((unsigned long)d->video_seg<<4)+off_s),nbytes);
+#endif
+}
+static void vram_fill(DosPlat *d, int row, int col, int nchars, unsigned char ch, unsigned char attr){
+    unsigned char buf[COLUMNS*2];
+    int i;
+    unsigned off=(unsigned)(row*COLUMNS+col)*2;
+    for(i=0;i<nchars;i++){ buf[i*2]=ch; buf[i*2+1]=attr; }
+#if defined(__WATCOMC__)
+    movedata(FP_SEG(buf),FP_OFF(buf),d->video_seg,off,(unsigned)nchars*2);
+#else
+    memcpy((char*)(((unsigned long)d->video_seg<<4)+off),buf,(unsigned)nchars*2);
+#endif
+}
+static void vram_write_row(DosPlat *d, int r, const char *ch, const unsigned char *rev,
+    unsigned char normal, unsigned char reverse){
+    unsigned char buf[COLUMNS*2];
+    int c;
+    for(c=0;c<COLUMNS;c++){
+        buf[c*2]=(unsigned char)ch[c];
+        buf[c*2+1]=rev[c]?reverse:normal;
+    }
+#if defined(__WATCOMC__)
+    movedata(FP_SEG(buf),FP_OFF(buf),d->video_seg,(unsigned)r*COLUMNS*2,COLUMNS*2);
+#else
+    memcpy((char*)(((unsigned long)d->video_seg<<4)+(unsigned)r*COLUMNS*2),buf,COLUMNS*2);
+#endif
+}
+
 /* Write only the rows that changed since the last frame. A full clear each
  * key flickers on a 4.77 MHz 8088. LPS-DOS-115-CHG05: rows are compared with
  * memcmp (rep cmpsb) instead of cell by cell, which cost ~370 ms per key at
  * 8088 speed; a changed row is rewritten whole. */
 static void present_vram(DosPlat *d){
-    int r,c;
+    int r;
     unsigned char normal=attr_for(d,0), reverse=attr_for(d,1);
-#if defined(__WATCOMC__)
-    unsigned char far *vid = (unsigned char far *)MK_FP(d->video_seg, 0);
-#else
-    unsigned char *vid = (unsigned char*)((unsigned long)d->video_seg << 4);
-#endif
     if(d->sh_palette!=d->palette){ d->painted=0; d->sh_palette=d->palette; }
-    for(r=0;r<ROWS;r++,vid+=COLUMNS*2){
+    for(r=0;r<ROWS;r++){
         const char *ch=d->cells[r]; const unsigned char *rev=d->rev[r];
         if(d->painted && memcmp(d->sh_ch[r],ch,COLUMNS)==0 && memcmp(d->sh_rev[r],rev,COLUMNS)==0) continue;
-        for(c=0;c<COLUMNS;c++){
-            vid[c*2]=(unsigned char)ch[c];
-            vid[c*2+1]=rev[c]?reverse:normal;
-        }
+        vram_write_row(d,r,ch,rev,normal,reverse);
         memcpy(d->sh_ch[r],ch,COLUMNS);
         memcpy(d->sh_rev[r],rev,COLUMNS);
     }
@@ -334,6 +367,65 @@ static int dos_meal_card(Platform *p, const MealView *v){
     return meals_picture(v->picture,&d->card_planes);
 }
 static void dos_meal_close(Platform *p){ (void)p; meals_close(); mealscga_close(); }
+
+
+/* LPS116-CHG07b: scroll a rectangle in the cell buffers, the shadow and
+ * VRAM together so present() can skip the moved rows. There is no CGA
+ * retrace wait here: present_vram never had one. */
+static void dos_scroll_text(Platform *p, int top, int left, int bottom, int right, int lines){
+    DosPlat *d=self_of(p);
+    int r, n, len;
+    unsigned char attr;
+    if(top<0) top=0;
+    if(bottom>=ROWS) bottom=ROWS-1;
+    if(left<0) left=0;
+    if(right>=COLUMNS) right=COLUMNS-1;
+    if(top>bottom||left>right||lines==0) return;
+    len=right-left+1;
+    attr=attr_for(d,0);
+    if(lines>0){
+        if(lines>bottom-top+1) lines=bottom-top+1;
+        for(r=top;r<=bottom-lines;r++){
+            memcpy(d->cells[r]+left,d->cells[r+lines]+left,(size_t)len);
+            memcpy(d->rev[r]+left,d->rev[r+lines]+left,(size_t)len);
+            if(d->painted){
+                memcpy(d->sh_ch[r]+left,d->sh_ch[r+lines]+left,(size_t)len);
+                memcpy(d->sh_rev[r]+left,d->sh_rev[r+lines]+left,(size_t)len);
+            }
+            if(d->painted && !d->use_bios) vram_move(d,r,left,r+lines,left,len);
+        }
+        for(r=bottom-lines+1;r<=bottom;r++){
+            memset(d->cells[r]+left,' ',(size_t)len);
+            memset(d->rev[r]+left,0,(size_t)len);
+            if(d->painted){
+                memset(d->sh_ch[r]+left,' ',(size_t)len);
+                memset(d->sh_rev[r]+left,0,(size_t)len);
+            }
+            if(d->painted && !d->use_bios) vram_fill(d,r,left,len,' ',attr);
+        }
+    }else{
+        n=-lines;
+        if(n>bottom-top+1) n=bottom-top+1;
+        for(r=bottom;r>=top+n;r--){
+            memcpy(d->cells[r]+left,d->cells[r-n]+left,(size_t)len);
+            memcpy(d->rev[r]+left,d->rev[r-n]+left,(size_t)len);
+            if(d->painted){
+                memcpy(d->sh_ch[r]+left,d->sh_ch[r-n]+left,(size_t)len);
+                memcpy(d->sh_rev[r]+left,d->sh_rev[r-n]+left,(size_t)len);
+            }
+            if(d->painted && !d->use_bios) vram_move(d,r,left,r-n,left,len);
+        }
+        for(r=top;r<top+n;r++){
+            memset(d->cells[r]+left,' ',(size_t)len);
+            memset(d->rev[r]+left,0,(size_t)len);
+            if(d->painted){
+                memset(d->sh_ch[r]+left,' ',(size_t)len);
+                memset(d->sh_rev[r]+left,0,(size_t)len);
+            }
+            if(d->painted && !d->use_bios) vram_fill(d,r,left,len,' ',attr);
+        }
+    }
+}
 
 static void dos_present(Platform *p){
     DosPlat *d=self_of(p);
@@ -410,6 +502,7 @@ Platform *plat_dos_create(void){
     dp->iface.meal_card=dos_meal_card;
     dp->iface.meal_close=dos_meal_close;
     dp->iface.export_meal_csv=dos_export_meal_csv;
+    dp->iface.scroll_text=dos_scroll_text;
     dp->palette=PAL_GREEN;
     detect_video(dp);
     detect_adapter(dp);

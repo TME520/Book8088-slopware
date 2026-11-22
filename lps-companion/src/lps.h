@@ -198,6 +198,11 @@ struct Platform {
     /* LPS-DOS-115-CHG08: rewrites EXPORT\MPYYMMDD.CSV for s->today
      * (meal_csv_export); 0 on failure. NULL: nothing to write. */
     int  (*export_meal_csv)(Platform *self, const State *s);
+    /* LPS116-CHG07b: scroll a text rectangle. lines>0 moves content up
+     * (blank lines appear at the bottom); lines<0 moves it down. Rows
+     * top..bottom and columns left..right are inclusive. NULL: the app
+     * redraws the window. */
+    void (*scroll_text)(Platform *self, int top, int left, int bottom, int right, int lines);
     void *user;
 };
 
